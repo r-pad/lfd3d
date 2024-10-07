@@ -10,7 +10,7 @@ set -e
 
 # Set some variables.
 dockerhub_username=beisner
-project_name=python_ml_project_template
+project_name=lfd3d
 scs_username=baeisner
 
 # Get paths.

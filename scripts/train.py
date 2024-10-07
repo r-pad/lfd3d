@@ -8,9 +8,9 @@ import wandb
 from lightning.pytorch.callbacks import ModelCheckpoint
 from lightning.pytorch.loggers import WandbLogger
 
-from python_ml_project_template.datasets.cifar10 import CIFAR10DataModule
-from python_ml_project_template.models.classifier import ClassifierTrainingModule
-from python_ml_project_template.utils.script_utils import (
+from lfd3d.datasets.cifar10 import CIFAR10DataModule
+from lfd3d.models.classifier import ClassifierTrainingModule
+from lfd3d.utils.script_utils import (
     PROJECT_ROOT,
     LogPredictionSamplesCallback,
     create_model,
@@ -69,7 +69,7 @@ def main(cfg):
     # and eval can be the same.
     #
     # If it's a custom network, a good idea is to put the custom network
-    # in `python_ml_project_template.nets.my_net`.
+    # in `lfd3d.nets.my_net`.
     ######################################################################
 
     # Model architecture is dataset-dependent, so we have a helper

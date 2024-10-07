@@ -5,10 +5,10 @@ import torch
 import torch.utils._pytree as pytree
 import wandb
 
-from python_ml_project_template.datasets.cifar10 import CIFAR10DataModule
-from python_ml_project_template.metrics.classification import get_metrics
-from python_ml_project_template.models.classifier import ClassifierInferenceModule
-from python_ml_project_template.utils.script_utils import (
+from lfd3d.datasets.cifar10 import CIFAR10DataModule
+from lfd3d.metrics.classification import get_metrics
+from lfd3d.models.classifier import ClassifierInferenceModule
+from lfd3d.utils.script_utils import (
     PROJECT_ROOT,
     create_model,
     flatten_outputs,
