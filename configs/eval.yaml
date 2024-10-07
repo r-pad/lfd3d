@@ -1,0 +1,39 @@
+mode: eval
+
+# This is somewhat arbitrary.
+job_type: ${mode}_${dataset.name}
+
+defaults:
+  # Each of these have their own configuration parameters.
+  - dataset: cifar10
+  - model: vit
+
+  # A set of inference settings for the model. Note that these may be different
+  # from / or a subset of the training settings. This is that we don't have to
+  # provide, like, a learning rater or something to eval.
+  - inference: ${dataset}_${model}
+
+  # Simple shared imports.
+  - _logging
+
+  # Override.
+  - _self_
+
+seed: 42
+
+# This is the checkpoint that we're evaluating. You can change this to whatever you need,
+# like if you want multiple checkpoints simultaneously, etc.
+checkpoint:
+  # If we want to load a model for a specific run, we can change that here.
+  run_id: ???
+  reference: ${wandb.entity}/${wandb.project}/model-${checkpoint.run_id}:best
+
+resources:
+  num_workers: 4
+  gpus:
+    - 0
+
+wandb:
+  # The group ***should*** be the same as the training group (so it can be bundled)
+  # nicely in the UI. But you might have a one-off eval or something.
+  group: ???

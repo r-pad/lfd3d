@@ -1,0 +1,45 @@
+name: Run Tests
+
+on:
+  workflow_call:
+    inputs:
+      install_string:
+        required: True
+        type: string
+      image_tag:
+        required: True
+        type: string
+        default: "latest"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    container:
+      # Image tag is "latest" if the branch is main, else it is the branch name.
+      image: beisner/python_ml_project_template:${{ inputs.image_tag }}
+
+    defaults:
+      run:
+        working-directory: /opt/baeisner/code
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: 'true'
+
+      # Link the code from the default checkout directory to the correct directory.
+      # Use the github workspace variable to get the correct directory.
+      # Can't use the checkout action to checkout to a different directory, so we have to simlink.
+      - name: Move code to correct directory
+        run: rm -rf /opt/baeisner/code && ln -s $GITHUB_WORKSPACE /opt/baeisner/code
+
+      - name: Code Quality
+        run: python -m black src/ tests/ --check
+
+      - name: MyPy Typechecking
+        run: python -m mypy src/ tests/
+
+      # Run tests.
+      - name: Test with pytest
+        run: python -m pytest

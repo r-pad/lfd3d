@@ -1,0 +1,27 @@
+name: Test and Deploy Site
+
+on:
+  push:
+    branches: [main]
+
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+jobs:
+  compute_tag:
+    uses: ./.github/workflows/compute-tag.yaml
+    with:
+      latest_on_noexist: 'true'
+  test:
+    uses: ./.github/workflows/run-tests.yaml
+    needs: compute_tag
+    with:
+      install_string: .[develop]
+      # Get the image tag from the compute_tag job.
+      image_tag: ${{ needs.compute_tag.outputs.image_tag }}
+
+  build_site:
+    uses: ./.github/workflows/build-site.yaml
+  deploy_site:
+    uses: ./.github/workflows/deploy-site.yaml
+    needs: build_site

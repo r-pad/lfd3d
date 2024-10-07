@@ -1,0 +1,8 @@
+name: vit
+hidden_dim: 512
+num_heads: 8
+num_layers: 6
+patch_size: 4
+representation_size: 256
+mlp_dim: 2048
+dropout: 0.2

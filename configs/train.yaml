@@ -1,0 +1,29 @@
+mode: train
+
+# This is somewhat arbitrary.
+job_type: ${mode}_${dataset.name}
+
+defaults:
+  # Each of these have their own configuration parameters.
+  - dataset: cifar10
+  - model: vit
+
+  # We assume a different training config for each dataset/model pair.
+  - training: ${dataset}_${model}
+
+  # Simple shared imports.
+  - _logging
+
+  # Override.
+  - _self_
+
+seed: 42
+
+resources:
+  num_workers: 4
+  gpus:
+    - 0
+
+wandb:
+  # Assume no group provided, we will create a default one.
+  group: Null

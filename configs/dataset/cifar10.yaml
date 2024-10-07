@@ -1,0 +1,4 @@
+name: cifar10
+data_dir: ${hydra:runtime.cwd}/data
+image_size: 32
+num_classes: 10
