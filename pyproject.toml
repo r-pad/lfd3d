@@ -1,5 +1,5 @@
 [project]
-name = "python-ml-project-template"
+name = "lfd3d"
 version = "0.1.0"
 description = "A Python Package Template"
 readme = "README.md"
@@ -40,7 +40,7 @@ build_docs = ["mkdocs-material", "mkdocstrings[python]"]
 where = ["src"]
 
 [tool.setuptools.package-data]
-python_ml_project_template = ["py.typed"]
+lfd3d = ["py.typed"]
 
 [tool.isort]
 profile = "black"

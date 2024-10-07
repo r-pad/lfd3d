@@ -30,7 +30,7 @@ jobs:
             # If latest_on_noexist is true, set the tag to latest if the tag does not exist.
             if [[ "${{ inputs.latest_on_noexist }}" == "true" ]]; then
               # Check if the tag exists using docker manifest.
-              if ! docker manifest inspect ${{ secrets.DOCKERHUB_USERNAME }}/python_ml_project_template:${sanitized_branch_name} > /dev/null 2>&1; then
+              if ! docker manifest inspect ${{ secrets.DOCKERHUB_USERNAME }}/lfd3d:${sanitized_branch_name} > /dev/null 2>&1; then
                 echo "tag=latest" >> $GITHUB_OUTPUT
               else
                 echo "tag=${sanitized_branch_name}" >> $GITHUB_OUTPUT

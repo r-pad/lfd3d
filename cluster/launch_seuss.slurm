@@ -19,7 +19,7 @@ module load singularity
 
 # Env variables.
 dockerhub_username=beisner
-project_name=python_ml_project_template
+project_name=lfd3d
 scs_username=baeisner
 
 # Get the branch name.
@@ -42,7 +42,7 @@ mkdir -p /scratch/$(whoami)
 mkdir -p /scratch/$(whoami)/data
 mkdir -p /scratch/$(whoami)/logs
 
-SINGULARITYENV_WANDB_DOCKER_IMAGE=python-ml-project-template \
+SINGULARITYENV_WANDB_DOCKER_IMAGE=lfd3d \
     SINGULARITYENV_WANDB_API_KEY=$WANDB_API_KEY \
     singularity exec \
     --nv \

@@ -21,7 +21,7 @@ lightning:
 
 wandb:
   entity: r-pad
-  project: python_ml_project_template
+  project: lfd3d
 
   # Group is for grouping runs together (i.e. a train run and an eval run).
   group: ???

@@ -38,6 +38,6 @@ jobs:
         with:
           push: true
           # This is the name of the image that will be pushed to Docker Hub. If the branch is main, the image will be tagged as latest. Else, it will be tagged as the branch name.
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/python_ml_project_template:${{ needs.compute_tag.outputs.image_tag }}
-          cache-from: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/python_ml_project_template:${{ needs.compute_tag.outputs.image_tag }}
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/lfd3d:${{ needs.compute_tag.outputs.image_tag }}
+          cache-from: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/lfd3d:${{ needs.compute_tag.outputs.image_tag }}
           cache-to: type=inline

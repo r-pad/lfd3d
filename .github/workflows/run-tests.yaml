@@ -17,7 +17,7 @@ jobs:
 
     container:
       # Image tag is "latest" if the branch is main, else it is the branch name.
-      image: beisner/python_ml_project_template:${{ inputs.image_tag }}
+      image: beisner/lfd3d:${{ inputs.image_tag }}
 
     defaults:
       run:
