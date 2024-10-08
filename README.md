@@ -49,10 +49,10 @@ pre-commit install
 
 ## Docker
 
-To build the docker image, run:
+Make sure to set the shell variables `$DOCKERHUB_USERNAME` and `CMU_SCS_USERNAME`. To build the docker image, run:
 
 ```bash
-docker build -t <my_dockerhub_username>/lfd3d .
+docker build --build-arg CMU_SCS_USERNAME=$CMU_SCS_USERNAME -t $DOCKERHUB_USERNAME/lfd3d .
 ```
 
 To run the training script locally, run:
@@ -62,8 +62,8 @@ WANDB_API_KEY=<API_KEY>
 # Optional: mount current directory to run / test new code.
 # Mount data directory to access data.
 docker run \
-    -v $(pwd)/data:/opt/baeisner/data \
-    -v $(pwd)/logs:/opt/baeisner/logs \
+    -v $(pwd)/data:/opt/$CMU_SCS_USERNAME/data \
+    -v $(pwd)/logs:/opt/$CMU_SCS_USERNAME/logs \
     --gpus all \
     -e WANDB_API_KEY=$WANDB_API_KEY \
     -e WANDB_DOCKER_IMAGE=lfd3d \
@@ -75,7 +75,7 @@ docker run \
 To push this:
 
 ```bash
-docker push <my_dockerhub_username>/lfd3d:latest
+docker push $DOCKER_USERNAME/lfd3d:latest
 ```
 
 ## Using the CI.

@@ -13,8 +13,11 @@ RUN apt-get update && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
+# Define build argument
+ARG CMU_SCS_USERNAME
+
 # Install pyenv
-ENV CODING_ROOT="/opt/baeisner"
+ENV CODING_ROOT="/opt/$CMU_SCS_USERNAME"
 
 WORKDIR $CODING_ROOT
 RUN git clone --depth=1 https://github.com/pyenv/pyenv.git .pyenv

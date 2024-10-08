@@ -18,9 +18,9 @@ unset XDG_RUNTIME_DIR
 module load singularity
 
 # Env variables.
-dockerhub_username=beisner
+dockerhub_username=$DOCKERHUB_USERNAME
 project_name=lfd3d
-scs_username=baeisner
+scs_username=$CMU_SCS_USERNAME
 
 # Get the branch name.
 root_dir=$HOME/code/${project_name}
