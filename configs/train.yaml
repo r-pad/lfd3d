@@ -24,6 +24,12 @@ resources:
   gpus:
     - 0
 
+load_checkpoint: False
+checkpoint:
+  # If we want to load a model for a specific run, we can change that here.
+  run_id: False
+  reference: ${wandb.entity}/${wandb.project}/model-${checkpoint.run_id}:latest
+
 wandb:
   # Assume no group provided, we will create a default one.
   group: Null
