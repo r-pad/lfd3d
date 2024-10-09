@@ -9,9 +9,8 @@
 set -e
 
 # Set some variables.
-dockerhub_username=beisner
+dockerhub_username=$DOCKERHUB_USERNAME
 project_name=lfd3d
-scs_username=baeisner
 
 # Get paths.
 script_path=$(realpath $0)
@@ -30,4 +29,4 @@ sif_name=${root_dir}/.singularity_images/${project_name}_${sanitized_branch_name
 singularity build ${sif_name} docker-daemon://${dockerhub_username}/${project_name}:${sanitized_branch_name}-scratch
 
 # Rsync the singularity image to the seuss cluster.
-rsync -avz --progress ${sif_name} ${scs_username}@seuss.ri.cmu.edu:/home/${scs_username}/singularity_images/
+rsync -avz --progress ${sif_name} $CMU_SCS_USERNAME@seuss.ri.cmu.edu:/home/$CMU_SCS_USERNAME/singularity_images/

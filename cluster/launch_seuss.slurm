@@ -18,9 +18,8 @@ unset XDG_RUNTIME_DIR
 module load singularity
 
 # Env variables.
-dockerhub_username=beisner
+dockerhub_username=$DOCKERHUB_USERNAME
 project_name=lfd3d
-scs_username=baeisner
 
 # Get the branch name.
 root_dir=$HOME/code/${project_name}
@@ -38,17 +37,17 @@ fi
 
 echo "Using SIF name: ${sif_name}"
 
-mkdir -p /scratch/$(whoami)
-mkdir -p /scratch/$(whoami)/data
-mkdir -p /scratch/$(whoami)/logs
+mkdir -p /scratch/rpad
+mkdir -p /scratch/rpad/data
+mkdir -p /scratch/rpad/logs
 
 SINGULARITYENV_WANDB_DOCKER_IMAGE=lfd3d \
     SINGULARITYENV_WANDB_API_KEY=$WANDB_API_KEY \
     singularity exec \
     --nv \
-    --pwd /opt/$(whoami)/code \
-    -B /scratch/$(whoami)/data:/opt/data \
-    -B /scratch/$(whoami)/logs:/opt/logs \
+    --pwd /opt/rpad/code \
+    -B /scratch/rpad/data:/opt/data \
+    -B /scratch/rpad/logs:/opt/logs \
     ${sif_name} \
     python scripts/train.py \
     dataset.data_dir=/opt/data \

@@ -14,7 +14,7 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 # Install pyenv
-ENV CODING_ROOT="/opt/baeisner"
+ENV CODING_ROOT="/opt/rpad"
 
 WORKDIR $CODING_ROOT
 RUN git clone --depth=1 https://github.com/pyenv/pyenv.git .pyenv
