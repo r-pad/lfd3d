@@ -67,7 +67,7 @@ docker run \
     --gpus all \
     -e WANDB_API_KEY=$WANDB_API_KEY \
     -e WANDB_DOCKER_IMAGE=lfd3d \
-    lfd3d python scripts/train.py \
+    $DOCKERHUB_USERNAME/lfd3d python scripts/train.py \
         dataset.data_dir=/root/data \
         log_dir=/root/logs
 ```

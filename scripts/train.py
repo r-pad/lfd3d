@@ -7,12 +7,10 @@ import torch
 import wandb
 from lightning.pytorch.callbacks import ModelCheckpoint
 from lightning.pytorch.loggers import WandbLogger
-
-from lfd3d.datasets.cifar10 import CIFAR10DataModule
-from lfd3d.models.classifier import ClassifierTrainingModule
-from lfd3d.utils.script_utils import (
+from non_rigid.utils.script_utils import (
     PROJECT_ROOT,
     LogPredictionSamplesCallback,
+    create_datamodule,
     create_model,
     match_fn,
 )
@@ -27,6 +25,7 @@ def main(cfg):
             indent=4,
         )
     )
+
     ######################################################################
     # Torch settings.
     ######################################################################
@@ -49,12 +48,7 @@ def main(cfg):
     # This could be swapped out for a different datamodule in-place,
     # or with an if statement, or by using hydra.instantiate.
     ######################################################################
-
-    datamodule = CIFAR10DataModule(
-        root=cfg.dataset.data_dir,
-        batch_size=cfg.training.batch_size,
-        num_workers=cfg.resources.num_workers,
-    )
+    cfg, datamodule = create_datamodule(cfg)
 
     ######################################################################
     # Create the network(s) which will be trained by the Training Module.
@@ -74,20 +68,13 @@ def main(cfg):
 
     # Model architecture is dataset-dependent, so we have a helper
     # function to create the model (while separating out relevant vals).
-    network = create_model(
-        image_size=cfg.dataset.image_size,
-        num_classes=cfg.dataset.num_classes,
-        model_cfg=cfg.model,
-    )
-
     ######################################################################
     # Create the training module.
     # The training module is responsible for all the different parts of
     # training, including the network, the optimizer, the loss function,
     # and the logging.
     ######################################################################
-
-    model = ClassifierTrainingModule(network, training_cfg=cfg.training)
+    network, model = create_model(cfg)
 
     ######################################################################
     # Set up logging in WandB.
@@ -132,9 +119,12 @@ def main(cfg):
     trainer = L.Trainer(
         accelerator="gpu",
         devices=cfg.resources.gpus,
-        precision="16-mixed",
+        precision="32-true",
         max_epochs=cfg.training.epochs,
         logger=logger,
+        check_val_every_n_epoch=cfg.training.check_val_every_n_epochs,
+        log_every_n_steps=len(datamodule.train_dataloader()),
+        gradient_clip_val=cfg.training.grad_clip_norm,
         callbacks=[
             # Callback which logs whatever visuals (i.e. dataset examples, preds, etc.) we want.
             LogPredictionSamplesCallback(logger),
@@ -151,12 +141,14 @@ def main(cfg):
             # This checkpoint will get saved to WandB. The Callback mechanism in lightning is poorly designed, so we have to put it last.
             ModelCheckpoint(
                 dirpath=cfg.lightning.checkpoint_dir,
-                filename="{epoch}-{step}-{val_loss:.2f}-weights-only",
-                monitor="val_loss",
+                filename="{epoch}-{step}-{val_wta_rmse_0:.3f}",
+                monitor="val_rmse_wta_0",
                 mode="min",
-                save_weights_only=True,
+                save_weights_only=False,
+                save_last=False,
             ),
         ],
+        num_sanity_val_steps=0,
     )
 
     ######################################################################
@@ -179,7 +171,26 @@ def main(cfg):
     # Train the model.
     ######################################################################
 
-    trainer.fit(model, datamodule=datamodule)
+    # this might be a little too "pythonic"
+    if cfg.checkpoint.run_id:
+        print(
+            "Attempting to resume training from checkpoint: ", cfg.checkpoint.reference
+        )
+
+        api = wandb.Api()
+        artifact_dir = cfg.wandb.artifact_dir
+        artifact = api.artifact(cfg.checkpoint.reference, type="model")
+        ckpt_file = artifact.get_path("model.ckpt").download(root=artifact_dir)
+        # ckpt = torch.load(ckpt_file)
+        # # model.load_state_dict(
+        # #     {k.partition(".")[2]: v for k, v, in ckpt["state_dict"].items()}
+        # # )
+        # model.load_state_dict(ckpt["state_dict"])
+    else:
+        print("Starting training from scratch.")
+        ckpt_file = None
+
+    trainer.fit(model, datamodule=datamodule, ckpt_path=ckpt_file)
 
 
 if __name__ == "__main__":
