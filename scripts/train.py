@@ -9,7 +9,6 @@ from lightning.pytorch.callbacks import ModelCheckpoint
 from lightning.pytorch.loggers import WandbLogger
 from non_rigid.utils.script_utils import (
     PROJECT_ROOT,
-    LogPredictionSamplesCallback,
     create_datamodule,
     create_model,
     match_fn,
@@ -127,7 +126,7 @@ def main(cfg):
         gradient_clip_val=cfg.training.grad_clip_norm,
         callbacks=[
             # Callback which logs whatever visuals (i.e. dataset examples, preds, etc.) we want.
-            LogPredictionSamplesCallback(logger),
+            # LogPredictionSamplesCallback(logger),
             # This checkpoint callback saves the latest model during training, i.e. so we can resume if it crashes.
             # It saves everything, and you can load by referencing last.ckpt.
             ModelCheckpoint(
