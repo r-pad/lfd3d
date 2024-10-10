@@ -1,16 +1,13 @@
 import os
-from functools import partial
 import pathlib
+from functools import partial
 from typing import Dict, List, Sequence, Union, cast
 
 import torch
 import torch.utils._pytree as pytree
-import torchvision as tv
 import wandb
 from lightning.pytorch import Callback
-from pytorch_lightning.loggers import WandbLogger
-
-
+from non_rigid.datasets.proc_cloth_flow import ProcClothFlowDataModule
 from non_rigid.models.df_base import (
     DiffusionFlowBase,
     FlowPredictionInferenceModule,
@@ -22,39 +19,50 @@ from non_rigid.models.regression import (
     LinearRegression,
     LinearRegressionInferenceModule,
     LinearRegressionTrainingModule,
-    RegressionNetwork,
     RegressionModule,
+    RegressionNetwork,
 )
-from non_rigid.models.tax3d import (
+from pytorch_lightning.loggers import WandbLogger
+
+from lfd3d.datasets.hoi4d import HOI4DDataModule
+from lfd3d.models.tax3d import (
+    CrossDisplacementModule,
     DiffusionTransformerNetwork,
     SceneDisplacementModule,
-    CrossDisplacementModule,
 )
-
-from non_rigid.datasets.proc_cloth_flow import ProcClothFlowDataModule
-from non_rigid.datasets.hoi4d import HOI4DDataModule
-
 
 PROJECT_ROOT = str(pathlib.Path(__file__).parent.parent.parent.parent.resolve())
 
-    
+
 def create_model_legacy(cfg):
     if cfg.model.name in ["df_base", "df_cross"]:
         network_fn = DiffusionFlowBase
         if cfg.mode == "train":
             # tax3d training modules
             if cfg.model.type == "flow":
-                module_fn = partial(FlowPredictionTrainingModule, training_cfg=cfg.training)
+                module_fn = partial(
+                    FlowPredictionTrainingModule, training_cfg=cfg.training
+                )
             elif cfg.model.type == "point":
-                module_fn = partial(PointPredictionTrainingModule, task_type=cfg.task_type, training_cfg=cfg.training)
+                module_fn = partial(
+                    PointPredictionTrainingModule,
+                    task_type=cfg.task_type,
+                    training_cfg=cfg.training,
+                )
             else:
                 raise ValueError(f"Invalid model type: {cfg.model.type}")
         elif cfg.mode == "eval":
             # tax3d inference modules
             if cfg.model.type == "flow":
-                module_fn = partial(FlowPredictionInferenceModule, inference_cfg=cfg.inference)
+                module_fn = partial(
+                    FlowPredictionInferenceModule, inference_cfg=cfg.inference
+                )
             elif cfg.model.type == "point":
-                module_fn = partial(PointPredictionInferenceModule, task_type=cfg.task_type, inference_cfg=cfg.inference)
+                module_fn = partial(
+                    PointPredictionInferenceModule,
+                    task_type=cfg.task_type,
+                    inference_cfg=cfg.inference,
+                )
             else:
                 raise ValueError(f"Invalid model type: {cfg.model.type}")
         else:
@@ -64,10 +72,14 @@ def create_model_legacy(cfg):
         network_fn = LinearRegression
         if cfg.mode == "train":
             # linear training module
-            module_fn = partial(LinearRegressionTrainingModule, training_cfg=cfg.training)
+            module_fn = partial(
+                LinearRegressionTrainingModule, training_cfg=cfg.training
+            )
         elif cfg.mode == "eval":
             # linear inference module
-            module_fn = partial(LinearRegressionInferenceModule, inference_cfg=cfg.inference)
+            module_fn = partial(
+                LinearRegressionInferenceModule, inference_cfg=cfg.inference
+            )
         else:
             raise ValueError(f"Invalid mode: {cfg.mode}")
     else:
@@ -139,7 +151,9 @@ def create_datamodule(cfg):
 
     # updating job config sample sizes
     if cfg.dataset.scene:
-        job_cfg.sample_size = cfg.dataset.sample_size_action + cfg.dataset.sample_size_anchor
+        job_cfg.sample_size = (
+            cfg.dataset.sample_size_action + cfg.dataset.sample_size_anchor
+        )
     else:
         job_cfg.sample_size = cfg.dataset.sample_size_action
         job_cfg.sample_size_anchor = cfg.dataset.sample_size_anchor
@@ -149,7 +163,6 @@ def create_datamodule(cfg):
         job_cfg.num_training_steps = len(datamodule.train_dataloader()) * job_cfg.epochs
 
     return cfg, datamodule
-        
 
 
 # This matching function

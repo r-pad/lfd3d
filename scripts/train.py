@@ -7,7 +7,8 @@ import torch
 import wandb
 from lightning.pytorch.callbacks import ModelCheckpoint
 from lightning.pytorch.loggers import WandbLogger
-from non_rigid.utils.script_utils import (
+
+from lfd3d.utils.script_utils import (
     PROJECT_ROOT,
     create_datamodule,
     create_model,

@@ -26,9 +26,6 @@ ENV PATH="$PYENV_ROOT/shims:$PYENV_ROOT/bin:$PATH"
 RUN pyenv install 3.10.0
 RUN pyenv global 3.10.0
 
-# Install PyTorch with CUDA support (make sure to adjust this depending on your CUDA version)
-RUN pip install torch==2.0.1 torchvision==0.15.2 --index-url https://download.pytorch.org/whl/cu118/
-
 # Make the working directory the home directory
 RUN mkdir $CODING_ROOT/code
 WORKDIR $CODING_ROOT/code
@@ -37,6 +34,9 @@ WORKDIR $CODING_ROOT/code
 COPY ./src $CODING_ROOT/code/src
 COPY ./setup.py $CODING_ROOT/code/setup.py
 COPY ./pyproject.toml $CODING_ROOT/code/pyproject.toml
+COPY ./requirements.txt $CODING_ROOT/code/requirements.txt
+RUN pip install -r requirements.txt
+RUN pip install --no-deps git+https://github.com/ey-cai/non-rigid.git@articulated
 RUN pip install -e .[develop]
 
 # Changes to the configs and scripts will not require a rebuild
