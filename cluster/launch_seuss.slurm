@@ -46,9 +46,11 @@ SINGULARITYENV_WANDB_DOCKER_IMAGE=lfd3d \
     singularity exec \
     --nv \
     --pwd /opt/rpad/code \
-    -B /scratch/rpad/data:/opt/data \
+    -B /home/sskrishn/hoi4d/hoi4d_data:/opt/data \
     -B /scratch/rpad/logs:/opt/logs \
     ${sif_name} \
     python scripts/train.py \
+    model=df_cross \
+    dataset=hoi4d \
     dataset.data_dir=/opt/data \
     log_dir=/opt/logs

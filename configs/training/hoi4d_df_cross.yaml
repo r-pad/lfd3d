@@ -1,0 +1,14 @@
+lr: 1e-4
+lr_warmup_steps: 100
+weight_decay: 1e-5
+epochs: 20000
+batch_size: 16
+val_batch_size: 4
+grad_clip_norm: 1.0
+num_training_steps: None # Set by the training loop.
+sample_size: None # Set by the training loop, from dataset config.
+sample_size_anchor: None # Set by the training loop, from dataset config.
+
+check_val_every_n_epochs: 200
+num_wta_trials: 10
+additional_train_logging_period: 5 # Global step period to log additional training metrics

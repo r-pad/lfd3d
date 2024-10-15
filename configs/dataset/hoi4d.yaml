@@ -1,0 +1,35 @@
+name: hoi4d
+data_dir: ""
+# data_dir: "~/datasets/nrp/ProcCloth/"
+# data_dir : "~/Documents/data/real world"
+type: point # (flow, point) Type of dataset
+source: real # (real, dedo, etc.) Source of the dataset
+
+train_size: null # (int, null) Length of the train dataset
+val_size: null # (int, null) Length of the validation dataset
+
+sample_size_action: 512
+sample_size_anchor: 512
+downsample_type: fps
+
+scene: True
+world_frame: True
+
+# multi_cloth:
+#   hole: single
+#   size: 100
+
+cloth_geometry: single
+cloth_pose: fixed
+anchor_geometry: single
+anchor_pose: random
+hole: single
+
+# Dataset pre-processing options
+center_type: anchor_center # [action_center, anchor_center, anchor_random, none], centers the point clouds w.r.t. the action, anchor, or no centering
+action_context_center_type: center # [center, random, none], centers the action context point clouds
+# pcd_scale_factor: 15.0 # Scale factor for the point clouds
+action_transform_type: identity # Transformation type to apply to demonstrations
+anchor_transform_type: random_flat_upright # Transformation type to apply to demonstrations
+translation_variance: 0.0 # Translation variance of the demo transformation
+rotation_variance: 180 # Rotation variance of the demo transformation
