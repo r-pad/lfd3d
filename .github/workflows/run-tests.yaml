@@ -21,7 +21,7 @@ jobs:
 
     defaults:
       run:
-        working-directory: /opt/baeisner/code
+        working-directory: /opt/rpad/code
 
     steps:
       - uses: actions/checkout@v4
@@ -32,7 +32,7 @@ jobs:
       # Use the github workspace variable to get the correct directory.
       # Can't use the checkout action to checkout to a different directory, so we have to simlink.
       - name: Move code to correct directory
-        run: rm -rf /opt/baeisner/code && ln -s $GITHUB_WORKSPACE /opt/baeisner/code
+        run: rm -rf /opt/rpad/code && ln -s $GITHUB_WORKSPACE /opt/rpad/code
 
       - name: Code Quality
         run: python -m black src/ tests/ --check
