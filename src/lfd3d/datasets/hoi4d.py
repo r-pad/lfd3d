@@ -5,6 +5,7 @@ from glob import glob
 
 import lightning as L
 import numpy as np
+import open3d as o3d
 import torch.utils.data as data
 
 
@@ -23,6 +24,16 @@ class HOI4DDataset(data.Dataset):
         self.size = self.num_demos
         self.PAD_SIZE = 1000
         self.fps = 15
+        # Events where there is meaningfully described object motion
+        self.valid_event_types = [
+            "Pickup",
+            "close",
+            "dump",
+            "open",
+            "pull",
+            "push",
+            "putdown",
+        ]
 
     def __len__(self):
         return self.size
@@ -30,6 +41,11 @@ class HOI4DDataset(data.Dataset):
     def __getitem__(self, index):
         vid_name = self.data_files[index]
         dir_name = os.path.dirname(os.path.dirname(vid_name))
+
+        cam_trajectory = o3d.io.read_pinhole_camera_trajectory(
+            f"{dir_name}/3Dseg/output.log"
+        )
+        K = cam_trajectory.parameters[0].intrinsic.intrinsic_matrix
 
         # rgb = np.array([cv2.cvtColor(cv2.imread(i), cv2.COLOR_BGR2RGB) for i in sorted(glob(f"{dir_name}/align_rgb/*jpg"))])
         # depth = np.array([cv2.imread(i, -1) for i in sorted(glob(f"{dir_name}/align_depth/*png"))])
@@ -40,8 +56,10 @@ class HOI4DDataset(data.Dataset):
         tracks = np.pad(tracks, ((0, 0), (self.PAD_SIZE - tracks.shape[1], 0), (0, 0)))
         # A few videos don't have any valid tracks, a check to avoid div by 0.
         if tracks.max() != 0:
-            tracks[:, :, 0] /= tracks[:, :, 0].max()
-            tracks[:, :, 1] /= tracks[:, :, 1].max()
+            # SpatialTracker tracks u,v in image plane and z in 3d.
+            # Unproject u,v to x,y
+            tracks[:, :, 0] = ((tracks[:, :, 0] - K[0, 2]) * tracks[:, :, 2]) / K[0, 0]
+            tracks[:, :, 1] = ((tracks[:, :, 1] - K[1, 2]) * tracks[:, :, 2]) / K[1, 1]
 
         # Get the object name from the pose file.
         # The dataset does not have a consistent naming scheme .......
@@ -51,14 +69,23 @@ class HOI4DDataset(data.Dataset):
         obj_name = json.load(open(objpose_fname))["dataList"][0]["label"]
 
         action_annotation = json.load(open(f"{dir_name}/action/color.json"))
-        # Convert timestamp in seconds to frame_idx
         # The dataset does not have a consistent naming scheme .......
         try:
-            event = random.choice(action_annotation["events"])
+            # Filter out useful events
+            all_events = action_annotation["events"]
+            valid_events = [
+                i for i in all_events if i["event"] in self.valid_event_types
+            ]
+            event = random.choice(valid_events)
+            # Convert timestamp in seconds to frame_idx
             event_start_idx = int(event["startTime"] * self.fps)
             event_end_idx = int(event["endTime"] * self.fps) - 1
         except KeyError:
-            event = random.choice(action_annotation["markResult"]["marks"])
+            all_events = action_annotation["markResult"]["marks"]
+            valid_events = [
+                i for i in all_events if i["event"] in self.valid_event_types
+            ]
+            event = random.choice(valid_events)
             event_start_idx = int(event["hdTimeStart"] * self.fps)
             event_end_idx = int(event["hdTimeEnd"] * self.fps) - 1
         event_name = event["event"]

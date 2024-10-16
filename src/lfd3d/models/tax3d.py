@@ -13,6 +13,7 @@ from non_rigid.models.dit.models import (
 from non_rigid.utils.logging_utils import viz_predicted_vs_gt
 from non_rigid.utils.pointcloud_utils import expand_pcd
 from pytorch3d.transforms import Transform3d
+from sentence_transformers import SentenceTransformer
 from torch import nn, optim
 
 
@@ -111,6 +112,8 @@ class DenseDisplacementDiffusionModule(L.LightningModule):
         else:
             raise ValueError(f"Invalid prediction type: {self.prediction_type}")
 
+        self.text_embed = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
+
         # mode-specific processing
         if self.mode == "train":
             self.run_cfg = cfg.training
@@ -183,6 +186,8 @@ class DenseDisplacementDiffusionModule(L.LightningModule):
         """
         ground_truth = batch[self.label_key].permute(0, 2, 1)  # channel first
         model_kwargs = self.get_model_kwargs(batch)
+
+        text_embedding = self.text_embed.encode(batch["caption"])
 
         # run diffusion
         # noise = torch.randn_like(ground_truth) * self.noise_scale
