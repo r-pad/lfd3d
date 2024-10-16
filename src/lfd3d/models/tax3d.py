@@ -106,6 +106,8 @@ class DenseDisplacementDiffusionModule(L.LightningModule):
             self.label_key = "flow"
         elif self.prediction_type == "point":
             self.label_key = "pc"
+        elif self.prediction_type == "cross_displacement":
+            self.label_key = "cross_displacement"
         else:
             raise ValueError(f"Invalid prediction type: {self.prediction_type}")
 
@@ -179,7 +181,7 @@ class DenseDisplacementDiffusionModule(L.LightningModule):
         """
         Forward pass to compute diffusion training loss.
         """
-        ground_truth = batch["cross_displacement"].permute(0, 2, 1)  # channel first
+        ground_truth = batch[self.label_key].permute(0, 2, 1)  # channel first
         model_kwargs = self.get_model_kwargs(batch)
 
         # run diffusion
@@ -241,12 +243,19 @@ class DenseDisplacementDiffusionModule(L.LightningModule):
                 pred_point = pred
                 pred_flow = pred_point - pc_action
                 results = [res.permute(0, 2, 1) for res in results]
+            elif self.prediction_type == "cross_displacement":
+                pred_point = pred
+                pred_flow = pred_point - pc_action
+                results = [res.permute(0, 2, 1) for res in results]
 
             pred_dict = {
                 "flow": {
                     "pred": pred_flow,
                 },
                 "point": {
+                    "pred": pred_point,
+                },
+                "cross_displacement": {
                     "pred": pred_point,
                 },
                 "results": results,
@@ -270,7 +279,7 @@ class DenseDisplacementDiffusionModule(L.LightningModule):
             batch: the input batch
             num_samples: the number of samples to generate
         """
-        ground_truth = batch["cross_displacement"].to(self.device)
+        ground_truth = batch[self.label_key].to(self.device)
         # seg = batch["seg"].to(self.device)
 
         # re-shaping and expanding for winner-take-all
@@ -340,7 +349,7 @@ class DenseDisplacementDiffusionModule(L.LightningModule):
         """
         self.train()
         t = torch.randint(
-            0, self.diff_steps, (self.batch_size,), device=self.device
+            0, self.diff_steps, (batch[self.label_key].shape[0],), device=self.device
         ).long()
         _, loss = self(batch, t)
         #########################################################
