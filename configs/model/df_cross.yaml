@@ -1,7 +1,7 @@
 name: df_cross
 
 # Model settings
-type: point # (flow, point) Type of model
+type: cross_displacement # (flow, point) Type of model
 size: xS # (xs, s, ...) Architecture of DiT
 in_channels: 3 # Number of input channels
 learn_sigma: True # Learn sigma for diffusion

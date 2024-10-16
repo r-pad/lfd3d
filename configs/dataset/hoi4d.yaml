@@ -2,7 +2,7 @@ name: hoi4d
 data_dir: ""
 # data_dir: "~/datasets/nrp/ProcCloth/"
 # data_dir : "~/Documents/data/real world"
-type: point # (flow, point) Type of dataset
+type: cross_displacement # (flow, point) Type of dataset
 source: real # (real, dedo, etc.) Source of the dataset
 
 train_size: null # (int, null) Length of the train dataset
