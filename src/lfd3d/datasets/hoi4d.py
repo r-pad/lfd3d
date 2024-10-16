@@ -17,19 +17,12 @@ class HOI4DDataset(data.Dataset):
         self.data_files = sorted(
             glob(f"{self.dataset_dir}/**/image.mp4", recursive=True)
         )
-        self.data_files = self.data_files[:16]
         self.num_demos = len(self.data_files)
-        print(self.num_demos)
         self.dataset_cfg = dataset_cfg
 
         self.size = self.num_demos
-
-        # setting sample sizes
-        self.scene = self.dataset_cfg.scene
-        self.sample_size_action = self.dataset_cfg.sample_size_action
-        self.sample_size_anchor = self.dataset_cfg.sample_size_anchor
-        self.world_frame = self.dataset_cfg.world_frame
-        self.PAD_SIZE = 300
+        self.PAD_SIZE = 1000
+        self.fps = 15
 
     def __len__(self):
         return self.size
@@ -43,41 +36,46 @@ class HOI4DDataset(data.Dataset):
         # depth = depth / 1000. # Conver to metres
 
         tracks = np.load(f"{dir_name}/spatracker_3d_tracks.npy")
-        tracks[:, :, 0] /= tracks[:, :, 0].max()
-        tracks[:, :, 1] /= tracks[:, :, 1].max()
+        # Pad points on the "left" to have common size for batching
+        tracks = np.pad(tracks, ((0, 0), (self.PAD_SIZE - tracks.shape[1], 0), (0, 0)))
+        # A few videos don't have any valid tracks, a check to avoid div by 0.
+        if tracks.max() != 0:
+            tracks[:, :, 0] /= tracks[:, :, 0].max()
+            tracks[:, :, 1] /= tracks[:, :, 1].max()
 
-        obj_name = json.load(open(f"{dir_name}/objpose/00000.json"))["dataList"][0][
-            "label"
-        ]
+        # Get the object name from the pose file.
+        # The dataset does not have a consistent naming scheme .......
+        objpose_fname = f"{dir_name}/objpose/0.json"
+        if not os.path.exists(objpose_fname):
+            objpose_fname = f"{dir_name}/objpose/00000.json"
+        obj_name = json.load(open(objpose_fname))["dataList"][0]["label"]
 
         action_annotation = json.load(open(f"{dir_name}/action/color.json"))
-        event = random.choice(action_annotation["events"])
-        event_start_idx = int(event["startTime"] * 30)
-        event_end_idx = int(event["endTime"] * 30) - 1
+        # Convert timestamp in seconds to frame_idx
+        # The dataset does not have a consistent naming scheme .......
+        try:
+            event = random.choice(action_annotation["events"])
+            event_start_idx = int(event["startTime"] * self.fps)
+            event_end_idx = int(event["endTime"] * self.fps) - 1
+        except KeyError:
+            event = random.choice(action_annotation["markResult"]["marks"])
+            event_start_idx = int(event["hdTimeStart"] * self.fps)
+            event_end_idx = int(event["hdTimeEnd"] * self.fps) - 1
         event_name = event["event"]
 
         caption = f"{event_name} {obj_name}"
         item = {}
         item["start_pcd"] = tracks[event_start_idx]
-        # Pad points on the `left` to have common size for batching
-        item["start_pcd"] = np.pad(
-            item["start_pcd"], ((self.PAD_SIZE - item["start_pcd"].shape[0], 0), (0, 0))
-        )
         item["caption"] = caption
         # item["rgb"] = rgb[event_start_idx]
         # item["depth"] = depth[event_start_idx]
         item["cross_displacement"] = tracks[event_end_idx] - tracks[event_start_idx]
-        item["cross_displacement"] = np.pad(
-            item["cross_displacement"],
-            ((self.PAD_SIZE - item["cross_displacement"].shape[0], 0), (0, 0)),
-        )
         return item
 
 
 class HOI4DDataModule(L.LightningDataModule):
     def __init__(self, batch_size, val_batch_size, num_workers, dataset_cfg):
         super().__init__()
-        # self.root = root
         self.batch_size = batch_size
         self.val_batch_size = val_batch_size
         self.num_workers = num_workers
@@ -94,11 +92,9 @@ class HOI4DDataModule(L.LightningDataModule):
     def setup(self, stage: str = "fit"):
         self.stage = stage
 
-        self.train_dataset = HOI4DDataset(self.root, self.dataset_cfg, "traintax3d")
-        self.val_dataset = HOI4DDataset(self.root, self.dataset_cfg, "val_tax3d")
-        self.val_ood_dataset = HOI4DDataset(
-            self.root, self.dataset_cfg, "val_ood_tax3d"
-        )
+        self.train_dataset = HOI4DDataset(self.root, self.dataset_cfg, "train")
+        self.val_dataset = HOI4DDataset(self.root, self.dataset_cfg, "val")
+        self.test_dataset = HOI4DDataset(self.root, self.dataset_cfg, "test")
 
     def train_dataloader(self):
         return data.DataLoader(
@@ -115,10 +111,13 @@ class HOI4DDataModule(L.LightningDataModule):
             shuffle=False,
             num_workers=self.num_workers,
         )
-        val_ood_dataloader = data.DataLoader(
-            self.val_ood_dataset,
+        return val_dataloader
+
+    def test_dataloader(self):
+        test_dataloader = data.DataLoader(
+            self.test_dataset,
             batch_size=self.val_batch_size,
             shuffle=False,
             num_workers=self.num_workers,
         )
-        return val_dataloader, val_ood_dataloader
+        return test_dataloader
