@@ -3,18 +3,19 @@ import numpy as np
 import torch
 import wandb
 from diffusers import get_cosine_schedule_with_warmup
-from non_rigid.models.dit.diffusion import create_diffusion
-from non_rigid.models.dit.models import DiT_PointCloud, DiT_PointCloud_Cross
-from non_rigid.models.dit.models import DiT_PointCloud_Unc as DiT_pcu
-from non_rigid.models.dit.models import (
-    DiT_PointCloud_Unc_Cross,
-    Rel3D_DiT_PointCloud_Unc_Cross,
-)
 from non_rigid.utils.logging_utils import viz_predicted_vs_gt
 from non_rigid.utils.pointcloud_utils import expand_pcd
 from pytorch3d.transforms import Transform3d
 from sentence_transformers import SentenceTransformer
 from torch import nn, optim
+
+from lfd3d.models.dit.diffusion import create_diffusion
+from lfd3d.models.dit.models import DiT_PointCloud, DiT_PointCloud_Cross
+from lfd3d.models.dit.models import DiT_PointCloud_Unc as DiT_pcu
+from lfd3d.models.dit.models import (
+    DiT_PointCloud_Unc_Cross,
+    Rel3D_DiT_PointCloud_Unc_Cross,
+)
 
 
 def DiT_pcu_S(**kwargs):
@@ -186,8 +187,6 @@ class DenseDisplacementDiffusionModule(L.LightningModule):
         """
         ground_truth = batch[self.label_key].permute(0, 2, 1)  # channel first
         model_kwargs = self.get_model_kwargs(batch)
-
-        text_embedding = self.text_embed.encode(batch["caption"])
 
         # run diffusion
         # noise = torch.randn_like(ground_truth) * self.noise_scale
@@ -493,6 +492,8 @@ class CrossDisplacementModule(DenseDisplacementDiffusionModule):
         # pc_anchor = batch["pc_anchor"]
         pc_action = batch["start_pcd"]
         pc_anchor = batch["start_pcd"]
+
+        text_embedding = self.text_embed.encode(batch["caption"])
         if num_samples is not None:
             # expand point clouds if num_samples is provided; used for WTA predictions
             pc_action = expand_pcd(pc_action, num_samples)
@@ -500,7 +501,7 @@ class CrossDisplacementModule(DenseDisplacementDiffusionModule):
 
         pc_action = pc_action.permute(0, 2, 1)  # channel first
         pc_anchor = pc_anchor.permute(0, 2, 1)  # channel first
-        model_kwargs = dict(x0=pc_action, y=pc_anchor)
+        model_kwargs = dict(x0=pc_action, y=pc_anchor, text_embed=text_embedding)
         return model_kwargs
 
     def get_world_preds(self, batch, num_samples, pc_action, pred_dict):
