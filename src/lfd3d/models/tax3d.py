@@ -114,6 +114,8 @@ class DenseDisplacementDiffusionModule(L.LightningModule):
             raise ValueError(f"Invalid prediction type: {self.prediction_type}")
 
         self.text_embed = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
+        for param in self.text_embed.parameters():
+            param.requires_grad = False
 
         # mode-specific processing
         if self.mode == "train":

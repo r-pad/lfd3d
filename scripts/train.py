@@ -159,13 +159,14 @@ def main(cfg):
     ######################################################################
 
     # Log the code used to train the model. Make sure not to log too much, because it will be too big.
-    wandb.run.log_code(
-        root=PROJECT_ROOT,
-        include_fn=match_fn(
-            dirs=["configs", "scripts", "src"],
-            extensions=[".py", ".yaml"],
-        ),
-    )
+    if trainer.is_global_zero:
+        wandb.run.log_code(
+            root=PROJECT_ROOT,
+            include_fn=match_fn(
+                dirs=["configs", "scripts", "src"],
+                extensions=[".py", ".yaml"],
+            ),
+        )
 
     ######################################################################
     # Train the model.
