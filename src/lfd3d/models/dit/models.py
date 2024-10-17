@@ -292,6 +292,14 @@ class DiTCrossBlock(nn.Module):
             **block_kwargs,
         )
         self.norm3 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
+        self.text_cross_attn = CrossAttention(
+            dim_x=hidden_size,
+            dim_y=hidden_size,
+            num_heads=num_heads,
+            qkv_bias=True,
+            **block_kwargs,
+        )
+        self.norm4 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
         mlp_hidden_dim = int(hidden_size * mlp_ratio)
         approx_gelu = lambda: nn.GELU(approximate="tanh")
         self.mlp = Mlp(
@@ -301,10 +309,13 @@ class DiTCrossBlock(nn.Module):
             drop=0,
         )
         self.adaLN_modulation = nn.Sequential(
-            nn.SiLU(), nn.Linear(hidden_size, 9 * hidden_size, bias=True)
+            nn.SiLU(), nn.Linear(hidden_size, 12 * hidden_size, bias=True)
         )
 
-    def forward(self, x, y, c):
+    def forward(self, x, y, c, text_embed):
+        # msa - multi-head self-attention
+        # mca - multi-head cross-attention
+        # tca - text cross-attention
         (
             shift_msa,
             scale_msa,
@@ -312,18 +323,24 @@ class DiTCrossBlock(nn.Module):
             shift_mca,
             scale_mca,
             gate_mca,
+            shift_tca,
+            scale_tca,
+            gate_tca,
             shift_x,
             scale_x,
             gate_x,
-        ) = self.adaLN_modulation(c).chunk(9, dim=1)
+        ) = self.adaLN_modulation(c).chunk(12, dim=1)
         x = x + gate_msa.unsqueeze(1) * self.self_attn(
             modulate(self.norm1(x), shift_msa, scale_msa)
         )
         x = x + gate_mca.unsqueeze(1) * self.cross_attn(
             modulate(self.norm2(x), shift_mca, scale_mca), y
         )
+        x = x + gate_tca.unsqueeze(1) * self.text_cross_attn(
+            modulate(self.norm3(x), shift_tca, scale_tca), text_embed
+        )
         x = x + gate_x.unsqueeze(1) * self.mlp(
-            modulate(self.norm3(x), shift_x, scale_x)
+            modulate(self.norm4(x), shift_x, scale_x)
         )
         return x
 
@@ -1011,6 +1028,9 @@ class DiT_PointCloud_Cross(nn.Module):
         # Timestamp embedding
         self.t_embedder = TimestepEmbedder(hidden_size)
 
+        # Project text embedding
+        self.text_projector = nn.Linear(384, hidden_size)
+
         # DiT blocks
         block_fn = DiTRelativeCrossBlock if self.model_cfg.rotary else DiTCrossBlock
         self.blocks = nn.ModuleList(
@@ -1060,6 +1080,7 @@ class DiT_PointCloud_Cross(nn.Module):
         t: torch.Tensor,
         y: torch.Tensor,
         x0: Optional[torch.Tensor] = None,
+        text_embed: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """
         Forward pass of DiT with scene cross attention.
@@ -1069,6 +1090,7 @@ class DiT_PointCloud_Cross(nn.Module):
             t (torch.Tensor): (B,) tensor of diffusion timesteps
             y (torch.Tensor): (B, D, N) tensor of un-noised scene (e.g. anchor) features
             x0 (Optional[torch.Tensor]): (B, D, N) tensor of un-noised x (e.g. action) features
+            text_embed (Optional[torch.Tensor]): (B, K) tensor of text embedding features. Assumes K=384 (miniLM)
         """
         # noise-centering, if enabled
         if self.model_cfg.center_noise:
@@ -1100,12 +1122,16 @@ class DiT_PointCloud_Cross(nn.Module):
         # timestep embedding
         t_emb = self.t_embedder(t)
 
+        if text_embed is not None:
+            # Project text embedding to the same dimension as x
+            text_emb = self.text_projector(text_embed)
+
         # forward pass through DiT blocks
         for block in self.blocks:
             if self.model_cfg.rotary:
-                x = block(x, y_emb, t_emb, x_pos, y_pos)
+                x = block(x, y_emb, t_emb, text_emb, x_pos, y_pos)
             else:
-                x = block(x, y_emb, t_emb)
+                x = block(x, y_emb, t_emb, text_emb)
 
         # final layer
         x = self.final_layer(x, t_emb)

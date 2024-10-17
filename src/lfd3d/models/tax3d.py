@@ -495,11 +495,16 @@ class CrossDisplacementModule(DenseDisplacementDiffusionModule):
         pc_action = batch["start_pcd"]
         pc_anchor = batch["start_pcd"]
 
-        text_embedding = self.text_embed.encode(batch["caption"])
+        text_embedding = torch.tensor(
+            self.text_embed.encode(batch["caption"]), device=self.device
+        )
+        # Repeat embedding to apply to every point for conditioning
+        text_embedding = text_embedding.unsqueeze(1).repeat(1, pc_action.shape[1], 1)
         if num_samples is not None:
             # expand point clouds if num_samples is provided; used for WTA predictions
             pc_action = expand_pcd(pc_action, num_samples)
             pc_anchor = expand_pcd(pc_anchor, num_samples)
+            text_embedding = expand_pcd(text_embedding, num_samples)
 
         pc_action = pc_action.permute(0, 2, 1)  # channel first
         pc_anchor = pc_anchor.permute(0, 2, 1)  # channel first
