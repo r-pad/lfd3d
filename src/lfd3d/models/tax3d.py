@@ -1,5 +1,5 @@
-import lightning as L
 import numpy as np
+import pytorch_lightning as pl
 import torch
 import wandb
 from diffusers import get_cosine_schedule_with_warmup
@@ -88,7 +88,7 @@ class DiffusionTransformerNetwork(nn.Module):
         return self.dit(x, t, **kwargs)
 
 
-class DenseDisplacementDiffusionModule(L.LightningModule):
+class DenseDisplacementDiffusionModule(pl.LightningModule):
     """
     Generalized Dense Displacement Diffusion (DDD) module that handles model training, inference,
     evaluation, and visualization. This module is inherited and overriden by scene-level and

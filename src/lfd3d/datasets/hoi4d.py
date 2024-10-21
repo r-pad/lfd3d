@@ -3,9 +3,9 @@ import os
 import random
 from glob import glob
 
-import lightning as L
 import numpy as np
 import open3d as o3d
+import pytorch_lightning as pl
 import torch.utils.data as data
 
 
@@ -100,7 +100,7 @@ class HOI4DDataset(data.Dataset):
         return item
 
 
-class HOI4DDataModule(L.LightningDataModule):
+class HOI4DDataModule(pl.LightningDataModule):
     def __init__(self, batch_size, val_batch_size, num_workers, dataset_cfg):
         super().__init__()
         self.batch_size = batch_size

@@ -1,12 +1,12 @@
 import json
 
 import hydra
-import lightning as L
 import omegaconf
+import pytorch_lightning as pl
 import torch
 import wandb
-from lightning.pytorch.callbacks import ModelCheckpoint
-from lightning.pytorch.loggers import WandbLogger
+from pytorch_lightning.callbacks import ModelCheckpoint
+from pytorch_lightning.loggers import WandbLogger
 
 from lfd3d.utils.script_utils import (
     PROJECT_ROOT,
@@ -38,7 +38,7 @@ def main(cfg):
     torch.set_float32_matmul_precision("medium")
 
     # Global seed for reproducibility.
-    L.seed_everything(cfg.seed)
+    pl.seed_everything(cfg.seed)
 
     ######################################################################
     # Create the datamodule.
@@ -116,7 +116,7 @@ def main(cfg):
     #       loss), and logs it to wandb.
     ######################################################################
 
-    trainer = L.Trainer(
+    trainer = pl.Trainer(
         accelerator="gpu",
         devices=cfg.resources.gpus,
         precision="32-true",
@@ -160,6 +160,7 @@ def main(cfg):
 
     # Log the code used to train the model. Make sure not to log too much, because it will be too big.
     if trainer.is_global_zero:
+        wandb.init(project="lfd3d")
         wandb.run.log_code(
             root=PROJECT_ROOT,
             include_fn=match_fn(

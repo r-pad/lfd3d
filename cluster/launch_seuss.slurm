@@ -2,13 +2,12 @@
 #SBATCH --job-name=train_model
 #SBATCH --output=./.slurm_logs/%j.out
 #SBATCH --error=./.slurm_logs/%j.err
-#SBATCH --ntasks=1
+#SBATCH --ntasks-per-node=8
 #SBATCH --nodes=1
-#SBATCH --ntasks-per-node=4
 #SBATCH --time=96:00:00
-#SBATCH --gres=gpu:1
-#SBATCH --mem=32G
-#SBATCH --exclude=compute-0-[5,6]
+#SBATCH --gres=gpu:8
+#SBATCH --mem=256G
+#SBATCH --nodelist=compute-1-9
 #SBATCH --partition=GPU
 
 # Unset XDG_RUNTIME_DIR to avoid directory issue
@@ -49,8 +48,9 @@ SINGULARITYENV_WANDB_DOCKER_IMAGE=lfd3d \
     -B /home/sskrishn/hoi4d/hoi4d_data:/opt/data \
     -B /scratch/rpad/logs:/opt/logs \
     ${sif_name} \
-    python scripts/train.py \
+    torchrun --nproc_per_node=8 scripts/train.py \
     model=df_cross \
     dataset=hoi4d \
     dataset.data_dir=/opt/data \
-    log_dir=/opt/logs
+    log_dir=/opt/logs \
+    resources.gpus=-1
