@@ -7,9 +7,10 @@ https://github.com/zhouxian/act3d-chained-diffuser/blob/main/model/utils/layers.
 
 import math
 import warnings
+from typing import Optional, Tuple
 
 import torch
-from torch import nn
+from torch import Tensor, nn
 from torch.nn import Linear, Module
 from torch.nn import functional as F
 from torch.nn.init import constant_, xavier_normal_, xavier_uniform_
@@ -22,6 +23,7 @@ class RotaryPositionEncoding(nn.Module):
 
         self.feature_dim = feature_dim
         self.pe_type = pe_type
+        self.type_hint: Tuple[Tensor] = (torch.tensor(2), torch.tensor(2))
 
     @staticmethod
     def embed_rotary(x, cos, sin):
@@ -333,7 +335,6 @@ def multi_head_attention_forward(
     gate_attn=None,
     mem_mask=None,
 ):
-    # type: (...) -> Tuple[Tensor, Optional[Tensor]]
     r"""
     Args:
         query, key, value: map a query and a set of key-value pairs to an output.
@@ -401,7 +402,7 @@ def multi_head_attention_forward(
             # This is inline in_proj function with in_proj_weight and in_proj_bias
             _b = in_proj_bias
             _start = 0
-            _end = embed_dim
+            _end: Optional[int] = embed_dim
             _w = in_proj_weight[_start:_end, :]
             if _b is not None:
                 _b = _b[_start:_end]
