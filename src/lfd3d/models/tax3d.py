@@ -1,19 +1,21 @@
-import lightning as L
 import numpy as np
+import pytorch_lightning as pl
 import torch
 import wandb
 from diffusers import get_cosine_schedule_with_warmup
-from non_rigid.models.dit.diffusion import create_diffusion
-from non_rigid.models.dit.models import DiT_PointCloud, DiT_PointCloud_Cross
-from non_rigid.models.dit.models import DiT_PointCloud_Unc as DiT_pcu
-from non_rigid.models.dit.models import (
-    DiT_PointCloud_Unc_Cross,
-    Rel3D_DiT_PointCloud_Unc_Cross,
-)
 from non_rigid.utils.logging_utils import viz_predicted_vs_gt
 from non_rigid.utils.pointcloud_utils import expand_pcd
 from pytorch3d.transforms import Transform3d
+from sentence_transformers import SentenceTransformer
 from torch import nn, optim
+
+from lfd3d.models.dit.diffusion import create_diffusion
+from lfd3d.models.dit.models import DiT_PointCloud, DiT_PointCloud_Cross
+from lfd3d.models.dit.models import DiT_PointCloud_Unc as DiT_pcu
+from lfd3d.models.dit.models import (
+    DiT_PointCloud_Unc_Cross,
+    Rel3D_DiT_PointCloud_Unc_Cross,
+)
 
 
 def DiT_pcu_S(**kwargs):
@@ -86,7 +88,7 @@ class DiffusionTransformerNetwork(nn.Module):
         return self.dit(x, t, **kwargs)
 
 
-class DenseDisplacementDiffusionModule(L.LightningModule):
+class DenseDisplacementDiffusionModule(pl.LightningModule):
     """
     Generalized Dense Displacement Diffusion (DDD) module that handles model training, inference,
     evaluation, and visualization. This module is inherited and overriden by scene-level and
@@ -106,8 +108,14 @@ class DenseDisplacementDiffusionModule(L.LightningModule):
             self.label_key = "flow"
         elif self.prediction_type == "point":
             self.label_key = "pc"
+        elif self.prediction_type == "cross_displacement":
+            self.label_key = "cross_displacement"
         else:
             raise ValueError(f"Invalid prediction type: {self.prediction_type}")
+
+        self.text_embed = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
+        for param in self.text_embed.parameters():
+            param.requires_grad = False
 
         # mode-specific processing
         if self.mode == "train":
@@ -179,7 +187,7 @@ class DenseDisplacementDiffusionModule(L.LightningModule):
         """
         Forward pass to compute diffusion training loss.
         """
-        ground_truth = batch["cross_displacement"].permute(0, 2, 1)  # channel first
+        ground_truth = batch[self.label_key].permute(0, 2, 1)  # channel first
         model_kwargs = self.get_model_kwargs(batch)
 
         # run diffusion
@@ -241,12 +249,19 @@ class DenseDisplacementDiffusionModule(L.LightningModule):
                 pred_point = pred
                 pred_flow = pred_point - pc_action
                 results = [res.permute(0, 2, 1) for res in results]
+            elif self.prediction_type == "cross_displacement":
+                pred_point = pred
+                pred_flow = pred_point - pc_action
+                results = [res.permute(0, 2, 1) for res in results]
 
             pred_dict = {
                 "flow": {
                     "pred": pred_flow,
                 },
                 "point": {
+                    "pred": pred_point,
+                },
+                "cross_displacement": {
                     "pred": pred_point,
                 },
                 "results": results,
@@ -270,7 +285,7 @@ class DenseDisplacementDiffusionModule(L.LightningModule):
             batch: the input batch
             num_samples: the number of samples to generate
         """
-        ground_truth = batch["cross_displacement"].to(self.device)
+        ground_truth = batch[self.label_key].to(self.device)
         # seg = batch["seg"].to(self.device)
 
         # re-shaping and expanding for winner-take-all
@@ -340,7 +355,7 @@ class DenseDisplacementDiffusionModule(L.LightningModule):
         """
         self.train()
         t = torch.randint(
-            0, self.diff_steps, (self.batch_size,), device=self.device
+            0, self.diff_steps, (batch[self.label_key].shape[0],), device=self.device
         ).long()
         _, loss = self(batch, t)
         #########################################################
@@ -479,14 +494,21 @@ class CrossDisplacementModule(DenseDisplacementDiffusionModule):
         # pc_anchor = batch["pc_anchor"]
         pc_action = batch["start_pcd"]
         pc_anchor = batch["start_pcd"]
+
+        text_embedding = torch.tensor(
+            self.text_embed.encode(batch["caption"]), device=self.device
+        )
+        # Repeat embedding to apply to every point for conditioning
+        text_embedding = text_embedding.unsqueeze(1).repeat(1, pc_action.shape[1], 1)
         if num_samples is not None:
             # expand point clouds if num_samples is provided; used for WTA predictions
             pc_action = expand_pcd(pc_action, num_samples)
             pc_anchor = expand_pcd(pc_anchor, num_samples)
+            text_embedding = expand_pcd(text_embedding, num_samples)
 
         pc_action = pc_action.permute(0, 2, 1)  # channel first
         pc_anchor = pc_anchor.permute(0, 2, 1)  # channel first
-        model_kwargs = dict(x0=pc_action, y=pc_anchor)
+        model_kwargs = dict(x0=pc_action, y=pc_anchor, text_embed=text_embedding)
         return model_kwargs
 
     def get_world_preds(self, batch, num_samples, pc_action, pred_dict):
