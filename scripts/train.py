@@ -119,11 +119,11 @@ def main(cfg):
     trainer = pl.Trainer(
         accelerator="gpu",
         devices=cfg.resources.gpus,
-        precision="32-true",
+        precision="16-mixed",
         max_epochs=cfg.training.epochs,
         logger=logger,
         check_val_every_n_epoch=cfg.training.check_val_every_n_epochs,
-        log_every_n_steps=len(datamodule.train_dataloader()),
+        log_every_n_steps=len(datamodule.train_dataloader()) // 16,
         gradient_clip_val=cfg.training.grad_clip_norm,
         callbacks=[
             # Callback which logs whatever visuals (i.e. dataset examples, preds, etc.) we want.
@@ -141,8 +141,8 @@ def main(cfg):
             # This checkpoint will get saved to WandB. The Callback mechanism in lightning is poorly designed, so we have to put it last.
             ModelCheckpoint(
                 dirpath=cfg.lightning.checkpoint_dir,
-                filename="{epoch}-{step}-{val_wta_rmse_0:.3f}",
-                monitor="val_rmse_wta_0",
+                filename="{epoch}-{step}-{val_rmse_0:.3f}",
+                monitor="val_rmse_0",
                 mode="min",
                 save_weights_only=False,
                 save_last=False,
