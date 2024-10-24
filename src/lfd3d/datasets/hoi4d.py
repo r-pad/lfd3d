@@ -3,6 +3,7 @@ import os
 import random
 from glob import glob
 
+import cv2
 import numpy as np
 import open3d as o3d
 import pytorch_lightning as pl
@@ -45,11 +46,11 @@ class HOI4DDataset(data.Dataset):
         cam_trajectory = o3d.io.read_pinhole_camera_trajectory(
             f"{dir_name}/3Dseg/output.log"
         )
-        K = cam_trajectory.parameters[0].intrinsic.intrinsic_matrix
-
-        # rgb = np.array([cv2.cvtColor(cv2.imread(i), cv2.COLOR_BGR2RGB) for i in sorted(glob(f"{dir_name}/align_rgb/*jpg"))])
-        # depth = np.array([cv2.imread(i, -1) for i in sorted(glob(f"{dir_name}/align_depth/*png"))])
-        # depth = depth / 1000. # Conver to metres
+        K = (
+            cam_trajectory.parameters[0]
+            .intrinsic.intrinsic_matrix.astype(np.float32)
+            .copy()
+        )
 
         tracks = np.load(f"{dir_name}/spatracker_3d_tracks.npy")
         # Pad points on the "left" to have common size for batching
@@ -90,13 +91,36 @@ class HOI4DDataset(data.Dataset):
             event_end_idx = int(event["hdTimeEnd"] * self.fps) - 1
         event_name = event["event"]
 
+        # Return rgb/depth at beginning and end of event
+        rgb_init = cv2.cvtColor(
+            cv2.imread(f"{dir_name}/align_rgb/{str(event_start_idx).zfill(5)}.jpg"),
+            cv2.COLOR_BGR2RGB,
+        )
+        rgb_end = cv2.cvtColor(
+            cv2.imread(f"{dir_name}/align_rgb/{str(event_end_idx).zfill(5)}.jpg"),
+            cv2.COLOR_BGR2RGB,
+        )
+        rgbs = np.array([rgb_init, rgb_end])
+
+        depth_init = cv2.imread(
+            f"{dir_name}/align_depth/{str(event_start_idx).zfill(5)}.png", -1
+        )
+        depth_init = depth_init / 1000.0  # Conver to metres
+        depth_end = cv2.imread(
+            f"{dir_name}/align_depth/{str(event_end_idx).zfill(5)}.png", -1
+        )
+        depth_end = depth_end / 1000.0  # Conver to metres
+        depths = np.array([depth_init, depth_end])
+
         caption = f"{event_name} {obj_name}"
-        item = {}
-        item["start_pcd"] = tracks[event_start_idx]
-        item["caption"] = caption
-        # item["rgb"] = rgb[event_start_idx]
-        # item["depth"] = depth[event_start_idx]
-        item["cross_displacement"] = tracks[event_end_idx] - tracks[event_start_idx]
+        item = {
+            "start_pcd": tracks[event_start_idx],
+            "caption": caption,
+            "cross_displacement": tracks[event_end_idx] - tracks[event_start_idx],
+            "intrinsics": K,
+            "rgbs": rgbs,
+            "depths": depths,
+        }
         return item
 
 

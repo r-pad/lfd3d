@@ -1,11 +1,11 @@
 import os
 
+import cv2
 import numpy as np
 import pytorch_lightning as pl
 import torch
 import wandb
 from diffusers import get_cosine_schedule_with_warmup
-from non_rigid.utils.logging_utils import viz_predicted_vs_gt
 from sentence_transformers import SentenceTransformer
 from torch import nn, optim
 
@@ -17,6 +17,7 @@ from lfd3d.models.dit.models import (
     DiT_PointCloud_Unc_Cross,
     Rel3D_DiT_PointCloud_Unc_Cross,
 )
+from lfd3d.utils.viz_utils import get_img_and_track_pcd, project_pcd_on_image
 
 
 def DiT_pcu_S(**kwargs):
@@ -264,20 +265,49 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
             tag: the tag to use for logging
         """
         # pick a random sample in the batch to visualize
-        viz_idx = np.random.randint(0, batch["pc"].shape[0])
-        pred_viz = pred_dict["pred"][viz_idx, 0, :, :3]
-        viz_args = self.get_viz_args(batch, viz_idx)
+        viz_idx = np.random.randint(0, batch["start_pcd"].shape[0])
+        RED, BLUE = (255, 0, 0), (0, 0, 255)
 
-        # getting predicted action point cloud
-        if self.prediction_type == "flow":
-            pred_action_viz = viz_args["pc_action_viz"] + pred_viz
-        elif self.prediction_type == "point":
-            pred_action_viz = pred_viz
+        pred = pred_dict[self.prediction_type]["pred"][viz_idx].cpu().numpy()
 
-        # logging predicted vs ground truth point cloud
-        viz_args["pred_action_viz"] = pred_action_viz
-        predicted_vs_gt = viz_predicted_vs_gt(**viz_args)
-        wandb.log({f"{tag}/predicted_vs_gt": predicted_vs_gt})
+        goal_text = batch["caption"][viz_idx]
+        pcd = batch["start_pcd"][viz_idx].cpu().numpy()
+        gt = batch[self.prediction_type][viz_idx].cpu().numpy()
+
+        pred_pcd = pcd + pred
+        gt_pcd = pcd + gt
+
+        K = batch["intrinsics"][viz_idx].cpu().numpy()
+
+        rgb_init, rgb_end = (
+            batch["rgbs"][viz_idx, 0].cpu().numpy(),
+            batch["rgbs"][viz_idx, 1].cpu().numpy(),
+        )
+        depth_init, depth_end = (
+            batch["depths"][viz_idx, 0].cpu().numpy(),
+            batch["depths"][viz_idx, 1].cpu().numpy(),
+        )
+
+        ### Project tracks to image and save
+        init_rgb_proj = project_pcd_on_image(pcd, rgb_init, K, RED)
+        end_rgb_proj = project_pcd_on_image(gt_pcd, rgb_end, K, RED)
+        pred_rgb_proj = project_pcd_on_image(pred_pcd, rgb_end, K, BLUE)
+        rgb_proj_viz = cv2.hconcat([init_rgb_proj, end_rgb_proj, pred_rgb_proj])
+        rgb_proj_viz = cv2.resize(rgb_proj_viz, (0, 0), fx=0.25, fy=0.25)
+
+        wandb_proj_img = wandb.Image(
+            rgb_proj_viz,
+            caption=f"Left: Initial Frame (GT Track)\n; Middle: Final Frame (GT Track)\n; Right: Final Frame (Pred Track)\n; Goal Description : {goal_text}",
+        )
+        wandb.log({f"{tag}/track_projected_to_rgb": wandb_proj_img})
+        ###
+
+        # Visualize 3D point cloud
+        viz_pcd = get_img_and_track_pcd(
+            rgb_end, depth_end, K, pred_pcd, gt_pcd, BLUE, RED
+        )
+        wandb.log({f"{tag}/image_and_tracks_pcd": wandb.Object3D(viz_pcd)})
+        ###
 
     def training_step(self, batch):
         """
@@ -295,6 +325,7 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         self.log_dict(
             {"train/loss": loss},
             add_dataloader_idx=False,
+            sync_dist=True,
         )
 
         # determine if additional logging should be done
@@ -315,12 +346,14 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
                     "train/chamfer_dist": pred_dict["chamfer_dist"].mean(),
                 },
                 add_dataloader_idx=False,
+                sync_dist=True,
             )
 
             ####################################################
             # logging visualizations
             ####################################################
-            # self.log_viz_to_wandb(batch, pred_dict, "train")
+            if self.trainer.is_global_zero:
+                self.log_viz_to_wandb(batch, pred_dict, "train")
 
         return loss
 
@@ -342,16 +375,18 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         ####################################################
         self.log_dict(
             {
-                f"val_rmse": pred_dict["rmse"].mean(),
-                f"val_chamfer_dist": pred_dict["chamfer_dist"].mean(),
+                f"val/rmse": pred_dict["rmse"].mean(),
+                f"val/chamfer_dist": pred_dict["chamfer_dist"].mean(),
             },
             add_dataloader_idx=False,
+            sync_dist=True,
         )
 
         ####################################################
         # logging visualizations
         ####################################################
-        # self.log_viz_to_wandb(batch, pred_dict, f"val_{dataloader_idx}")
+        if self.trainer.is_global_zero:
+            self.log_viz_to_wandb(batch, pred_dict, "val")
 
     def predict_step(self, batch, batch_idx, dataloader_idx=0):
         """
