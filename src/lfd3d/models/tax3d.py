@@ -9,6 +9,7 @@ from non_rigid.utils.logging_utils import viz_predicted_vs_gt
 from sentence_transformers import SentenceTransformer
 from torch import nn, optim
 
+from lfd3d.metrics.pcd_metrics import chamfer_distance, rmse_pcd
 from lfd3d.models.dit.diffusion import create_diffusion
 from lfd3d.models.dit.models import DiT_PointCloud, DiT_PointCloud_Cross
 from lfd3d.models.dit.models import DiT_PointCloud_Unc as DiT_pcu
@@ -58,6 +59,25 @@ def encode_without_parallelism(text_embed_model, text):
     else:
         del os.environ["TOKENIZERS_PARALLELISM"]
     return embeddings
+
+
+def calc_pcd_metrics(pred_dict, pcd, pred, gt):
+    """
+    Calculate pcd metrics and update pred_dict with the keys.
+    Creates point clouds to be measured by applying the predicted
+    and gt displacements to the metric pcd.
+
+    pred_dict: Dictionary with keys to be updated
+    pcd: Metric Point Cloud
+    pred: Predicted cross displacement
+    gt: GT cross displacement
+    """
+    pred_pcd = pcd + pred
+    gt_pcd = pcd + gt
+
+    pred_dict["rmse"] = rmse_pcd(pred_pcd, gt_pcd)
+    pred_dict["chamfer_dist"] = chamfer_distance(pred_pcd, gt_pcd)
+    return pred_dict
 
 
 # TODO: clean up all unused functions
@@ -268,6 +288,7 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
             0, self.diff_steps, (batch[self.label_key].shape[0],), device=self.device
         ).long()
         _, loss = self(batch, t)
+        start_pcd = batch["start_pcd"]
         #########################################################
         # logging training metrics
         #########################################################
@@ -286,11 +307,12 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
             pred_dict = self.predict(batch)
             pred = pred_dict[self.prediction_type]["pred"]
             ground_truth = batch[self.label_key].to(self.device)
-            rmse = ((pred - ground_truth) ** 2).mean(axis=(1, 2)) ** 0.5
+            pred_dict = calc_pcd_metrics(pred_dict, start_pcd, pred, ground_truth)
 
             self.log_dict(
                 {
-                    "train/rmse": rmse.mean(),
+                    "train/rmse": pred_dict["rmse"].mean(),
+                    "train/chamfer_dist": pred_dict["chamfer_dist"].mean(),
                 },
                 add_dataloader_idx=False,
             )
@@ -312,14 +334,16 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
 
         pred = pred_dict[self.prediction_type]["pred"]
         ground_truth = batch[self.label_key].to(self.device)
-        pred_dict["rmse"] = ((pred - ground_truth) ** 2).mean(axis=(1, 2)) ** 0.5
+        start_pcd = batch["start_pcd"]
+        pred_dict = calc_pcd_metrics(pred_dict, start_pcd, pred, ground_truth)
 
         ####################################################
         # logging validation metrics
         ####################################################
         self.log_dict(
             {
-                f"val_rmse_{dataloader_idx}": pred_dict["rmse"].mean(),
+                f"val_rmse": pred_dict["rmse"].mean(),
+                f"val_chamfer_dist": pred_dict["chamfer_dist"].mean(),
             },
             add_dataloader_idx=False,
         )
