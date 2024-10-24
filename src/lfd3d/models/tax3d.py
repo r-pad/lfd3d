@@ -347,6 +347,7 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
                 },
                 add_dataloader_idx=False,
                 sync_dist=True,
+                prog_bar=True,
             )
 
             ####################################################
