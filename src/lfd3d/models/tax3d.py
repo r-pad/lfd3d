@@ -133,6 +133,7 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         self.model_cfg = cfg.model
         self.prediction_type = self.model_cfg.type  # flow or point
         self.mode = cfg.mode  # train or eval
+        self.val_outputs, self.train_outputs = [], []
 
         # prediction type-specific processing
         # TODO: eventually, this should be removed by updating dataset to use "point" instead of "pc"
@@ -274,6 +275,8 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         pcd = batch["start_pcd"][viz_idx].cpu().numpy()
         gt = batch[self.prediction_type][viz_idx].cpu().numpy()
 
+        start_mask = ~np.all(pcd == 0, axis=1)  # Remove 0 points
+        end_mask = ~np.all(pcd == 0, axis=1)  # Remove 0 points
         pred_pcd = pcd + pred
         gt_pcd = pcd + gt
 
@@ -289,9 +292,9 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         )
 
         ### Project tracks to image and save
-        init_rgb_proj = project_pcd_on_image(pcd, rgb_init, K, RED)
-        end_rgb_proj = project_pcd_on_image(gt_pcd, rgb_end, K, RED)
-        pred_rgb_proj = project_pcd_on_image(pred_pcd, rgb_end, K, BLUE)
+        init_rgb_proj = project_pcd_on_image(pcd, start_mask, rgb_init, K, RED)
+        end_rgb_proj = project_pcd_on_image(gt_pcd, end_mask, rgb_end, K, RED)
+        pred_rgb_proj = project_pcd_on_image(pred_pcd, end_mask, rgb_end, K, BLUE)
         rgb_proj_viz = cv2.hconcat([init_rgb_proj, end_rgb_proj, pred_rgb_proj])
         rgb_proj_viz = cv2.resize(rgb_proj_viz, (0, 0), fx=0.25, fy=0.25)
 
@@ -299,17 +302,22 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
             rgb_proj_viz,
             caption=f"Left: Initial Frame (GT Track)\n; Middle: Final Frame (GT Track)\n; Right: Final Frame (Pred Track)\n; Goal Description : {goal_text}",
         )
-        wandb.log({f"{tag}/track_projected_to_rgb": wandb_proj_img})
+        wandb.log(
+            {f"{tag}/track_projected_to_rgb": wandb_proj_img},
+            commit=False,
+        )
         ###
 
         # Visualize 3D point cloud
         viz_pcd = get_img_and_track_pcd(
             rgb_end, depth_end, K, pred_pcd, gt_pcd, BLUE, RED
         )
-        wandb.log({f"{tag}/image_and_tracks_pcd": wandb.Object3D(viz_pcd)})
+        wandb.log(
+            {f"{tag}/image_and_tracks_pcd": wandb.Object3D(viz_pcd)},
+        )
         ###
 
-    def training_step(self, batch):
+    def training_step(self, batch, batch_idx):
         """
         Training step for the module. Logs training metrics and visualizations to wandb.
         """
@@ -322,15 +330,12 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         #########################################################
         # logging training metrics
         #########################################################
-        self.log_dict(
-            {"train/loss": loss},
-            add_dataloader_idx=False,
-            sync_dist=True,
-        )
+        train_metrics = {"loss": loss}
 
         # determine if additional logging should be done
         do_additional_logging = (
-            self.global_step % self.additional_train_logging_period == 0
+            batch_idx % self.additional_train_logging_period == 0
+            and self.trainer.is_global_zero
         )
 
         # additional logging
@@ -339,26 +344,40 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
             pred = pred_dict[self.prediction_type]["pred"]
             ground_truth = batch[self.label_key].to(self.device)
             pred_dict = calc_pcd_metrics(pred_dict, start_pcd, pred, ground_truth)
-
-            self.log_dict(
-                {
-                    "train/rmse": pred_dict["rmse"].mean(),
-                    "train/chamfer_dist": pred_dict["chamfer_dist"].mean(),
-                },
-                add_dataloader_idx=False,
-                sync_dist=True,
-                prog_bar=True,
-            )
+            train_metrics.update(pred_dict)
 
             ####################################################
             # logging visualizations
             ####################################################
-            if self.trainer.is_global_zero:
-                self.log_viz_to_wandb(batch, pred_dict, "train")
+            self.log_viz_to_wandb(batch, pred_dict, "train")
 
+        self.train_outputs.append(train_metrics)
         return loss
 
-    def validation_step(self, batch, batch_idx, dataloader_idx=0):
+    def on_train_epoch_end(self):
+        loss = torch.stack([x["loss"] for x in self.train_outputs]).mean()
+        rmse = torch.stack(
+            [x["rmse"] for x in self.train_outputs if "rmse" in x]
+        ).mean()
+        chamfer_dist = torch.stack(
+            [x["chamfer_dist"] for x in self.train_outputs if "chamfer_dist" in x]
+        ).mean()
+        ####################################################
+        # logging training metrics
+        ####################################################
+        self.log_dict(
+            {
+                "train/loss": loss,
+                "train/rmse": rmse,
+                "train/chamfer_dist": chamfer_dist,
+            },
+            add_dataloader_idx=False,
+            sync_dist=True,
+            prog_bar=True,
+        )
+        self.train_outputs.clear()
+
+    def validation_step(self, batch, batch_idx):
         """
         Validation step for the module. Logs validation metrics and visualizations to wandb.
         """
@@ -370,24 +389,30 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         ground_truth = batch[self.label_key].to(self.device)
         start_pcd = batch["start_pcd"]
         pred_dict = calc_pcd_metrics(pred_dict, start_pcd, pred, ground_truth)
+        self.val_outputs.append(pred_dict)
 
+        ####################################################
+        # logging visualizations
+        ####################################################
+        if batch_idx == 0 and self.trainer.is_global_zero:
+            self.log_viz_to_wandb(batch, pred_dict, "val")
+        return pred_dict
+
+    def on_validation_epoch_end(self):
+        rmse = torch.stack([x["rmse"] for x in self.val_outputs]).mean()
+        chamfer_dist = torch.stack([x["chamfer_dist"] for x in self.val_outputs]).mean()
         ####################################################
         # logging validation metrics
         ####################################################
         self.log_dict(
             {
-                f"val/rmse": pred_dict["rmse"].mean(),
-                f"val/chamfer_dist": pred_dict["chamfer_dist"].mean(),
+                f"val/rmse": rmse,
+                f"val/chamfer_dist": chamfer_dist,
             },
             add_dataloader_idx=False,
             sync_dist=True,
         )
-
-        ####################################################
-        # logging visualizations
-        ####################################################
-        if self.trainer.is_global_zero:
-            self.log_viz_to_wandb(batch, pred_dict, "val")
+        self.val_outputs.clear()
 
     def predict_step(self, batch, batch_idx, dataloader_idx=0):
         """

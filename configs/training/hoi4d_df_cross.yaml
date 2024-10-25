@@ -9,5 +9,5 @@ num_training_steps: None # Set by the training loop.
 sample_size: None # Set by the training loop, from dataset config.
 sample_size_anchor: None # Set by the training loop, from dataset config.
 
-check_val_every_n_epochs: 25
+check_val_every_n_epochs: 3
 additional_train_logging_period: 100 # Global step period to log additional training metrics

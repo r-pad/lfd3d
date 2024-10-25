@@ -2,7 +2,7 @@ import cv2
 import numpy as np
 
 
-def project_pcd_on_image(pcd, image, K, color):
+def project_pcd_on_image(pcd, mask, image, K, color):
     """
     Project point cloud onto image, overwrite projected
     points with the provided colour.
@@ -10,7 +10,6 @@ def project_pcd_on_image(pcd, image, K, color):
     height, width, ch = image.shape
     viz_image = image.copy()
 
-    mask = ~np.all(pcd == 0, axis=1)  # Remove 0 points
     pcd = pcd[mask]
 
     projected_points = K @ pcd.T
