@@ -25,6 +25,7 @@ from non_rigid.models.regression import (
 from pytorch_lightning.loggers import WandbLogger
 
 from lfd3d.datasets.hoi4d import HOI4DDataModule
+from lfd3d.datasets.rt1 import RT1DataModule
 from lfd3d.models.tax3d import (
     CrossDisplacementModule,
     DiffusionTransformerNetwork,
@@ -124,6 +125,8 @@ def create_datamodule(cfg):
         datamodule_fn = ProcClothFlowDataModule
     elif cfg.dataset.name == "hoi4d":
         datamodule_fn = HOI4DDataModule
+    elif cfg.dataset.name == "rt1":
+        datamodule_fn = RT1DataModule
     else:
         raise ValueError(f"Invalid dataset name: {cfg.dataset.name}")
 
