@@ -6,7 +6,7 @@
 #SBATCH --nodes=1
 #SBATCH --time=96:00:00
 #SBATCH --gres=gpu:8
-#SBATCH --mem=256G
+#SBATCH --mem=512G
 #SBATCH --nodelist=compute-1-9
 #SBATCH --partition=GPU
 
