@@ -1,4 +1,5 @@
 import os
+from typing import Dict, List
 
 import cv2
 import numpy as np
@@ -133,7 +134,8 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         self.model_cfg = cfg.model
         self.prediction_type = self.model_cfg.type  # flow or point
         self.mode = cfg.mode  # train or eval
-        self.val_outputs, self.train_outputs = [], []
+        self.val_outputs: List[Dict] = []
+        self.train_outputs: List[Dict] = []
 
         # prediction type-specific processing
         # TODO: eventually, this should be removed by updating dataset to use "point" instead of "pc"
