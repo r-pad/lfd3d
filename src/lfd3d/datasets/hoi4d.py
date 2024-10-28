@@ -19,6 +19,9 @@ class HOI4DDataset(data.Dataset):
         self.data_files = sorted(
             glob(f"{self.dataset_dir}/**/image.mp4", recursive=True)
         )
+        split_files = self.load_split(split)
+        # Keep only the files that are in the requested split
+        self.data_files = list(set(self.data_files).intersection(set(split_files)))
         self.num_demos = len(self.data_files)
         self.dataset_cfg = dataset_cfg
 
@@ -37,6 +40,23 @@ class HOI4DDataset(data.Dataset):
 
     def __len__(self):
         return self.size
+
+    def load_split(self, split):
+        """
+        Load the filenames corresponding to each split - [train, val, test]
+        The file containing the splits `metadata.json` is expected to be
+        placed *outside* the directory. The splits were generated using the code
+        in the General Flow codebase
+        """
+        with open(f"{self.dataset_dir}/../metadata.json", "r") as f:
+            all_splits = json.load(f)
+        split_data = all_splits[split]
+
+        split_data_fnames = list(set([i["index"] for i in split_data]))
+        split_data_fnames = [
+            f"{self.dataset_dir}/{i}/align_rgb/image.mp4" for i in split_data_fnames
+        ]
+        return split_data_fnames
 
     def __getitem__(self, index):
         vid_name = self.data_files[index]

@@ -22,9 +22,9 @@ RUN git clone --depth=1 https://github.com/pyenv/pyenv.git .pyenv
 ENV PYENV_ROOT="$CODING_ROOT/.pyenv"
 ENV PATH="$PYENV_ROOT/shims:$PYENV_ROOT/bin:$PATH"
 
-# Install Python 3.10 using pyenv
-RUN pyenv install 3.10.0
-RUN pyenv global 3.10.0
+# Install Python 3.9 using pyenv
+RUN pyenv install 3.9.0
+RUN pyenv global 3.9.0
 
 # Make the working directory the home directory
 RUN mkdir $CODING_ROOT/code
