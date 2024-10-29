@@ -22,8 +22,20 @@ class RT1Dataset(data.Dataset):
         return self.size
 
     def __getitem__(self, index):
-        breakpoint()
-        data = next(iter(self.dataset.skip(index).take(1)))
+        data = next(iter(self.dataset.skip(500).take(1)))
+        import matplotlib.pyplot as plt
+        import numpy as np
+
+        steps = [i for i in data["steps"]]
+        images = np.array([i["observation"]["image"] for i in steps])
+        [
+            plt.imsave(f"/home/sriram/Desktop/lfd3d/{str(i).zfill(5)}.png", j)
+            for i, j in enumerate(images)
+        ]
+        print(
+            f"\n\n\nGoal text: {steps[0]['observation']['natural_language_instruction']}, number of images: {len(images)} \n\n\n"
+        )
+        exit()
         return 0
 
 
