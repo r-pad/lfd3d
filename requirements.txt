@@ -12,5 +12,5 @@ torch_cluster==1.6.3
 torch_spline_conv==1.2.2
 torch_geometric
 
---find-links https://dl.fbaipublicfiles.com/pytorch3d/packaging/wheels/py39_cu118_pyt201/download.html
+--find-links https://dl.fbaipublicfiles.com/pytorch3d/packaging/wheels/py310_cu118_pyt201/download.html
 pytorch3d
