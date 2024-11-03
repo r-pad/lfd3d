@@ -23,9 +23,15 @@ def project_pcd_on_image(pcd, mask, image, K, color):
     return viz_image
 
 
-def get_img_and_track_pcd(image, depth, K, pred_pcd, gt_pcd, pred_color, gt_color):
+def get_img_and_track_pcd(
+    image, depth, K, init_pcd, gt_pcd, pred_pcd, init_pcd_color, gt_color, pred_color
+):
     height, width = depth.shape
-    pred_color, gt_color = np.array(pred_color), np.array(gt_color)
+    init_pcd_color, pred_color, gt_color = (
+        np.array(init_pcd_color),
+        np.array(pred_color),
+        np.array(gt_color),
+    )
 
     # Create pixel coordinate grid
     x = np.arange(width)
@@ -58,7 +64,12 @@ def get_img_and_track_pcd(image, depth, K, pred_pcd, gt_pcd, pred_color, gt_colo
     # Keep one in 100 points
     image_pcd = image_pcd[::100]
 
-    mask = ~np.all(gt_pcd == 0, axis=1)  # Remove 0 points
+    mask = ~np.all(init_pcd == 0, axis=1)  # Remove 0 points
+
+    init_pcd = init_pcd[mask]
+    init_pcd_color = np.repeat(init_pcd_color[None, :], init_pcd.shape[0], axis=0)
+    init_pcd = np.concatenate([init_pcd, init_pcd_color], axis=-1)
+
     gt_pcd = gt_pcd[mask]
     gt_color = np.repeat(gt_color[None, :], gt_pcd.shape[0], axis=0)
     gt_pcd = np.concatenate([gt_pcd, gt_color], axis=-1)
@@ -67,6 +78,6 @@ def get_img_and_track_pcd(image, depth, K, pred_pcd, gt_pcd, pred_color, gt_colo
     pred_color = np.repeat(pred_color[None, :], pred_pcd.shape[0], axis=0)
     pred_pcd = np.concatenate([pred_pcd, pred_color], axis=-1)
 
-    viz_pcd = np.concatenate([image_pcd, pred_pcd, gt_pcd], axis=0)
+    viz_pcd = np.concatenate([image_pcd, init_pcd, pred_pcd, gt_pcd], axis=0)
 
     return viz_pcd

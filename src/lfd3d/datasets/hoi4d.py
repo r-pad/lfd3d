@@ -21,7 +21,9 @@ class HOI4DDataset(data.Dataset):
         )
         split_files = self.load_split(split)
         # Keep only the files that are in the requested split
-        self.data_files = list(set(self.data_files).intersection(set(split_files)))
+        self.data_files = sorted(
+            list(set(self.data_files).intersection(set(split_files)))
+        )
         self.num_demos = len(self.data_files)
         self.dataset_cfg = dataset_cfg
 

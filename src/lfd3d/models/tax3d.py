@@ -269,7 +269,7 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         """
         # pick a random sample in the batch to visualize
         viz_idx = np.random.randint(0, batch["start_pcd"].shape[0])
-        RED, BLUE = (255, 0, 0), (0, 0, 255)
+        RED, GREEN, BLUE = (255, 0, 0), (0, 255, 0), (0, 0, 255)
 
         pred = pred_dict[self.prediction_type]["pred"][viz_idx].cpu().numpy()
 
@@ -277,8 +277,7 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         pcd = batch["start_pcd"][viz_idx].cpu().numpy()
         gt = batch[self.prediction_type][viz_idx].cpu().numpy()
 
-        start_mask = ~np.all(pcd == 0, axis=1)  # Remove 0 points
-        end_mask = ~np.all(pcd == 0, axis=1)  # Remove 0 points
+        mask = ~np.all(pcd == 0, axis=1)  # Remove 0 points
         pred_pcd = pcd + pred
         gt_pcd = pcd + gt
 
@@ -294,9 +293,9 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         )
 
         ### Project tracks to image and save
-        init_rgb_proj = project_pcd_on_image(pcd, start_mask, rgb_init, K, RED)
-        end_rgb_proj = project_pcd_on_image(gt_pcd, end_mask, rgb_end, K, RED)
-        pred_rgb_proj = project_pcd_on_image(pred_pcd, end_mask, rgb_end, K, BLUE)
+        init_rgb_proj = project_pcd_on_image(pcd, mask, rgb_init, K, GREEN)
+        end_rgb_proj = project_pcd_on_image(gt_pcd, mask, rgb_end, K, RED)
+        pred_rgb_proj = project_pcd_on_image(pred_pcd, mask, rgb_end, K, BLUE)
         rgb_proj_viz = cv2.hconcat([init_rgb_proj, end_rgb_proj, pred_rgb_proj])
         rgb_proj_viz = cv2.resize(rgb_proj_viz, (0, 0), fx=0.25, fy=0.25)
 
@@ -312,7 +311,7 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
 
         # Visualize 3D point cloud
         viz_pcd = get_img_and_track_pcd(
-            rgb_end, depth_end, K, pred_pcd, gt_pcd, BLUE, RED
+            rgb_end, depth_end, K, pcd, gt_pcd, pred_pcd, GREEN, RED, BLUE
         )
         wandb.log(
             {f"{tag}/image_and_tracks_pcd": wandb.Object3D(viz_pcd)},
@@ -336,7 +335,7 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
 
         # determine if additional logging should be done
         do_additional_logging = (
-            batch_idx % self.additional_train_logging_period == 0
+            self.global_step % self.additional_train_logging_period == 0
             and self.trainer.is_global_zero
         )
 
@@ -401,8 +400,10 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         return pred_dict
 
     def on_validation_epoch_end(self):
-        rmse = torch.stack([x["rmse"] for x in self.val_outputs]).mean()
-        chamfer_dist = torch.stack([x["chamfer_dist"] for x in self.val_outputs]).mean()
+        rmse = torch.stack([x["rmse"].mean() for x in self.val_outputs]).mean()
+        chamfer_dist = torch.stack(
+            [x["chamfer_dist"].mean() for x in self.val_outputs]
+        ).mean()
         ####################################################
         # logging validation metrics
         ####################################################
