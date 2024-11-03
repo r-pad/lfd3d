@@ -1,5 +1,6 @@
 import cv2
 import numpy as np
+import open3d as o3d
 
 
 def project_pcd_on_image(pcd, mask, image, K, color):
@@ -81,3 +82,61 @@ def get_img_and_track_pcd(
     viz_pcd = np.concatenate([image_pcd, init_pcd, pred_pcd, gt_pcd], axis=0)
 
     return viz_pcd
+
+
+def create_point_cloud_frames(points_colors, n_frames=30, width=640, height=480):
+    """
+    Create frames of a rotating point cloud using headless rendering.
+
+    Args:
+        points_colors: Nx6 numpy array where first 3 columns are XYZ coordinates
+                      and last 3 columns are RGB values (0-255)
+        n_frames: Number of frames to generate
+        width: Width of output frames
+        height: Height of output frames
+
+    Returns:
+        numpy array of shape (n_frames, height, width, 3) with uint8 RGB values
+    """
+    # Create point cloud
+    pcd = o3d.geometry.PointCloud()
+    pcd.points = o3d.utility.Vector3dVector(points_colors[:, :3])
+    pcd.colors = o3d.utility.Vector3dVector(points_colors[:, 3:] / 255.0)
+
+    # Pre-allocate frames array
+    frames = np.empty((n_frames, height, width, 3), dtype=np.uint8)
+
+    # Create offscreen renderer
+    render = o3d.visualization.rendering.OffscreenRenderer(width, height)
+
+    # Create material with larger point size
+    mat = o3d.visualization.rendering.MaterialRecord()
+    mat.base_color = [1.0, 1.0, 1.0, 1.0]
+    mat.shader = "defaultUnlit"
+    mat.point_size = 5.0  # Increased point size
+
+    # Set up scene
+    render.scene.add_geometry("points", pcd, mat)
+    render.scene.set_background([0, 0, 0, 1])  # Set to black for contrast
+
+    # Set up camera positioning and orientation
+    bounds = pcd.get_axis_aligned_bounding_box()
+    center = bounds.get_center()
+    extent = np.linalg.norm(bounds.get_max_bound() - bounds.get_min_bound())
+
+    camera_distance = extent * 0.75
+    up = [0, -1, 0]
+
+    # Generate frames
+    angles = np.linspace(0, 2 * np.pi, n_frames)
+    for i, angle in enumerate(angles):
+        eye = center + camera_distance * np.array([np.sin(angle), 0, np.cos(angle)])
+
+        # Update camera to look at the center of the point cloud
+        render.scene.camera.look_at(center, eye, up)
+
+        # Render frame
+        img = render.render_to_image()
+        frames[i] = np.asarray(img)
+
+    return frames

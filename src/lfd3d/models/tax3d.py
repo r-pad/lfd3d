@@ -18,7 +18,11 @@ from lfd3d.models.dit.models import (
     DiT_PointCloud_Unc_Cross,
     Rel3D_DiT_PointCloud_Unc_Cross,
 )
-from lfd3d.utils.viz_utils import get_img_and_track_pcd, project_pcd_on_image
+from lfd3d.utils.viz_utils import (
+    create_point_cloud_frames,
+    get_img_and_track_pcd,
+    project_pcd_on_image,
+)
 
 
 def DiT_pcu_S(**kwargs):
@@ -309,12 +313,20 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         )
         ###
 
-        # Visualize 3D point cloud
+        # Visualize point cloud
         viz_pcd = get_img_and_track_pcd(
             rgb_end, depth_end, K, pcd, gt_pcd, pred_pcd, GREEN, RED, BLUE
         )
         wandb.log(
             {f"{tag}/image_and_tracks_pcd": wandb.Object3D(viz_pcd)},
+        )
+        ###
+
+        # Render video of point cloud
+        pcd_video = create_point_cloud_frames(viz_pcd)
+        pcd_video = np.transpose(pcd_video, (0, 3, 1, 2))
+        wandb.log(
+            {f"{tag}/pcd_video": wandb.Video(pcd_video, fps=6, format="webm")},
         )
         ###
 
