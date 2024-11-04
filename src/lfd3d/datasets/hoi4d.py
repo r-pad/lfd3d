@@ -117,6 +117,16 @@ class HOI4DDataset(data.Dataset):
             event_end_idx = int(event["hdTimeEnd"] * fps) - 1
         event_name = event["event"]
 
+        # Register the tracks at the end of the chunk with respect
+        # to the coordinate frame at the beginning of the chunk
+        start2world = cam2world[event_start_idx]
+        end2world = cam2world[event_end_idx]
+        start_tracks = tracks[event_start_idx]
+        end_tracks = tracks[event_end_idx]
+        end_tracks = np.hstack((end_tracks, np.ones((end_tracks.shape[0], 1))))
+        start2end = start2world @ np.linalg.inv(end2world)
+        end_tracks = (start2end @ end_tracks.T).T[:, :3].astype(np.float32)
+
         # Return rgb/depth at beginning and end of event
         rgb_init = cv2.cvtColor(
             cv2.imread(f"{dir_name}/align_rgb/{str(event_start_idx).zfill(5)}.jpg"),
@@ -140,12 +150,13 @@ class HOI4DDataset(data.Dataset):
 
         caption = f"{event_name} {obj_name}"
         item = {
-            "start_pcd": tracks[event_start_idx],
+            "start_pcd": start_tracks,
             "caption": caption,
-            "cross_displacement": tracks[event_end_idx] - tracks[event_start_idx],
+            "cross_displacement": end_tracks - start_tracks,
             "intrinsics": K,
             "rgbs": rgbs,
             "depths": depths,
+            "start2end": start2end,
         }
         return item
 

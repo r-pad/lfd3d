@@ -25,7 +25,16 @@ def project_pcd_on_image(pcd, mask, image, K, color):
 
 
 def get_img_and_track_pcd(
-    image, depth, K, init_pcd, gt_pcd, pred_pcd, init_pcd_color, gt_color, pred_color
+    image,
+    depth,
+    K,
+    mask,
+    init_pcd,
+    gt_pcd,
+    pred_pcd,
+    init_pcd_color,
+    gt_color,
+    pred_color,
 ):
     height, width = depth.shape
     init_pcd_color, pred_color, gt_color = (
@@ -64,8 +73,6 @@ def get_img_and_track_pcd(
     image_pcd = np.concatenate([points, colors], axis=-1)
     # Keep one in 100 points
     image_pcd = image_pcd[::100]
-
-    mask = ~np.all(init_pcd == 0, axis=1)  # Remove 0 points
 
     init_pcd = init_pcd[mask]
     init_pcd_color = np.repeat(init_pcd_color[None, :], init_pcd.shape[0], axis=0)

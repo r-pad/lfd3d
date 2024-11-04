@@ -276,6 +276,7 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         RED, GREEN, BLUE = (255, 0, 0), (0, 255, 0), (0, 0, 255)
 
         pred = pred_dict[self.prediction_type]["pred"][viz_idx].cpu().numpy()
+        end2start = np.linalg.inv(batch["start2end"][viz_idx].cpu().numpy())
 
         goal_text = batch["caption"][viz_idx]
         pcd = batch["start_pcd"][viz_idx].cpu().numpy()
@@ -284,6 +285,16 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         mask = ~np.all(pcd == 0, axis=1)  # Remove 0 points
         pred_pcd = pcd + pred
         gt_pcd = pcd + gt
+
+        # All points cloud are in the start image's coordinate frame
+        # We need to visualize the end image, therefore need to apply transform
+        # Transform the point clouds to align with end image coordinate frame
+        pcd_endframe = np.hstack((pcd, np.ones((pcd.shape[0], 1))))
+        pcd_endframe = (end2start @ pcd_endframe.T).T[:, :3]
+        pred_pcd = np.hstack((pred_pcd, np.ones((pred_pcd.shape[0], 1))))
+        pred_pcd = (end2start @ pred_pcd.T).T[:, :3]
+        gt_pcd = np.hstack((gt_pcd, np.ones((gt_pcd.shape[0], 1))))
+        gt_pcd = (end2start @ gt_pcd.T).T[:, :3]
 
         K = batch["intrinsics"][viz_idx].cpu().numpy()
 
@@ -315,7 +326,16 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
 
         # Visualize point cloud
         viz_pcd = get_img_and_track_pcd(
-            rgb_end, depth_end, K, pcd, gt_pcd, pred_pcd, GREEN, RED, BLUE
+            rgb_end,
+            depth_end,
+            K,
+            mask,
+            pcd_endframe,
+            gt_pcd,
+            pred_pcd,
+            GREEN,
+            RED,
+            BLUE,
         )
         wandb.log(
             {f"{tag}/image_and_tracks_pcd": wandb.Object3D(viz_pcd)},
