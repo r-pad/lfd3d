@@ -1,4 +1,5 @@
 import os
+import random
 from typing import Dict, List
 
 import cv2
@@ -280,6 +281,7 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
 
         goal_text = batch["caption"][viz_idx]
         vid_name = batch["vid_name"][viz_idx]
+        rmse = pred_dict["rmse"][viz_idx]
         pcd = batch["start_pcd"][viz_idx].cpu().numpy()
         gt = batch[self.prediction_type][viz_idx].cpu().numpy()
 
@@ -319,7 +321,7 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
             rgb_proj_viz,
             caption=f"Left: Initial Frame (GT Track)\n; Middle: Final Frame (GT Track)\n\
             ; Right: Final Frame (Pred Track)\n; Goal Description : {goal_text};\n\
-            video path = {vid_name}",
+            rmse={rmse};\nvideo path = {vid_name}; ",
         )
         ###
 
@@ -412,6 +414,12 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         )
         self.train_outputs.clear()
 
+    def on_validation_epoch_start(self):
+        # Choose a random batch index for each validation epoch
+        self.random_val_viz_idx = random.randint(
+            0, len(self.trainer.val_dataloaders) - 1
+        )
+
     def validation_step(self, batch, batch_idx):
         """
         Validation step for the module. Logs validation metrics and visualizations to wandb.
@@ -429,7 +437,7 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         ####################################################
         # logging visualizations
         ####################################################
-        if batch_idx == 0 and self.trainer.is_global_zero:
+        if batch_idx == self.random_val_viz_idx and self.trainer.is_global_zero:
             self.log_viz_to_wandb(batch, pred_dict, "val")
         return pred_dict
 
