@@ -19,6 +19,11 @@ class HOI4DDataset(data.Dataset):
         self.data_files = sorted(
             glob(f"{self.dataset_dir}/**/image.mp4", recursive=True)
         )
+        split_files = self.load_split(split)
+        # Keep only the files that are in the requested split
+        self.data_files = sorted(
+            list(set(self.data_files).intersection(set(split_files)))
+        )
         self.num_demos = len(self.data_files)
         self.dataset_cfg = dataset_cfg
 
@@ -38,10 +43,24 @@ class HOI4DDataset(data.Dataset):
     def __len__(self):
         return self.size
 
-    def __getitem__(self, index):
-        vid_name = self.data_files[index]
-        dir_name = os.path.dirname(os.path.dirname(vid_name))
+    def load_split(self, split):
+        """
+        Load the filenames corresponding to each split - [train, val, test]
+        The file containing the splits `metadata.json` is expected to be
+        placed *outside* the directory. The splits were generated using the code
+        in the General Flow codebase
+        """
+        with open(f"{self.dataset_dir}/../metadata.json", "r") as f:
+            all_splits = json.load(f)
+        split_data = all_splits[split]
 
+        split_data_fnames = list(set([i["index"] for i in split_data]))
+        split_data_fnames = [
+            f"{self.dataset_dir}/{i}/align_rgb/image.mp4" for i in split_data_fnames
+        ]
+        return split_data_fnames
+
+    def load_camera_params(self, dir_name):
         cam_trajectory = o3d.io.read_pinhole_camera_trajectory(
             f"{dir_name}/3Dseg/output.log"
         )
@@ -51,24 +70,9 @@ class HOI4DDataset(data.Dataset):
             .copy()
         )
         cam2world = np.array([i.extrinsic for i in cam_trajectory.parameters])
+        return K, cam2world
 
-        tracks = np.load(f"{dir_name}/spatracker_3d_tracks.npy")
-        # Pad points on the "left" to have common size for batching
-        tracks = np.pad(tracks, ((0, 0), (self.PAD_SIZE - tracks.shape[1], 0), (0, 0)))
-        # A few videos don't have any valid tracks, a check to avoid div by 0.
-        if tracks.max() != 0:
-            # SpatialTracker tracks u,v in image plane and z in 3d.
-            # Unproject u,v to x,y
-            tracks[:, :, 0] = ((tracks[:, :, 0] - K[0, 2]) * tracks[:, :, 2]) / K[0, 0]
-            tracks[:, :, 1] = ((tracks[:, :, 1] - K[1, 2]) * tracks[:, :, 2]) / K[1, 1]
-
-        # Get the object name from the pose file.
-        # The dataset does not have a consistent naming scheme .......
-        objpose_fname = f"{dir_name}/objpose/0.json"
-        if not os.path.exists(objpose_fname):
-            objpose_fname = f"{dir_name}/objpose/00000.json"
-        obj_name = json.load(open(objpose_fname))["dataList"][0]["label"]
-
+    def load_event(self, dir_name):
         action_annotation = json.load(open(f"{dir_name}/action/color.json"))
         # The dataset does not have a consistent naming scheme .......
         try:
@@ -93,8 +97,9 @@ class HOI4DDataset(data.Dataset):
             event = random.choice(valid_events)
             event_start_idx = int(event["hdTimeStart"] * fps)
             event_end_idx = int(event["hdTimeEnd"] * fps) - 1
-        event_name = event["event"]
+        return event, event_start_idx, event_end_idx
 
+    def load_rgbd(self, dir_name, event_start_idx, event_end_idx):
         # Return rgb/depth at beginning and end of event
         rgb_init = cv2.cvtColor(
             cv2.imread(f"{dir_name}/align_rgb/{str(event_start_idx).zfill(5)}.jpg"),
@@ -115,15 +120,56 @@ class HOI4DDataset(data.Dataset):
         )
         depth_end = depth_end / 1000.0  # Convert to metres
         depths = np.array([depth_init, depth_end])
+        return rgbs, depths
+
+    def __getitem__(self, index):
+        vid_name = self.data_files[index]
+        dir_name = os.path.dirname(os.path.dirname(vid_name))
+
+        K, cam2world = self.load_camera_params(dir_name)
+
+        tracks = np.load(f"{dir_name}/spatracker_3d_tracks.npy")
+        # Pad points on the "left" to have common size for batching
+        tracks = np.pad(tracks, ((0, 0), (self.PAD_SIZE - tracks.shape[1], 0), (0, 0)))
+        # A few videos don't have any valid tracks, a check to avoid div by 0.
+        if tracks.max() != 0:
+            # SpatialTracker tracks u,v in image plane and z in 3d.
+            # Unproject u,v to x,y
+            tracks[:, :, 0] = ((tracks[:, :, 0] - K[0, 2]) * tracks[:, :, 2]) / K[0, 0]
+            tracks[:, :, 1] = ((tracks[:, :, 1] - K[1, 2]) * tracks[:, :, 2]) / K[1, 1]
+
+        # Get the object name from the pose file.
+        # The dataset does not have a consistent naming scheme .......
+        objpose_fname = f"{dir_name}/objpose/0.json"
+        if not os.path.exists(objpose_fname):
+            objpose_fname = f"{dir_name}/objpose/00000.json"
+        obj_name = json.load(open(objpose_fname))["dataList"][0]["label"]
+
+        event, event_start_idx, event_end_idx = self.load_event(dir_name)
+        event_name = event["event"]
+
+        # Register the tracks at the end of the chunk with respect
+        # to the coordinate frame at the beginning of the chunk
+        start2world = cam2world[event_start_idx]
+        end2world = cam2world[event_end_idx]
+        start_tracks = tracks[event_start_idx]
+        end_tracks = tracks[event_end_idx]
+        end_tracks = np.hstack((end_tracks, np.ones((end_tracks.shape[0], 1))))
+        start2end = start2world @ np.linalg.inv(end2world)
+        end_tracks = (start2end @ end_tracks.T).T[:, :3].astype(np.float32)
+
+        rgbs, depths = self.load_rgbd(dir_name, event_start_idx, event_end_idx)
 
         caption = f"{event_name} {obj_name}"
         item = {
-            "start_pcd": tracks[event_start_idx],
+            "start_pcd": start_tracks,
             "caption": caption,
-            "cross_displacement": tracks[event_end_idx] - tracks[event_start_idx],
+            "cross_displacement": end_tracks - start_tracks,
             "intrinsics": K,
             "rgbs": rgbs,
             "depths": depths,
+            "start2end": start2end,
+            "vid_name": dir_name,
         }
         return item
 

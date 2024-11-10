@@ -15,12 +15,13 @@ from typing import Optional
 import numpy as np
 import torch
 import torch.nn as nn
-from non_rigid.models.dit.relative_encoding import (
+from timm.models.vision_transformer import Attention, Mlp, PatchEmbed
+
+from lfd3d.models.dit.relative_encoding import (
     MultiheadRelativeAttentionWrapper,
     RotaryPositionEncoding3D,
 )
-from non_rigid.nets.dgcnn import DGCNN
-from timm.models.vision_transformer import Attention, Mlp, PatchEmbed
+from lfd3d.nets.dgcnn import DGCNN
 
 torch.set_printoptions(precision=8, sci_mode=True)
 

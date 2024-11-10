@@ -10,8 +10,6 @@ pip install torch==2.0.1 torchvision==0.15.2 --index-url https://download.pytorc
 
 ```
 
-Install TAX3D following the instructions [here](https://github.com/ey-cai/non-rigid/tree/articulated)
-
 Then, we can install the package itself:
 
 ```bash
@@ -81,3 +79,7 @@ You'll also need to Ctrl-F replace instances of beisner and baeisner with approp
 ## Running on Clusters
 
 * [Autobot](autobot.md)
+
+## Acknowledgements
+
+This codebase was adapted from [TAX3D](https://github.com/ey-cai/non-rigid/) and [python-ml-project-template](https://github.com/r-pad/python_ml_project_template/)

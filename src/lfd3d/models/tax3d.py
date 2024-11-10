@@ -18,7 +18,11 @@ from lfd3d.models.dit.models import (
     DiT_PointCloud_Unc_Cross,
     Rel3D_DiT_PointCloud_Unc_Cross,
 )
-from lfd3d.utils.viz_utils import get_img_and_track_pcd, project_pcd_on_image
+from lfd3d.utils.viz_utils import (
+    create_point_cloud_frames,
+    get_img_and_track_pcd,
+    project_pcd_on_image,
+)
 
 
 def DiT_pcu_S(**kwargs):
@@ -269,18 +273,29 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         """
         # pick a random sample in the batch to visualize
         viz_idx = np.random.randint(0, batch["start_pcd"].shape[0])
-        RED, BLUE = (255, 0, 0), (0, 0, 255)
+        RED, GREEN, BLUE = (255, 0, 0), (0, 255, 0), (0, 0, 255)
 
         pred = pred_dict[self.prediction_type]["pred"][viz_idx].cpu().numpy()
+        end2start = np.linalg.inv(batch["start2end"][viz_idx].cpu().numpy())
 
         goal_text = batch["caption"][viz_idx]
+        vid_name = batch["vid_name"][viz_idx]
         pcd = batch["start_pcd"][viz_idx].cpu().numpy()
         gt = batch[self.prediction_type][viz_idx].cpu().numpy()
 
-        start_mask = ~np.all(pcd == 0, axis=1)  # Remove 0 points
-        end_mask = ~np.all(pcd == 0, axis=1)  # Remove 0 points
+        mask = ~np.all(pcd == 0, axis=1)  # Remove 0 points
         pred_pcd = pcd + pred
         gt_pcd = pcd + gt
+
+        # All points cloud are in the start image's coordinate frame
+        # We need to visualize the end image, therefore need to apply transform
+        # Transform the point clouds to align with end image coordinate frame
+        pcd_endframe = np.hstack((pcd, np.ones((pcd.shape[0], 1))))
+        pcd_endframe = (end2start @ pcd_endframe.T).T[:, :3]
+        pred_pcd = np.hstack((pred_pcd, np.ones((pred_pcd.shape[0], 1))))
+        pred_pcd = (end2start @ pred_pcd.T).T[:, :3]
+        gt_pcd = np.hstack((gt_pcd, np.ones((gt_pcd.shape[0], 1))))
+        gt_pcd = (end2start @ gt_pcd.T).T[:, :3]
 
         K = batch["intrinsics"][viz_idx].cpu().numpy()
 
@@ -294,28 +309,46 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         )
 
         ### Project tracks to image and save
-        init_rgb_proj = project_pcd_on_image(pcd, start_mask, rgb_init, K, RED)
-        end_rgb_proj = project_pcd_on_image(gt_pcd, end_mask, rgb_end, K, RED)
-        pred_rgb_proj = project_pcd_on_image(pred_pcd, end_mask, rgb_end, K, BLUE)
+        init_rgb_proj = project_pcd_on_image(pcd, mask, rgb_init, K, GREEN)
+        end_rgb_proj = project_pcd_on_image(gt_pcd, mask, rgb_end, K, RED)
+        pred_rgb_proj = project_pcd_on_image(pred_pcd, mask, rgb_end, K, BLUE)
         rgb_proj_viz = cv2.hconcat([init_rgb_proj, end_rgb_proj, pred_rgb_proj])
         rgb_proj_viz = cv2.resize(rgb_proj_viz, (0, 0), fx=0.25, fy=0.25)
 
         wandb_proj_img = wandb.Image(
             rgb_proj_viz,
-            caption=f"Left: Initial Frame (GT Track)\n; Middle: Final Frame (GT Track)\n; Right: Final Frame (Pred Track)\n; Goal Description : {goal_text}",
-        )
-        wandb.log(
-            {f"{tag}/track_projected_to_rgb": wandb_proj_img},
-            commit=False,
+            caption=f"Left: Initial Frame (GT Track)\n; Middle: Final Frame (GT Track)\n\
+            ; Right: Final Frame (Pred Track)\n; Goal Description : {goal_text};\n\
+            video path = {vid_name}",
         )
         ###
 
-        # Visualize 3D point cloud
+        # Visualize point cloud
         viz_pcd = get_img_and_track_pcd(
-            rgb_end, depth_end, K, pred_pcd, gt_pcd, BLUE, RED
+            rgb_end,
+            depth_end,
+            K,
+            mask,
+            pcd_endframe,
+            gt_pcd,
+            pred_pcd,
+            GREEN,
+            RED,
+            BLUE,
         )
+        ###
+
+        # Render video of point cloud
+        pcd_video = create_point_cloud_frames(viz_pcd)
+        pcd_video = np.transpose(pcd_video, (0, 3, 1, 2))
+
         wandb.log(
-            {f"{tag}/image_and_tracks_pcd": wandb.Object3D(viz_pcd)},
+            {
+                f"{tag}/track_projected_to_rgb": wandb_proj_img,
+                f"{tag}/image_and_tracks_pcd": wandb.Object3D(viz_pcd),
+                f"{tag}/pcd_video": wandb.Video(pcd_video, fps=6, format="webm"),
+                "trainer/global_step": self.global_step,
+            },
         )
         ###
 
@@ -336,7 +369,7 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
 
         # determine if additional logging should be done
         do_additional_logging = (
-            batch_idx % self.additional_train_logging_period == 0
+            self.global_step % self.additional_train_logging_period == 0
             and self.trainer.is_global_zero
         )
 
@@ -401,8 +434,10 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         return pred_dict
 
     def on_validation_epoch_end(self):
-        rmse = torch.stack([x["rmse"] for x in self.val_outputs]).mean()
-        chamfer_dist = torch.stack([x["chamfer_dist"] for x in self.val_outputs]).mean()
+        rmse = torch.stack([x["rmse"].mean() for x in self.val_outputs]).mean()
+        chamfer_dist = torch.stack(
+            [x["chamfer_dist"].mean() for x in self.val_outputs]
+        ).mean()
         ####################################################
         # logging validation metrics
         ####################################################

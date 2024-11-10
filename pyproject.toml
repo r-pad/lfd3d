@@ -15,7 +15,6 @@ dependencies = [
   "hydra-core == 1.3.2",
   "lightning == 2.0.3",
   "omegaconf == 2.3.0",
-  "pandas",
   "numpy == 1.25",
   "torch == 2.0.1",        # CUDA 11.8
   "torchmetrics",
@@ -24,6 +23,8 @@ dependencies = [
   "rpad-pyg @ git+https://github.com/r-pad/pyg_libs.git",
   "rpad-visualize-3d @ git+https://github.com/r-pad/visualize_3d.git",
   "timm == 0.9.12",
+  "tensorflow-cpu == 2.8",
+  "tensorflow-datasets",
 ]
 
 [build-system]
@@ -36,7 +37,6 @@ develop = [
   "black == 23.3.0",
   "isort == 5.12.0",
   "mypy == 1.3.0",
-  "pandas-stubs == 2.0.2.230605",
   "pylint == 2.17.4",
   "pytest == 7.3.2",
   "pre-commit == 3.3.3",
@@ -64,7 +64,7 @@ namespace_packages = true
 explicit_package_bases = true
 
 [[tool.mypy.overrides]]
-module = ["torchvision.*", "diffusers", "non_rigid.*", "pytorch3d.transforms", "timm.*", "open3d", "sentence_transformers", "tqdm.auto"]
+module = ["torchvision.*", "diffusers", "pytorch3d.transforms", "timm.*", "open3d", "sentence_transformers", "tqdm.auto", "tensorflow_datasets"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
