@@ -23,8 +23,7 @@ ENV PYENV_ROOT="$CODING_ROOT/.pyenv"
 ENV PATH="$PYENV_ROOT/shims:$PYENV_ROOT/bin:$PATH"
 
 # Install Python 3.10 using pyenv
-RUN pyenv install 3.10.0
-RUN pyenv global 3.10.0
+RUN pyenv install 3.10.0 && pyenv global 3.10.0
 
 # Make the working directory the home directory
 RUN mkdir $CODING_ROOT/code
@@ -35,8 +34,8 @@ COPY ./src $CODING_ROOT/code/src
 COPY ./setup.py $CODING_ROOT/code/setup.py
 COPY ./pyproject.toml $CODING_ROOT/code/pyproject.toml
 COPY ./requirements.txt $CODING_ROOT/code/requirements.txt
-RUN pip install -r requirements.txt
-RUN pip install -e .[develop]
+RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -e .[develop]
 
 # Changes to the configs and scripts will not require a rebuild
 COPY ./configs $CODING_ROOT/code/configs
@@ -44,11 +43,8 @@ COPY ./scripts $CODING_ROOT/code/scripts
 
 RUN git config --global --add safe.directory /root/code
 
-# Make a data directory.
-RUN mkdir $CODING_ROOT/data
-
-# Make a logs directory.
-RUN mkdir $CODING_ROOT/logs
+# Make a data and logs directory.
+RUN mkdir $CODING_ROOT/data $CODING_ROOT/logs
 
 # Set up the entry point
 CMD ["python", "-c", "import torch; print(torch.cuda.is_available())"]
