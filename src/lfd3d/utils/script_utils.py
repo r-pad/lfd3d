@@ -1,27 +1,11 @@
 import os
 import pathlib
-from functools import partial
 from typing import Dict, List, Sequence, Union, cast
 
 import torch
 import torch.utils._pytree as pytree
 import wandb
 from lightning.pytorch import Callback
-from non_rigid.datasets.proc_cloth_flow import ProcClothFlowDataModule
-from non_rigid.models.df_base import (
-    DiffusionFlowBase,
-    FlowPredictionInferenceModule,
-    FlowPredictionTrainingModule,
-    PointPredictionInferenceModule,
-    PointPredictionTrainingModule,
-)
-from non_rigid.models.regression import (
-    LinearRegression,
-    LinearRegressionInferenceModule,
-    LinearRegressionTrainingModule,
-    RegressionModule,
-    RegressionNetwork,
-)
 from pytorch_lightning.loggers import WandbLogger
 
 from lfd3d.datasets.hoi4d import HOI4DDataModule
@@ -35,64 +19,6 @@ from lfd3d.models.tax3d import (
 PROJECT_ROOT = str(pathlib.Path(__file__).parent.parent.parent.parent.resolve())
 
 
-def create_model_legacy(cfg):
-    if cfg.model.name in ["df_base", "df_cross"]:
-        network_fn = DiffusionFlowBase
-        if cfg.mode == "train":
-            # tax3d training modules
-            if cfg.model.type == "flow":
-                module_fn = partial(
-                    FlowPredictionTrainingModule, training_cfg=cfg.training
-                )
-            elif cfg.model.type == "point":
-                module_fn = partial(
-                    PointPredictionTrainingModule,
-                    task_type=cfg.task_type,
-                    training_cfg=cfg.training,
-                )
-            else:
-                raise ValueError(f"Invalid model type: {cfg.model.type}")
-        elif cfg.mode == "eval":
-            # tax3d inference modules
-            if cfg.model.type == "flow":
-                module_fn = partial(
-                    FlowPredictionInferenceModule, inference_cfg=cfg.inference
-                )
-            elif cfg.model.type == "point":
-                module_fn = partial(
-                    PointPredictionInferenceModule,
-                    task_type=cfg.task_type,
-                    inference_cfg=cfg.inference,
-                )
-            else:
-                raise ValueError(f"Invalid model type: {cfg.model.type}")
-        else:
-            raise ValueError(f"Invalid mode: {cfg.mode}")
-    elif cfg.model.name == "linear_regression":
-        assert cfg.model.type == "point", "Only point regression is supported."
-        network_fn = LinearRegression
-        if cfg.mode == "train":
-            # linear training module
-            module_fn = partial(
-                LinearRegressionTrainingModule, training_cfg=cfg.training
-            )
-        elif cfg.mode == "eval":
-            # linear inference module
-            module_fn = partial(
-                LinearRegressionInferenceModule, inference_cfg=cfg.inference
-            )
-        else:
-            raise ValueError(f"Invalid mode: {cfg.mode}")
-    else:
-        raise ValueError(f"Invalid model name: {cfg.model.name}")
-    # create network
-    network = network_fn(model_cfg=cfg.model)
-    model = module_fn(network=network, model_cfg=cfg.model)
-
-    # TODO: this should also check for a checkpoint id, and setup the network
-    return network, model
-
-
 def create_model(cfg):
     if cfg.model.name == "df_base":
         network_fn = DiffusionTransformerNetwork
@@ -102,9 +28,6 @@ def create_model(cfg):
         network_fn = DiffusionTransformerNetwork
         # module_fn = Tax3dModule
         module_fn = CrossDisplacementModule
-    elif cfg.model.name == "regression":
-        network_fn = RegressionNetwork
-        module_fn = RegressionModule
 
     # create network and model
     network = network_fn(model_cfg=cfg.model)
@@ -121,8 +44,6 @@ def create_datamodule(cfg):
         )
 
     # check dataset name
-    if cfg.dataset.name == "proc_cloth":
-        datamodule_fn = ProcClothFlowDataModule
     elif cfg.dataset.name == "hoi4d":
         datamodule_fn = HOI4DDataModule
     elif cfg.dataset.name == "rt1":

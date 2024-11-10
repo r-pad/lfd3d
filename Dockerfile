@@ -36,7 +36,6 @@ COPY ./setup.py $CODING_ROOT/code/setup.py
 COPY ./pyproject.toml $CODING_ROOT/code/pyproject.toml
 COPY ./requirements.txt $CODING_ROOT/code/requirements.txt
 RUN pip install -r requirements.txt
-RUN pip install --no-deps git+https://github.com/ey-cai/non-rigid.git@articulated
 RUN pip install -e .[develop]
 
 # Changes to the configs and scripts will not require a rebuild

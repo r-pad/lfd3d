@@ -279,6 +279,7 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         end2start = np.linalg.inv(batch["start2end"][viz_idx].cpu().numpy())
 
         goal_text = batch["caption"][viz_idx]
+        vid_name = batch["vid_name"][viz_idx]
         pcd = batch["start_pcd"][viz_idx].cpu().numpy()
         gt = batch[self.prediction_type][viz_idx].cpu().numpy()
 
@@ -316,11 +317,9 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
 
         wandb_proj_img = wandb.Image(
             rgb_proj_viz,
-            caption=f"Left: Initial Frame (GT Track)\n; Middle: Final Frame (GT Track)\n; Right: Final Frame (Pred Track)\n; Goal Description : {goal_text}",
-        )
-        wandb.log(
-            {f"{tag}/track_projected_to_rgb": wandb_proj_img},
-            commit=False,
+            caption=f"Left: Initial Frame (GT Track)\n; Middle: Final Frame (GT Track)\n\
+            ; Right: Final Frame (Pred Track)\n; Goal Description : {goal_text};\n\
+            video path = {vid_name}",
         )
         ###
 
@@ -337,16 +336,19 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
             RED,
             BLUE,
         )
-        wandb.log(
-            {f"{tag}/image_and_tracks_pcd": wandb.Object3D(viz_pcd)},
-        )
         ###
 
         # Render video of point cloud
         pcd_video = create_point_cloud_frames(viz_pcd)
         pcd_video = np.transpose(pcd_video, (0, 3, 1, 2))
+
         wandb.log(
-            {f"{tag}/pcd_video": wandb.Video(pcd_video, fps=6, format="webm")},
+            {
+                f"{tag}/track_projected_to_rgb": wandb_proj_img,
+                f"{tag}/image_and_tracks_pcd": wandb.Object3D(viz_pcd),
+                f"{tag}/pcd_video": wandb.Video(pcd_video, fps=6, format="webm"),
+                "trainer/global_step": self.global_step,
+            },
         )
         ###
 
