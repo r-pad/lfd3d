@@ -81,9 +81,10 @@ def calc_pcd_metrics(pred_dict, pcd, pred, gt):
     """
     pred_pcd = pcd + pred
     gt_pcd = pcd + gt
+    mask = pcd.norm(dim=-1) != 0  # Filter out padding
 
-    pred_dict["rmse"] = rmse_pcd(pred_pcd, gt_pcd)
-    pred_dict["chamfer_dist"] = chamfer_distance(pred_pcd, gt_pcd)
+    pred_dict["rmse"] = rmse_pcd(pred_pcd, gt_pcd, mask)
+    pred_dict["chamfer_dist"] = chamfer_distance(pred_pcd, gt_pcd, mask)
     return pred_dict
 
 

@@ -64,11 +64,12 @@ class HOI4DDataset(data.Dataset):
         cam_trajectory = o3d.io.read_pinhole_camera_trajectory(
             f"{dir_name}/3Dseg/output.log"
         )
-        K = (
-            cam_trajectory.parameters[0]
-            .intrinsic.intrinsic_matrix.astype(np.float32)
-            .copy()
-        )
+        # A bit hacky.
+        # Camera intrinsics are expected to be placed one level above hoi4d dir
+        # with the directory name "camera_params"
+        cam_name = dir_name.split("/")[-7]
+        cam_param_pathname = f"{self.dataset_dir}/../camera_params/{cam_name}/"
+        K = np.load(f"{cam_param_pathname}/intrin.npy")
         cam2world = np.array([i.extrinsic for i in cam_trajectory.parameters])
         return K, cam2world
 
@@ -128,16 +129,6 @@ class HOI4DDataset(data.Dataset):
 
         K, cam2world = self.load_camera_params(dir_name)
 
-        tracks = np.load(f"{dir_name}/spatracker_3d_tracks.npy")
-        # Pad points on the "left" to have common size for batching
-        tracks = np.pad(tracks, ((0, 0), (self.PAD_SIZE - tracks.shape[1], 0), (0, 0)))
-        # A few videos don't have any valid tracks, a check to avoid div by 0.
-        if tracks.max() != 0:
-            # SpatialTracker tracks u,v in image plane and z in 3d.
-            # Unproject u,v to x,y
-            tracks[:, :, 0] = ((tracks[:, :, 0] - K[0, 2]) * tracks[:, :, 2]) / K[0, 0]
-            tracks[:, :, 1] = ((tracks[:, :, 1] - K[1, 2]) * tracks[:, :, 2]) / K[1, 1]
-
         # Get the object name from the pose file.
         # The dataset does not have a consistent naming scheme .......
         objpose_fname = f"{dir_name}/objpose/0.json"
@@ -148,17 +139,41 @@ class HOI4DDataset(data.Dataset):
         event, event_start_idx, event_end_idx = self.load_event(dir_name)
         event_name = event["event"]
 
+        rgbs, depths = self.load_rgbd(dir_name, event_start_idx, event_end_idx)
+
+        tracks = np.load(f"{dir_name}/spatracker_3d_tracks.npy")
+
+        start_tracks = tracks[event_start_idx]
+        ty = np.clip(start_tracks[:, 1].round().astype(int), 0, rgbs[0].shape[0] - 1)
+        tx = np.clip(start_tracks[:, 0].round().astype(int), 0, rgbs[0].shape[1] - 1)
+        start_tracks[:, 2] = depths[0][ty, tx]
+        start_tracks = np.pad(
+            start_tracks, ((self.PAD_SIZE - start_tracks.shape[0], 0), (0, 0))
+        )
+        start_tracks[:, 0] = ((start_tracks[:, 0] - K[0, 2]) * start_tracks[:, 2]) / K[
+            0, 0
+        ]
+        start_tracks[:, 1] = ((start_tracks[:, 1] - K[1, 2]) * start_tracks[:, 2]) / K[
+            1, 1
+        ]
+
+        end_tracks = tracks[event_end_idx]
+        ty = np.clip(end_tracks[:, 1].round().astype(int), 0, rgbs[0].shape[0] - 1)
+        tx = np.clip(end_tracks[:, 0].round().astype(int), 0, rgbs[0].shape[1] - 1)
+        end_tracks[:, 2] = depths[1][ty, tx]
+        end_tracks = np.pad(
+            end_tracks, ((self.PAD_SIZE - end_tracks.shape[0], 0), (0, 0))
+        )
+        end_tracks[:, 0] = ((end_tracks[:, 0] - K[0, 2]) * end_tracks[:, 2]) / K[0, 0]
+        end_tracks[:, 1] = ((end_tracks[:, 1] - K[1, 2]) * end_tracks[:, 2]) / K[1, 1]
+
         # Register the tracks at the end of the chunk with respect
         # to the coordinate frame at the beginning of the chunk
         start2world = cam2world[event_start_idx]
         end2world = cam2world[event_end_idx]
-        start_tracks = tracks[event_start_idx]
-        end_tracks = tracks[event_end_idx]
         end_tracks = np.hstack((end_tracks, np.ones((end_tracks.shape[0], 1))))
         start2end = start2world @ np.linalg.inv(end2world)
         end_tracks = (start2end @ end_tracks.T).T[:, :3].astype(np.float32)
-
-        rgbs, depths = self.load_rgbd(dir_name, event_start_idx, event_end_idx)
 
         caption = f"{event_name} {obj_name}"
         item = {
