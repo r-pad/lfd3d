@@ -19,17 +19,7 @@ class HOI4DDataset(data.Dataset):
         self.data_files = sorted(
             glob(f"{self.dataset_dir}/**/image.mp4", recursive=True)
         )
-        split_files = self.load_split(split)
-        # Keep only the files that are in the requested split
-        self.data_files = sorted(
-            list(set(self.data_files).intersection(set(split_files)))
-        )
-        self.num_demos = len(self.data_files)
-        self.dataset_cfg = dataset_cfg
-
-        self.size = self.num_demos
-        self.PAD_SIZE = 1000
-        # Events where there is meaningfully described object motion
+        # Events where there is meaningful object motion
         self.valid_event_types = [
             "Pickup",
             "close",
@@ -40,8 +30,47 @@ class HOI4DDataset(data.Dataset):
             "putdown",
         ]
 
+        split_files = self.load_split(split)
+        # Keep only the files that are in the requested split
+        self.data_files = sorted(
+            list(set(self.data_files).intersection(set(split_files)))
+        )
+        self.data_files = self.expand_all_events(split)
+
+        self.num_demos = len(self.data_files)
+        self.dataset_cfg = dataset_cfg
+
+        self.size = self.num_demos
+        self.PAD_SIZE = 1000
+
     def __len__(self):
         return self.size
+
+    def expand_all_events(self, split):
+        """During training, we randomly sample one event
+        from a video. For val and test, we want to evaluate
+        on *all* events in all videos. This function /expands/
+        each file to have an associated event_idx. However,
+        for train, it just sets the event_idx to None so that a
+        random event can be sampled."""
+        if split == "train":
+            expanded_data_files = [(f, None) for f in self.data_files]
+        else:
+            expanded_data_files = []
+            for f in self.data_files:
+                dir_name = os.path.dirname(os.path.dirname(f))
+                action_annotation = json.load(open(f"{dir_name}/action/color.json"))
+                if "events" in action_annotation:
+                    all_events = action_annotation["events"]
+                else:
+                    all_events = action_annotation["markResult"]["marks"]
+                valid_events = [
+                    i for i in all_events if i["event"] in self.valid_event_types
+                ]
+                expanded_data_files.extend(
+                    [(f, idx) for idx in range(len(valid_events))]
+                )
+        return expanded_data_files
 
     def load_split(self, split):
         """
@@ -73,7 +102,7 @@ class HOI4DDataset(data.Dataset):
         cam2world = np.array([i.extrinsic for i in cam_trajectory.parameters])
         return K, cam2world
 
-    def load_event(self, dir_name):
+    def load_event(self, dir_name, event_idx):
         action_annotation = json.load(open(f"{dir_name}/action/color.json"))
         # The dataset does not have a consistent naming scheme .......
         try:
@@ -81,21 +110,21 @@ class HOI4DDataset(data.Dataset):
             fps = 300 / action_annotation["info"]["duration"]
             # Filter out useful events
             all_events = action_annotation["events"]
-            valid_events = [
-                i for i in all_events if i["event"] in self.valid_event_types
-            ]
+        except KeyError:
+            fps = 300 / action_annotation["info"]["Duration"]
+            all_events = action_annotation["markResult"]["marks"]
+
+        valid_events = [i for i in all_events if i["event"] in self.valid_event_types]
+        if event_idx is None:
             event = random.choice(valid_events)
+        else:
+            event = valid_events[event_idx]
+
+        try:
             # Convert timestamp in seconds to frame_idx
             event_start_idx = int(event["startTime"] * fps)
             event_end_idx = int(event["endTime"] * fps) - 1
         except KeyError:
-            # 300 frames per video, 30 or 15 fps depending on length of video
-            fps = 300 / action_annotation["info"]["Duration"]
-            all_events = action_annotation["markResult"]["marks"]
-            valid_events = [
-                i for i in all_events if i["event"] in self.valid_event_types
-            ]
-            event = random.choice(valid_events)
             event_start_idx = int(event["hdTimeStart"] * fps)
             event_end_idx = int(event["hdTimeEnd"] * fps) - 1
         return event, event_start_idx, event_end_idx
@@ -124,7 +153,7 @@ class HOI4DDataset(data.Dataset):
         return rgbs, depths
 
     def __getitem__(self, index):
-        vid_name = self.data_files[index]
+        vid_name, event_idx = self.data_files[index]
         dir_name = os.path.dirname(os.path.dirname(vid_name))
 
         K, cam2world = self.load_camera_params(dir_name)
@@ -136,7 +165,7 @@ class HOI4DDataset(data.Dataset):
             objpose_fname = f"{dir_name}/objpose/00000.json"
         obj_name = json.load(open(objpose_fname))["dataList"][0]["label"]
 
-        event, event_start_idx, event_end_idx = self.load_event(dir_name)
+        event, event_start_idx, event_end_idx = self.load_event(dir_name, event_idx)
         event_name = event["event"]
 
         rgbs, depths = self.load_rgbd(dir_name, event_start_idx, event_end_idx)
