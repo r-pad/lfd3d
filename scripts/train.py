@@ -8,7 +8,12 @@ import wandb
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import WandbLogger
 
-from lfd3d.utils.script_utils import create_datamodule, create_model
+from lfd3d.utils.script_utils import (
+    PROJECT_ROOT,
+    create_datamodule,
+    create_model,
+    match_fn,
+)
 
 
 @hydra.main(config_path="../configs", config_name="train", version_base="1.3")
@@ -121,19 +126,6 @@ def main(cfg):
         log_every_n_steps=len(datamodule.train_dataloader()) // 16,
         gradient_clip_val=cfg.training.grad_clip_norm,
         callbacks=[
-            # Callback which logs whatever visuals (i.e. dataset examples, preds, etc.) we want.
-            # LogPredictionSamplesCallback(logger),
-            # This checkpoint callback saves the latest model during training, i.e. so we can resume if it crashes.
-            # It saves everything, and you can load by referencing last.ckpt.
-            ModelCheckpoint(
-                dirpath=cfg.lightning.checkpoint_dir,
-                filename="{epoch}-{step}",
-                monitor="step",
-                mode="max",
-                save_weights_only=False,
-                save_last=True,
-            ),
-            # This checkpoint will get saved to WandB. The Callback mechanism in lightning is poorly designed, so we have to put it last.
             ModelCheckpoint(
                 dirpath=cfg.lightning.checkpoint_dir,
                 filename="{epoch}-{step}-{val/rmse:.3f}",
@@ -155,8 +147,7 @@ def main(cfg):
 
     # Log the code used to train the model. Make sure not to log too much, because it will be too big.
     if trainer.is_global_zero:
-        wandb.init(project="lfd3d")
-        wandb.run.log_code(
+        logger.experiment.log_code(
             root=PROJECT_ROOT,
             include_fn=match_fn(
                 dirs=["configs", "scripts", "src"],
