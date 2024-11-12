@@ -8,12 +8,7 @@ import wandb
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import WandbLogger
 
-from lfd3d.utils.script_utils import (
-    PROJECT_ROOT,
-    create_datamodule,
-    create_model,
-    match_fn,
-)
+from lfd3d.utils.script_utils import create_datamodule, create_model
 
 
 @hydra.main(config_path="../configs", config_name="train", version_base="1.3")

@@ -6,6 +6,7 @@ import torch
 import torch.utils._pytree as pytree
 import wandb
 from lightning.pytorch import Callback
+from omegaconf import OmegaConf
 from pytorch_lightning.loggers import WandbLogger
 
 from lfd3d.datasets.hoi4d import HOI4DDataModule
@@ -171,3 +172,56 @@ class CustomModelPlotsCallback(Callback):
             },
             step=trainer.global_step,
         )
+
+
+def load_checkpoint_config_from_wandb(
+    current_cfg, task_overrides, entity, project, run_id
+):
+    # grab run config from wandb
+    api = wandb.Api()
+    run_cfg = OmegaConf.create(api.run(f"{entity}/{project}/{run_id}").config)
+
+    # check for consistency between task overrides and original run config
+    inconsistent_keys = []
+    for ovrd in task_overrides:
+        key = ovrd.split("=")[0]
+        # hack to skip data_dir overrides
+        if "data_dir" in key:
+            continue
+        # only check for consistency with dataset/model keys
+        if key.split(".")[0] not in ["dataset", "model"]:
+            continue
+        if OmegaConf.select(current_cfg, key) != OmegaConf.select(run_cfg, key):
+            inconsistent_keys.append(key)
+
+    # for now, just raise an error if there are any inconsistencies
+    if inconsistent_keys:
+        raise ValueError(
+            f"Task overrides are inconsistent with original run config: {inconsistent_keys}"
+        )
+
+    # hack to keep data_dir override
+    current_data_dir = current_cfg.dataset.data_dir
+
+    # update run config with dataset and model configs from original run config
+    OmegaConf.update(
+        current_cfg,
+        "dataset",
+        OmegaConf.select(run_cfg, "dataset"),
+        merge=True,
+        force_add=True,
+    )
+    OmegaConf.update(
+        current_cfg,
+        "model",
+        OmegaConf.select(run_cfg, "model"),
+        merge=True,
+        force_add=True,
+    )
+
+    # small edge case - if 'eval', ignore 'train_size'/'val_size'
+    if current_cfg.mode == "eval":
+        current_cfg.dataset.train_size = None
+        current_cfg.dataset.val_size = None
+    current_cfg.dataset.data_dir = current_data_dir
+    return current_cfg
