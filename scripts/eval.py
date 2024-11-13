@@ -74,9 +74,11 @@ def main(cfg):
         ckpt_file = checkpoint_reference
     # Load the network weights.
     ckpt = torch.load(ckpt_file, map_location=device)
-    network.load_state_dict(
-        {k.partition(".")[2]: v for k, v, in ckpt["state_dict"].items()}
-    )
+    # HACK: The text embedding model doesn't get loaded correctly
+    # Just remove it before loading since it's a pretrained model anyway
+    # Ideally, we wouldn't even log it to WandB,
+    state_dict = {k: v for k, v in ckpt["state_dict"].items() if "text_embed" not in k}
+    network.load_state_dict({k.partition(".")[2]: v for k, v, in state_dict.items()})
     # set model to eval mode
     network.eval()
     model.eval()
@@ -106,8 +108,27 @@ def main(cfg):
     # function is.
     ######################################################################
 
-    breakpoint()
-    test_outputs = trainer.predict(model, dataloaders=[datamodule.test_dataloader()])
+    test_preds_list = trainer.predict(model, dataloaders=[datamodule.test_dataloader()])
+    # Flatten into dict
+    test_preds = {}
+    for key in test_preds_list[0].keys():
+        if type(test_preds_list[0][key]) == torch.Tensor:
+            test_preds[key] = torch.cat([i[key] for i in test_preds_list])
+        else:
+            test_preds[key] = []
+            for i in test_preds_list:
+                test_preds[key].extend(i[key])
+
+    # Upload output to wandb
+    wandb.init(entity="r-pad", project="lfd3d", id=cfg.checkpoint.run_id, resume="must")
+    table = wandb.Table(columns=list(test_preds.keys()))
+    num_rows = len(next(iter(test_preds.values())))
+
+    for i in range(num_rows):
+        row = [test_preds[key][i] for key in test_preds.keys()]
+        table.add_data(*row)
+    wandb.log({"test_results": table})
+    wandb.finish()
 
 
 if __name__ == "__main__":

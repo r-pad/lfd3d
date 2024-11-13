@@ -55,9 +55,6 @@ def create_datamodule(cfg):
     # job-specific datamodule pre-processing
     if cfg.mode == "eval":
         job_cfg = cfg.inference
-        # check for full action
-        if job_cfg.action_full:
-            cfg.dataset.sample_size_action = -1
         stage = "predict"
     elif cfg.mode == "train":
         job_cfg = cfg.training

@@ -1,1 +1,4 @@
-batch_size: 128
+batch_size: 16
+val_batch_size: 16
+sample_size: None # Set by the training loop, from dataset config.
+sample_size_anchor: None # Set by the training loop, from dataset config.

@@ -16,6 +16,17 @@ class HOI4DDataset(data.Dataset):
         self.root = root
         self.split = split
         self.dataset_dir = self.root
+
+        # SpatialTracker could not track the points in these files.
+        self.blacklisted_files = set(
+            [
+                f"{self.dataset_dir}/ZY20210800002/H2/C18/N26/S183/s01/T2/align_rgb/image.mp4",
+                f"{self.dataset_dir}/ZY20210800004/H4/C18/N19/S160/s05/T1/align_rgb/image.mp4",
+                f"{self.dataset_dir}/ZY20210800004/H4/C18/N26/S162/s02/T1/align_rgb/image.mp4",
+                f"{self.dataset_dir}/ZY20210800003/H3/C13/N50/S203/s02/T4/align_rgb/image.mp4",
+            ]
+        )
+
         self.data_files = sorted(
             glob(f"{self.dataset_dir}/**/image.mp4", recursive=True)
         )
@@ -32,9 +43,10 @@ class HOI4DDataset(data.Dataset):
 
         split_files = self.load_split(split)
         # Keep only the files that are in the requested split
-        self.data_files = sorted(
-            list(set(self.data_files).intersection(set(split_files)))
+        self.data_files = (
+            set(self.data_files).intersection(set(split_files)) - self.blacklisted_files
         )
+        self.data_files = sorted(list(self.data_files))
         self.data_files = self.expand_all_events(split)
 
         self.num_demos = len(self.data_files)

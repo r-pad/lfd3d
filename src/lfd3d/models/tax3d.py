@@ -171,8 +171,6 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
             )
         elif self.mode == "eval":
             self.run_cfg = cfg.inference
-            # inference-specific params
-            self.num_trials = self.run_cfg.num_trials
         else:
             raise ValueError(f"Invalid mode: {self.mode}")
 
@@ -465,8 +463,16 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         Prediction step for model evaluation.
         """
         pred_dict = self.predict(batch)
+        pred = pred_dict[self.prediction_type]["pred"]
+        ground_truth = batch[self.label_key].to(self.device)
+        start_pcd = batch["start_pcd"]
+        pred_dict = calc_pcd_metrics(pred_dict, start_pcd, pred, ground_truth)
+
         return {
             "rmse": pred_dict["rmse"],
+            "chamfer_dist": pred_dict["chamfer_dist"],
+            "vid_name": batch["vid_name"],
+            "caption": batch["caption"],
         }
 
 

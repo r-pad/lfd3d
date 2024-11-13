@@ -15,8 +15,8 @@ def rmse_pcd(x, y, mask):
     assert len(y.shape) == 3
 
     rmse = []
-    for pcd_x, pcd_y, mask in zip(x, y, mask):
-        pcd_x, pcd_y = pcd_x[mask], pcd_y[mask]
+    for pcd_x, pcd_y, pcd_mask in zip(x, y, mask):
+        pcd_x, pcd_y = pcd_x[pcd_mask], pcd_y[pcd_mask]
         rmse.append(((pcd_x - pcd_y) ** 2).mean() ** 0.5)
     rmse = torch.stack(rmse)
     return rmse
@@ -35,8 +35,8 @@ def chamfer_distance(x, y, mask):
     assert len(y.shape) == 3
 
     chamfer_dist = []
-    for pcd_x, pcd_y, mask in zip(x, y, mask):
-        pcd_x, pcd_y = pcd_x[mask], pcd_y[mask]
+    for pcd_x, pcd_y, pcd_mask in zip(x, y, mask):
+        pcd_x, pcd_y = pcd_x[pcd_mask], pcd_y[pcd_mask]
 
         # Compute squared distances from each point in x to the closest point in y
         dist_x_to_y = torch.cdist(pcd_x, pcd_y)  # Pairwise distances between all points
