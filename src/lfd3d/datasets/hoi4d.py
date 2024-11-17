@@ -170,6 +170,47 @@ class HOI4DDataset(data.Dataset):
         depths = np.array([depth_init, depth_end])
         return rgbs, depths
 
+    def process_and_register_tracks(
+        self, dir_name, event_start_idx, event_end_idx, depths, K, cam2world
+    ):
+        """
+        Load the tracks corresponding to the start and end of the event.
+        Unproject the tracks to 3D point clouds, register the point cloud
+        `end_tracks` to the `start_tracks` coordinate frame.
+        """
+        tracks = np.load(f"{dir_name}/spatracker_3d_tracks.npy")
+        start_tracks = tracks[event_start_idx]
+
+        # Clip to image boundaries, unproject
+        ty = np.clip(start_tracks[:, 1].round().astype(int), 0, depths[0].shape[0] - 1)
+        tx = np.clip(start_tracks[:, 0].round().astype(int), 0, depths[0].shape[1] - 1)
+        start_tracks[:, 2] = depths[0][ty, tx]
+        start_tracks[:, 0] = ((start_tracks[:, 0] - K[0, 2]) * start_tracks[:, 2]) / K[
+            0, 0
+        ]
+        start_tracks[:, 1] = ((start_tracks[:, 1] - K[1, 2]) * start_tracks[:, 2]) / K[
+            1, 1
+        ]
+
+        end_tracks = tracks[event_end_idx]
+
+        # Clip to image boundaries, unproject
+        ty = np.clip(end_tracks[:, 1].round().astype(int), 0, depths[0].shape[0] - 1)
+        tx = np.clip(end_tracks[:, 0].round().astype(int), 0, depths[0].shape[1] - 1)
+        end_tracks[:, 2] = depths[1][ty, tx]
+        end_tracks[:, 0] = ((end_tracks[:, 0] - K[0, 2]) * end_tracks[:, 2]) / K[0, 0]
+        end_tracks[:, 1] = ((end_tracks[:, 1] - K[1, 2]) * end_tracks[:, 2]) / K[1, 1]
+
+        # Register the tracks at the end of the chunk with respect
+        # to the coordinate frame at the beginning of the chunk
+        start2world = cam2world[event_start_idx]
+        end2world = cam2world[event_end_idx]
+        end_tracks = np.hstack((end_tracks, np.ones((end_tracks.shape[0], 1))))
+        start2end = start2world @ np.linalg.inv(end2world)
+        end_tracks = (start2end @ end_tracks.T).T[:, :3].astype(np.float32)
+
+        return start_tracks, end_tracks, start2end
+
     def __getitem__(self, index):
         vid_name, event_idx = self.data_files[index]
         dir_name = os.path.dirname(os.path.dirname(vid_name))
@@ -187,34 +228,9 @@ class HOI4DDataset(data.Dataset):
         event_name = event["event"]
 
         rgbs, depths = self.load_rgbd(dir_name, event_start_idx, event_end_idx)
-
-        tracks = np.load(f"{dir_name}/spatracker_3d_tracks.npy")
-
-        start_tracks = tracks[event_start_idx]
-        ty = np.clip(start_tracks[:, 1].round().astype(int), 0, rgbs[0].shape[0] - 1)
-        tx = np.clip(start_tracks[:, 0].round().astype(int), 0, rgbs[0].shape[1] - 1)
-        start_tracks[:, 2] = depths[0][ty, tx]
-        start_tracks[:, 0] = ((start_tracks[:, 0] - K[0, 2]) * start_tracks[:, 2]) / K[
-            0, 0
-        ]
-        start_tracks[:, 1] = ((start_tracks[:, 1] - K[1, 2]) * start_tracks[:, 2]) / K[
-            1, 1
-        ]
-
-        end_tracks = tracks[event_end_idx]
-        ty = np.clip(end_tracks[:, 1].round().astype(int), 0, rgbs[0].shape[0] - 1)
-        tx = np.clip(end_tracks[:, 0].round().astype(int), 0, rgbs[0].shape[1] - 1)
-        end_tracks[:, 2] = depths[1][ty, tx]
-        end_tracks[:, 0] = ((end_tracks[:, 0] - K[0, 2]) * end_tracks[:, 2]) / K[0, 0]
-        end_tracks[:, 1] = ((end_tracks[:, 1] - K[1, 2]) * end_tracks[:, 2]) / K[1, 1]
-
-        # Register the tracks at the end of the chunk with respect
-        # to the coordinate frame at the beginning of the chunk
-        start2world = cam2world[event_start_idx]
-        end2world = cam2world[event_end_idx]
-        end_tracks = np.hstack((end_tracks, np.ones((end_tracks.shape[0], 1))))
-        start2end = start2world @ np.linalg.inv(end2world)
-        end_tracks = (start2end @ end_tracks.T).T[:, :3].astype(np.float32)
+        start_tracks, end_tracks, start2end = self.process_and_register_tracks(
+            dir_name, event_start_idx, event_end_idx, depths, K, cam2world
+        )
 
         caption = f"{event_name} {obj_name}"
         item = {
