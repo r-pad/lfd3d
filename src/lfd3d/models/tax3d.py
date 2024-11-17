@@ -68,7 +68,7 @@ def encode_without_parallelism(text_embed_model, text):
     return embeddings
 
 
-def calc_pcd_metrics(pred_dict, pcd, pred, gt):
+def calc_pcd_metrics(pred_dict, pcd, pred, gt, padding_mask):
     """
     Calculate pcd metrics and update pred_dict with the keys.
     Creates point clouds to be measured by applying the predicted
@@ -78,13 +78,13 @@ def calc_pcd_metrics(pred_dict, pcd, pred, gt):
     pcd: Metric Point Cloud
     pred: Predicted cross displacement
     gt: GT cross displacement
+    padding_mask: Padding mask
     """
     pred_pcd = pcd + pred
     gt_pcd = pcd + gt
-    mask = pcd.norm(dim=-1) != 0  # Filter out padding
 
-    pred_dict["rmse"] = rmse_pcd(pred_pcd, gt_pcd, mask)
-    pred_dict["chamfer_dist"] = chamfer_distance(pred_pcd, gt_pcd, mask)
+    pred_dict["rmse"] = rmse_pcd(pred_pcd, gt_pcd, padding_mask)
+    pred_dict["chamfer_dist"] = chamfer_distance(pred_pcd, gt_pcd, padding_mask)
     return pred_dict
 
 
@@ -219,7 +219,9 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         """
         Forward pass to compute diffusion training loss.
         """
-        ground_truth = batch[self.label_key].permute(0, 2, 1)  # channel first
+        ground_truth = batch[self.label_key].points_padded()
+        ground_truth = ground_truth.permute(0, 2, 1)  # channel first
+        padding_mask = batch["padding_mask"]
         model_kwargs = self.get_model_kwargs(batch)
 
         # run diffusion
@@ -229,6 +231,7 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
             x_start=ground_truth,
             t=t,
             model_kwargs=model_kwargs,
+            padding_mask=padding_mask,
             # noise=noise,
         )
         loss = loss_dict["loss"].mean()
@@ -243,12 +246,11 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
             batch: the input batch
             progress: whether to show progress bar
         """
-        # TODO: replace bs with batch_size?
-        bs, sample_size = batch["start_pcd"].shape[:2]
+        batch_size, sample_size = batch[self.label_key].points_padded().shape[:2]
         model_kwargs = self.get_model_kwargs(batch)
 
         # generating latents and running diffusion
-        z = torch.randn(bs, 3, sample_size, device=self.device)
+        z = torch.randn(batch_size, 3, sample_size, device=self.device)
         pred, results = self.diffusion.p_sample_loop(
             self.network,
             z.shape,
@@ -271,8 +273,9 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
             pred_dict: the prediction dictionary
             tag: the tag to use for logging
         """
+        batch_size = batch[self.label_key].points_padded().shape[0]
         # pick a random sample in the batch to visualize
-        viz_idx = np.random.randint(0, batch["start_pcd"].shape[0])
+        viz_idx = np.random.randint(0, batch_size)
         RED, GREEN, BLUE = (255, 0, 0), (0, 255, 0), (0, 0, 255)
 
         pred = pred_dict[self.prediction_type]["pred"][viz_idx].cpu().numpy()
@@ -281,10 +284,10 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         goal_text = batch["caption"][viz_idx]
         vid_name = batch["vid_name"][viz_idx]
         rmse = pred_dict["rmse"][viz_idx]
-        pcd = batch["start_pcd"][viz_idx].cpu().numpy()
-        gt = batch[self.prediction_type][viz_idx].cpu().numpy()
+        pcd = batch["start_pcd"].points_padded()[viz_idx].cpu().numpy()
+        gt = batch[self.prediction_type].points_padded()[viz_idx].cpu().numpy()
 
-        mask = ~np.all(pcd == 0, axis=1)  # Remove 0 points
+        padding_mask = batch["padding_mask"][viz_idx].cpu().numpy()
         pred_pcd = pcd + pred
         gt_pcd = pcd + gt
 
@@ -310,9 +313,9 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         )
 
         ### Project tracks to image and save
-        init_rgb_proj = project_pcd_on_image(pcd, mask, rgb_init, K, GREEN)
-        end_rgb_proj = project_pcd_on_image(gt_pcd, mask, rgb_end, K, RED)
-        pred_rgb_proj = project_pcd_on_image(pred_pcd, mask, rgb_end, K, BLUE)
+        init_rgb_proj = project_pcd_on_image(pcd, padding_mask, rgb_init, K, GREEN)
+        end_rgb_proj = project_pcd_on_image(gt_pcd, padding_mask, rgb_end, K, RED)
+        pred_rgb_proj = project_pcd_on_image(pred_pcd, padding_mask, rgb_end, K, BLUE)
         rgb_proj_viz = cv2.hconcat([init_rgb_proj, end_rgb_proj, pred_rgb_proj])
         rgb_proj_viz = cv2.resize(rgb_proj_viz, (0, 0), fx=0.25, fy=0.25)
 
@@ -329,7 +332,7 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
             rgb_end,
             depth_end,
             K,
-            mask,
+            padding_mask,
             pcd_endframe,
             gt_pcd,
             pred_pcd,
@@ -358,9 +361,8 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         Training step for the module. Logs training metrics and visualizations to wandb.
         """
         self.train()
-        t = torch.randint(
-            0, self.diff_steps, (batch[self.label_key].shape[0],), device=self.device
-        ).long()
+        batch_size = batch[self.label_key].points_padded().shape[0]
+        t = torch.randint(0, self.diff_steps, (batch_size,), device=self.device).long()
         _, loss = self(batch, t)
         start_pcd = batch["start_pcd"]
         #########################################################
@@ -378,8 +380,15 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         if do_additional_logging:
             pred_dict = self.predict(batch)
             pred = pred_dict[self.prediction_type]["pred"]
+            padding_mask = batch["padding_mask"]
             ground_truth = batch[self.label_key].to(self.device)
-            pred_dict = calc_pcd_metrics(pred_dict, start_pcd, pred, ground_truth)
+            pred_dict = calc_pcd_metrics(
+                pred_dict,
+                start_pcd.points_padded(),
+                pred,
+                ground_truth.points_padded(),
+                padding_mask,
+            )
             train_metrics.update(pred_dict)
 
             ####################################################
@@ -439,7 +448,14 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         pred = pred_dict[self.prediction_type]["pred"]
         ground_truth = batch[self.label_key].to(self.device)
         start_pcd = batch["start_pcd"]
-        pred_dict = calc_pcd_metrics(pred_dict, start_pcd, pred, ground_truth)
+        padding_mask = batch["padding_mask"]
+        pred_dict = calc_pcd_metrics(
+            pred_dict,
+            start_pcd.points_padded(),
+            pred,
+            ground_truth.points_padded(),
+            padding_mask,
+        )
         self.val_outputs.append(pred_dict)
 
         ####################################################
@@ -475,7 +491,14 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         pred = pred_dict[self.prediction_type]["pred"]
         ground_truth = batch[self.label_key].to(self.device)
         start_pcd = batch["start_pcd"]
-        pred_dict = calc_pcd_metrics(pred_dict, start_pcd, pred, ground_truth)
+        padding_mask = batch["padding_mask"]
+        pred_dict = calc_pcd_metrics(
+            pred_dict,
+            start_pcd.points_padded(),
+            pred,
+            ground_truth.points_padded(),
+            padding_mask,
+        )
 
         return {
             "rmse": pred_dict["rmse"],
@@ -521,8 +544,8 @@ class CrossDisplacementModule(DenseDisplacementDiffusionModule):
         super().__init__(network, cfg)
 
     def get_model_kwargs(self, batch):
-        pc_action = batch["start_pcd"]
-        pc_anchor = batch["start_pcd"]
+        pc_action = batch["start_pcd"].points_padded()
+        pc_anchor = batch["start_pcd"].points_padded()
 
         text_embedding = torch.tensor(
             encode_without_parallelism(self.text_embed, batch["caption"]),

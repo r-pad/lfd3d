@@ -737,7 +737,9 @@ class GaussianDiffusion:
         output = th.where((t == 0), decoder_nll, kl)
         return {"output": output, "pred_xstart": out["pred_xstart"]}
 
-    def training_losses(self, model, x_start, t, model_kwargs=None, noise=None):
+    def training_losses(
+        self, model, x_start, t, model_kwargs=None, noise=None, padding_mask=None
+    ):
         """
         Compute training losses for a single timestep.
         :param model: the model to evaluate loss on.
@@ -746,6 +748,8 @@ class GaussianDiffusion:
         :param model_kwargs: if not None, a dict of extra keyword arguments to
             pass to the model. This can be used for conditioning.
         :param noise: if specified, the specific Gaussian noise to try to remove.
+        :param padding_mask: mask of valid points
+        NOTE: padding_mask is only currently used for mse, not for the other losses
         :return: a dict with the key "loss" containing a tensor of shape [N].
                  Some mean or variance settings may also have other keys.
         """
@@ -801,7 +805,10 @@ class GaussianDiffusion:
                 ModelMeanType.EPSILON: noise,
             }[self.model_mean_type]
             assert model_output.shape == target.shape == x_start.shape
-            terms["mse"] = mean_flat((target - model_output) ** 2)
+            err = ((target - model_output) ** 2).permute(0, 2, 1) * padding_mask[
+                :, :, None
+            ]
+            terms["mse"] = mean_flat(err)
             if "vb" in terms:
                 terms["loss"] = terms["mse"] + terms["vb"]
             else:

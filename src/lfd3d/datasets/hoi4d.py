@@ -7,7 +7,9 @@ import cv2
 import numpy as np
 import open3d as o3d
 import pytorch_lightning as pl
+import torch
 import torch.utils.data as data
+from pytorch3d.structures import Pointclouds
 
 
 class HOI4DDataset(data.Dataset):
@@ -58,7 +60,6 @@ class HOI4DDataset(data.Dataset):
         self.dataset_cfg = dataset_cfg
 
         self.size = self.num_demos
-        self.PAD_SIZE = 1000
 
     def __len__(self):
         return self.size
@@ -193,9 +194,6 @@ class HOI4DDataset(data.Dataset):
         ty = np.clip(start_tracks[:, 1].round().astype(int), 0, rgbs[0].shape[0] - 1)
         tx = np.clip(start_tracks[:, 0].round().astype(int), 0, rgbs[0].shape[1] - 1)
         start_tracks[:, 2] = depths[0][ty, tx]
-        start_tracks = np.pad(
-            start_tracks, ((self.PAD_SIZE - start_tracks.shape[0], 0), (0, 0))
-        )
         start_tracks[:, 0] = ((start_tracks[:, 0] - K[0, 2]) * start_tracks[:, 2]) / K[
             0, 0
         ]
@@ -207,9 +205,6 @@ class HOI4DDataset(data.Dataset):
         ty = np.clip(end_tracks[:, 1].round().astype(int), 0, rgbs[0].shape[0] - 1)
         tx = np.clip(end_tracks[:, 0].round().astype(int), 0, rgbs[0].shape[1] - 1)
         end_tracks[:, 2] = depths[1][ty, tx]
-        end_tracks = np.pad(
-            end_tracks, ((self.PAD_SIZE - end_tracks.shape[0], 0), (0, 0))
-        )
         end_tracks[:, 0] = ((end_tracks[:, 0] - K[0, 2]) * end_tracks[:, 2]) / K[0, 0]
         end_tracks[:, 1] = ((end_tracks[:, 1] - K[1, 2]) * end_tracks[:, 2]) / K[1, 1]
 
@@ -264,6 +259,7 @@ class HOI4DDataModule(pl.LightningDataModule):
             batch_size=self.batch_size,
             shuffle=True if self.stage == "train" else False,
             num_workers=self.num_workers,
+            collate_fn=collate_pcd_fn,
         )
 
     def val_dataloader(self):
@@ -272,6 +268,7 @@ class HOI4DDataModule(pl.LightningDataModule):
             batch_size=self.val_batch_size,
             shuffle=False,
             num_workers=self.num_workers,
+            collate_fn=collate_pcd_fn,
         )
         return val_dataloader
 
@@ -281,5 +278,79 @@ class HOI4DDataModule(pl.LightningDataModule):
             batch_size=self.val_batch_size,
             shuffle=False,
             num_workers=self.num_workers,
+            collate_fn=collate_pcd_fn,
         )
         return test_dataloader
+
+
+def collate_pcd_fn(batch):
+    """
+    Custom collate function that handles:
+    - Point clouds (start_pcd and cross_displacement)
+    - Strings (caption and vid_name)
+    - Regular tensors (intrinsics, rgbs, depths, start2end)
+
+    Args:
+        batch: List of dictionaries containing the items from your dataset
+
+    Returns:
+        Collated dictionary with properly batched items
+    """
+    # Initialize lists to store items
+    start_pcds = []
+    cross_displacements = []
+    captions = []
+    vid_names = []
+    intrinsics = []
+    rgbs = []
+    depths = []
+    start2ends = []
+
+    # Separate items from batch
+    for item in batch:
+        # Convert point clouds to tensors if they aren't already
+        start_pcd = torch.as_tensor(item["start_pcd"]).float()
+        cross_displacement = torch.as_tensor(item["cross_displacement"]).float()
+
+        start_pcds.append(start_pcd)
+        cross_displacements.append(cross_displacement)
+        captions.append(item["caption"])
+        vid_names.append(item["vid_name"])
+
+        # Convert other items to tensors if they aren't already
+        intrinsics.append(torch.as_tensor(item["intrinsics"]))
+        rgbs.append(torch.as_tensor(item["rgbs"]))
+        depths.append(torch.as_tensor(item["depths"]))
+        start2ends.append(torch.as_tensor(item["start2end"]))
+
+    # Create Pointclouds objects
+    start_pointclouds = Pointclouds(points=start_pcds)
+    cross_displacement_pointclouds = Pointclouds(points=cross_displacements)
+
+    batch_size, max_points, _ = start_pointclouds.points_padded().shape
+    num_points = start_pointclouds.num_points_per_cloud()
+    padding_mask = torch.arange(max_points)[None, :] < num_points[:, None]
+
+    # Stack regular tensors
+    intrinsics_batch = torch.stack(intrinsics)
+    rgbs_batch = torch.stack(rgbs)
+    depths_batch = torch.stack(depths)
+    start2ends_batch = torch.stack(start2ends)
+
+    # Create the output dictionary
+    collated_batch = {
+        # Point clouds
+        "start_pcd": start_pointclouds,
+        "cross_displacement": cross_displacement_pointclouds,
+        "padding_mask": padding_mask,
+        # Strings
+        "caption": captions,
+        "vid_name": vid_names,
+        # Regular tensors
+        "intrinsics": intrinsics_batch,
+        "rgbs": rgbs_batch,
+        "depths": depths_batch,
+        "start2end": start2ends_batch,
+    }
+
+    return collated_batch
