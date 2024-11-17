@@ -1,4 +1,5 @@
 import os
+import random
 from typing import Dict, List
 
 import cv2
@@ -80,9 +81,10 @@ def calc_pcd_metrics(pred_dict, pcd, pred, gt):
     """
     pred_pcd = pcd + pred
     gt_pcd = pcd + gt
+    mask = pcd.norm(dim=-1) != 0  # Filter out padding
 
-    pred_dict["rmse"] = rmse_pcd(pred_pcd, gt_pcd)
-    pred_dict["chamfer_dist"] = chamfer_distance(pred_pcd, gt_pcd)
+    pred_dict["rmse"] = rmse_pcd(pred_pcd, gt_pcd, mask)
+    pred_dict["chamfer_dist"] = chamfer_distance(pred_pcd, gt_pcd, mask)
     return pred_dict
 
 
@@ -169,8 +171,6 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
             )
         elif self.mode == "eval":
             self.run_cfg = cfg.inference
-            # inference-specific params
-            self.num_trials = self.run_cfg.num_trials
         else:
             raise ValueError(f"Invalid mode: {self.mode}")
 
@@ -280,6 +280,7 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
 
         goal_text = batch["caption"][viz_idx]
         vid_name = batch["vid_name"][viz_idx]
+        rmse = pred_dict["rmse"][viz_idx]
         pcd = batch["start_pcd"][viz_idx].cpu().numpy()
         gt = batch[self.prediction_type][viz_idx].cpu().numpy()
 
@@ -319,7 +320,7 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
             rgb_proj_viz,
             caption=f"Left: Initial Frame (GT Track)\n; Middle: Final Frame (GT Track)\n\
             ; Right: Final Frame (Pred Track)\n; Goal Description : {goal_text};\n\
-            video path = {vid_name}",
+            rmse={rmse};\nvideo path = {vid_name}; ",
         )
         ###
 
@@ -412,6 +413,12 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         )
         self.train_outputs.clear()
 
+    def on_validation_epoch_start(self):
+        # Choose a random batch index for each validation epoch
+        self.random_val_viz_idx = random.randint(
+            0, len(self.trainer.val_dataloaders) - 1
+        )
+
     def validation_step(self, batch, batch_idx):
         """
         Validation step for the module. Logs validation metrics and visualizations to wandb.
@@ -429,7 +436,7 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         ####################################################
         # logging visualizations
         ####################################################
-        if batch_idx == 0 and self.trainer.is_global_zero:
+        if batch_idx == self.random_val_viz_idx and self.trainer.is_global_zero:
             self.log_viz_to_wandb(batch, pred_dict, "val")
         return pred_dict
 
@@ -456,8 +463,16 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         Prediction step for model evaluation.
         """
         pred_dict = self.predict(batch)
+        pred = pred_dict[self.prediction_type]["pred"]
+        ground_truth = batch[self.label_key].to(self.device)
+        start_pcd = batch["start_pcd"]
+        pred_dict = calc_pcd_metrics(pred_dict, start_pcd, pred, ground_truth)
+
         return {
             "rmse": pred_dict["rmse"],
+            "chamfer_dist": pred_dict["chamfer_dist"],
+            "vid_name": batch["vid_name"],
+            "caption": batch["caption"],
         }
 
 

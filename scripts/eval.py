@@ -1,24 +1,33 @@
-import hydra
-import lightning as L
-import omegaconf
-import torch
-import torch.utils._pytree as pytree
-import wandb
+import json
 
-from lfd3d.datasets.cifar10 import CIFAR10DataModule
-from lfd3d.metrics.classification import get_metrics
-from lfd3d.models.classifier import ClassifierInferenceModule
+import hydra
+import omegaconf
+import pytorch_lightning as pl
+import torch
+import wandb
+from hydra.core.hydra_config import HydraConfig
+
 from lfd3d.utils.script_utils import (
-    PROJECT_ROOT,
+    create_datamodule,
     create_model,
-    flatten_outputs,
-    match_fn,
+    load_checkpoint_config_from_wandb,
 )
 
 
 @torch.no_grad()
 @hydra.main(config_path="../configs", config_name="eval", version_base="1.3")
 def main(cfg):
+    task_overrides = HydraConfig.get().overrides.task
+    cfg = load_checkpoint_config_from_wandb(
+        cfg, task_overrides, cfg.wandb.entity, cfg.wandb.project, cfg.checkpoint.run_id
+    )
+    print(
+        json.dumps(
+            omegaconf.OmegaConf.to_container(cfg, resolve=True, throw_on_missing=False),
+            sort_keys=True,
+            indent=4,
+        )
+    )
     ######################################################################
     # Torch settings.
     ######################################################################
@@ -31,49 +40,16 @@ def main(cfg):
     torch.set_float32_matmul_precision("medium")
 
     # Global seed for reproducibility.
-    L.seed_everything(42)
+    pl.seed_everything(42)
+
+    device = f"cuda:{cfg.resources.gpus[0]}"
 
     ######################################################################
     # Create the datamodule.
     # Should be the same one as in training, but we're gonna use val+test
     # dataloaders.
     ######################################################################
-
-    datamodule = CIFAR10DataModule(
-        root=cfg.dataset.data_dir,
-        batch_size=cfg.inference.batch_size,
-        num_workers=cfg.resources.num_workers,
-    )
-    # Gotta call this in order to establish the dataloaders.
-    datamodule.setup("predict")
-
-    ######################################################################
-    # Set up logging in WandB.
-    # This is a different job type (eval), but we want it all grouped
-    # together. Notice that we use our own logging here (not lightning).
-    ######################################################################
-
-    # Create a run.
-    run = wandb.init(
-        entity=cfg.wandb.entity,
-        project=cfg.wandb.project,
-        dir=cfg.wandb.save_dir,
-        config=omegaconf.OmegaConf.to_container(
-            cfg, resolve=True, throw_on_missing=True
-        ),
-        job_type=cfg.job_type,
-        save_code=True,  # This just has the main script.
-        group=cfg.wandb.group,
-    )
-
-    # Log the code.
-    wandb.run.log_code(
-        root=PROJECT_ROOT,
-        include_fn=match_fn(
-            dirs=["configs", "scripts", "src"],
-            extensions=[".py", ".yaml"],
-        ),
-    )
+    cfg, datamodule = create_datamodule(cfg)
 
     ######################################################################
     # Create the network(s) which will be evaluated (same as training).
@@ -83,42 +59,29 @@ def main(cfg):
     # We'll also load the weights.
     ######################################################################
 
-    network = create_model(
-        image_size=cfg.dataset.image_size,
-        num_classes=cfg.dataset.num_classes,
-        model_cfg=cfg.model,
-    )
+    # Model architecture is dataset-dependent, so we have a helper
+    # function to create the model (while separating out relevant vals).
+    network, model = create_model(cfg)
 
-    # Get the checkpoint file. If it's a wandb reference, download.
-    # Otherwise look to disk.
+    # get checkpoint file (for now, this does not log a run)
     checkpoint_reference = cfg.checkpoint.reference
     if checkpoint_reference.startswith(cfg.wandb.entity):
-        # download checkpoint locally (if not already cached)
+        api = wandb.Api()
         artifact_dir = cfg.wandb.artifact_dir
-        artifact = run.use_artifact(checkpoint_reference, type="model")
+        artifact = api.artifact(checkpoint_reference, type="model")
         ckpt_file = artifact.get_path("model.ckpt").download(root=artifact_dir)
     else:
         ckpt_file = checkpoint_reference
-
     # Load the network weights.
-    ckpt = torch.load(ckpt_file)
-    network.load_state_dict(
-        {k.partition(".")[2]: v for k, v, in ckpt["state_dict"].items()}
-    )
-
-    ######################################################################
-    # Create an inference module, which is basically just a bare-bones
-    # class which runs the model. In this example, we only implement
-    # the "predict_step" function, which may not be the blessed
-    # way to do it vis a vis lightning, but whatever.
-    #
-    # If this is a downstream application or something, you might
-    # want to implement a different interface (like with a "predict"
-    # function), so you can pass in un-batched observations from an
-    # environment, for instance.
-    ######################################################################
-
-    model = ClassifierInferenceModule(network)
+    ckpt = torch.load(ckpt_file, map_location=device)
+    # HACK: The text embedding model doesn't get loaded correctly
+    # Just remove it before loading since it's a pretrained model anyway
+    # Ideally, we wouldn't even log it to WandB,
+    state_dict = {k: v for k, v in ckpt["state_dict"].items() if "text_embed" not in k}
+    network.load_state_dict({k.partition(".")[2]: v for k, v, in state_dict.items()})
+    # set model to eval mode
+    network.eval()
+    model.eval()
 
     ######################################################################
     # Create the trainer.
@@ -129,7 +92,7 @@ def main(cfg):
     # If this is a different kind of downstream eval, chuck this block.
     ######################################################################
 
-    trainer = L.Trainer(
+    trainer = pl.Trainer(
         accelerator="gpu",
         devices=cfg.resources.gpus,
         precision="16-mixed",
@@ -145,35 +108,27 @@ def main(cfg):
     # function is.
     ######################################################################
 
-    train_outputs, val_outputs, test_outputs = trainer.predict(
-        model,
-        dataloaders=[
-            *datamodule.val_dataloader(),  # There are two different loaders (train_val and val).
-            datamodule.test_dataloader(),
-        ],
-    )
+    test_preds_list = trainer.predict(model, dataloaders=[datamodule.test_dataloader()])
+    # Flatten into dict
+    test_preds = {}
+    for key in test_preds_list[0].keys():
+        if type(test_preds_list[0][key]) == torch.Tensor:
+            test_preds[key] = torch.cat([i[key] for i in test_preds_list])
+        else:
+            test_preds[key] = []
+            for i in test_preds_list:
+                test_preds[key].extend(i[key])
 
-    for outputs_list, name in [
-        (train_outputs, "train"),
-        (val_outputs, "val"),
-        (test_outputs, "test"),
-    ]:
-        # Put everything on CPU, and flatten a list of dicts into one dict.
-        out_cpu = [pytree.tree_map(lambda x: x.cpu(), o) for o in outputs_list]
-        outputs = flatten_outputs(out_cpu)
+    # Upload output to wandb
+    wandb.init(entity="r-pad", project="lfd3d", id=cfg.checkpoint.run_id, resume="must")
+    table = wandb.Table(columns=list(test_preds.keys()))
+    num_rows = len(next(iter(test_preds.values())))
 
-        # Compute the metrics.
-        metrics = get_metrics(outputs["preds"], outputs["labels"])
-        global_acc = metrics["global_acc"]
-        macro_acc = metrics["macro_acc"]
-        acc_df = metrics["acc_df"]
-
-        # Log the metrics + table to wandb.
-        run.summary[f"{name}_true_accuracy"] = global_acc
-        run.summary[f"{name}_class_balanced_accuracy"] = macro_acc
-
-        table = wandb.Table(dataframe=acc_df)
-        run.log({f"{name}_accuracy_table": table})
+    for i in range(num_rows):
+        row = [test_preds[key][i] for key in test_preds.keys()]
+        table.add_data(*row)
+    wandb.log({"test_results": table})
+    wandb.finish()
 
 
 if __name__ == "__main__":

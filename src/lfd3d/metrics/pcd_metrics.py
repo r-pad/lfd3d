@@ -1,7 +1,7 @@
 import torch
 
 
-def rmse_pcd(x, y):
+def rmse_pcd(x, y, mask):
     """
     Calculate the RMSE over the predicted point cloud
     and the ground truth point cloud. Returns RMSE averaged
@@ -9,20 +9,20 @@ def rmse_pcd(x, y):
 
     x: Predicted pcd
     y: Actual pcd
+    mask: Mask of points to be considered
     """
     assert len(x.shape) == 3
     assert len(y.shape) == 3
 
     rmse = []
-    for pcd_x, pcd_y in zip(x, y):
-        mask = ~torch.all(pcd_y == 0, axis=1)  # Remove 0 points
-        pcd_x, pcd_y = pcd_x[mask], pcd_y[mask]
+    for pcd_x, pcd_y, pcd_mask in zip(x, y, mask):
+        pcd_x, pcd_y = pcd_x[pcd_mask], pcd_y[pcd_mask]
         rmse.append(((pcd_x - pcd_y) ** 2).mean() ** 0.5)
     rmse = torch.stack(rmse)
     return rmse
 
 
-def chamfer_distance(x, y):
+def chamfer_distance(x, y, mask):
     """
     Calculate the Chamfer distance over the predicted point cloud
     and the ground truth point cloud. Returns Chamfer Distance averaged
@@ -35,9 +35,8 @@ def chamfer_distance(x, y):
     assert len(y.shape) == 3
 
     chamfer_dist = []
-    for pcd_x, pcd_y in zip(x, y):
-        mask = ~torch.all(pcd_y == 0, axis=1)  # Remove 0 points
-        pcd_x, pcd_y = pcd_x[mask], pcd_y[mask]
+    for pcd_x, pcd_y, pcd_mask in zip(x, y, mask):
+        pcd_x, pcd_y = pcd_x[pcd_mask], pcd_y[pcd_mask]
 
         # Compute squared distances from each point in x to the closest point in y
         dist_x_to_y = torch.cdist(pcd_x, pcd_y)  # Pairwise distances between all points
