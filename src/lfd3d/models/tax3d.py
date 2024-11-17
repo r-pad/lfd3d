@@ -391,22 +391,31 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         return loss
 
     def on_train_epoch_end(self):
+        log_dictionary = {}
         loss = torch.stack([x["loss"] for x in self.train_outputs]).mean()
-        rmse = torch.stack(
-            [x["rmse"] for x in self.train_outputs if "rmse" in x]
-        ).mean()
-        chamfer_dist = torch.stack(
-            [x["chamfer_dist"] for x in self.train_outputs if "chamfer_dist" in x]
-        ).mean()
+        log_dictionary["train/loss"] = loss
+
+        extra_keys = any("rmse" in x.keys() for x in self.train_outputs)
+        if extra_keys:
+            rmse = torch.stack(
+                [x["rmse"].mean() for x in self.train_outputs if "rmse" in x]
+            ).mean()
+            log_dictionary["train/rmse"] = rmse
+
+            chamfer_dist = torch.stack(
+                [
+                    x["chamfer_dist"].mean()
+                    for x in self.train_outputs
+                    if "chamfer_dist" in x
+                ]
+            ).mean()
+            log_dictionary["train/chamfer_dist"] = chamfer_dist
+
         ####################################################
         # logging training metrics
         ####################################################
         self.log_dict(
-            {
-                "train/loss": loss,
-                "train/rmse": rmse,
-                "train/chamfer_dist": chamfer_dist,
-            },
+            log_dictionary,
             add_dataloader_idx=False,
             sync_dist=True,
             prog_bar=True,
