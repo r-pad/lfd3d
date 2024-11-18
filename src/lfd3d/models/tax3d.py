@@ -284,7 +284,7 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         goal_text = batch["caption"][viz_idx]
         vid_name = batch["vid_name"][viz_idx]
         rmse = pred_dict["rmse"][viz_idx]
-        pcd = batch["start_pcd"].points_padded()[viz_idx].cpu().numpy()
+        pcd = batch["action_pcd"].points_padded()[viz_idx].cpu().numpy()
         gt = batch[self.prediction_type].points_padded()[viz_idx].cpu().numpy()
 
         padding_mask = batch["padding_mask"][viz_idx].cpu().numpy()
@@ -364,7 +364,7 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         batch_size = batch[self.label_key].points_padded().shape[0]
         t = torch.randint(0, self.diff_steps, (batch_size,), device=self.device).long()
         _, loss = self(batch, t)
-        start_pcd = batch["start_pcd"]
+        action_pcd = batch["action_pcd"]
         #########################################################
         # logging training metrics
         #########################################################
@@ -384,7 +384,7 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
             ground_truth = batch[self.label_key].to(self.device)
             pred_dict = calc_pcd_metrics(
                 pred_dict,
-                start_pcd.points_padded(),
+                action_pcd.points_padded(),
                 pred,
                 ground_truth.points_padded(),
                 padding_mask,
@@ -447,11 +447,11 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
 
         pred = pred_dict[self.prediction_type]["pred"]
         ground_truth = batch[self.label_key].to(self.device)
-        start_pcd = batch["start_pcd"]
+        action_pcd = batch["action_pcd"]
         padding_mask = batch["padding_mask"]
         pred_dict = calc_pcd_metrics(
             pred_dict,
-            start_pcd.points_padded(),
+            action_pcd.points_padded(),
             pred,
             ground_truth.points_padded(),
             padding_mask,
@@ -490,11 +490,11 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         pred_dict = self.predict(batch)
         pred = pred_dict[self.prediction_type]["pred"]
         ground_truth = batch[self.label_key].to(self.device)
-        start_pcd = batch["start_pcd"]
+        action_pcd = batch["action_pcd"]
         padding_mask = batch["padding_mask"]
         pred_dict = calc_pcd_metrics(
             pred_dict,
-            start_pcd.points_padded(),
+            action_pcd.points_padded(),
             pred,
             ground_truth.points_padded(),
             padding_mask,
@@ -544,8 +544,8 @@ class CrossDisplacementModule(DenseDisplacementDiffusionModule):
         super().__init__(network, cfg)
 
     def get_model_kwargs(self, batch):
-        pc_action = batch["start_pcd"].points_padded()
-        pc_anchor = batch["start_pcd"].points_padded()
+        pc_action = batch["action_pcd"].points_padded()
+        pc_anchor = batch["anchor_pcd"].points_padded()
 
         text_embedding = torch.tensor(
             encode_without_parallelism(self.text_embed, batch["caption"]),

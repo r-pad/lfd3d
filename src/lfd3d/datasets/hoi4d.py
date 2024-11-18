@@ -60,6 +60,8 @@ class HOI4DDataset(data.Dataset):
         self.dataset_cfg = dataset_cfg
 
         self.size = self.num_demos
+        # Downsample factor for scene point cloud
+        self.DOWNSAMPLE_FACTOR = 1000
 
     def __len__(self):
         return self.size
@@ -211,6 +213,36 @@ class HOI4DDataset(data.Dataset):
 
         return start_tracks, end_tracks, start2end
 
+    def get_scene_pcd(self, rgb, depth, K):
+        height, width = depth.shape
+        # Create pixel coordinate grid
+        x = np.arange(width)
+        y = np.arange(height)
+        x_grid, y_grid = np.meshgrid(x, y)
+
+        # Flatten grid coordinates and depth
+        x_flat = x_grid.flatten()
+        y_flat = y_grid.flatten()
+        z_flat = depth.flatten()
+
+        # Remove points with invalid depth
+        valid_depth = z_flat > 0
+        x_flat = x_flat[valid_depth]
+        y_flat = y_flat[valid_depth]
+        z_flat = z_flat[valid_depth]
+
+        # Create homogeneous pixel coordinates
+        pixels = np.stack([x_flat, y_flat, np.ones_like(x_flat)], axis=0)
+
+        # Unproject points using K inverse
+        K_inv = np.linalg.inv(K)
+        points = K_inv @ pixels
+        points = points * z_flat
+        points = points.T  # Shape: (N, 3)
+
+        scene_pcd = points[:: self.DOWNSAMPLE_FACTOR]
+        return scene_pcd
+
     def __getitem__(self, index):
         vid_name, event_idx = self.data_files[index]
         dir_name = os.path.dirname(os.path.dirname(vid_name))
@@ -231,10 +263,13 @@ class HOI4DDataset(data.Dataset):
         start_tracks, end_tracks, start2end = self.process_and_register_tracks(
             dir_name, event_start_idx, event_end_idx, depths, K, cam2world
         )
-
+        start_scene_pcd = self.get_scene_pcd(rgbs[0], depths[0], K)
         caption = f"{event_name} {obj_name}"
+
+        # collate_pcd_fn handles batching of the point clouds
         item = {
-            "start_pcd": start_tracks,
+            "action_pcd": start_tracks,
+            "anchor_pcd": start_scene_pcd,
             "caption": caption,
             "cross_displacement": end_tracks - start_tracks,
             "intrinsics": K,
@@ -302,18 +337,19 @@ class HOI4DDataModule(pl.LightningDataModule):
 def collate_pcd_fn(batch):
     """
     Custom collate function that handles:
-    - Point clouds (start_pcd and cross_displacement)
+    - Point clouds (action_pcd, anchor_pcd and cross_displacement)
     - Strings (caption and vid_name)
     - Regular tensors (intrinsics, rgbs, depths, start2end)
 
     Args:
-        batch: List of dictionaries containing the items from your dataset
+        batch: List of dictionaries containing the items from dataset
 
     Returns:
         Collated dictionary with properly batched items
     """
     # Initialize lists to store items
-    start_pcds = []
+    action_pcds = []
+    anchor_pcds = []
     cross_displacements = []
     captions = []
     vid_names = []
@@ -325,10 +361,12 @@ def collate_pcd_fn(batch):
     # Separate items from batch
     for item in batch:
         # Convert point clouds to tensors if they aren't already
-        start_pcd = torch.as_tensor(item["start_pcd"]).float()
+        action_pcd = torch.as_tensor(item["action_pcd"]).float()
+        anchor_pcd = torch.as_tensor(item["anchor_pcd"]).float()
         cross_displacement = torch.as_tensor(item["cross_displacement"]).float()
 
-        start_pcds.append(start_pcd)
+        action_pcds.append(action_pcd)
+        anchor_pcds.append(anchor_pcd)
         cross_displacements.append(cross_displacement)
         captions.append(item["caption"])
         vid_names.append(item["vid_name"])
@@ -340,11 +378,12 @@ def collate_pcd_fn(batch):
         start2ends.append(torch.as_tensor(item["start2end"]))
 
     # Create Pointclouds objects
-    start_pointclouds = Pointclouds(points=start_pcds)
+    action_pointclouds = Pointclouds(points=action_pcds)
+    anchor_pointclouds = Pointclouds(points=anchor_pcds)
     cross_displacement_pointclouds = Pointclouds(points=cross_displacements)
 
-    batch_size, max_points, _ = start_pointclouds.points_padded().shape
-    num_points = start_pointclouds.num_points_per_cloud()
+    batch_size, max_points, _ = action_pointclouds.points_padded().shape
+    num_points = action_pointclouds.num_points_per_cloud()
     padding_mask = torch.arange(max_points)[None, :] < num_points[:, None]
 
     # Stack regular tensors
@@ -356,7 +395,8 @@ def collate_pcd_fn(batch):
     # Create the output dictionary
     collated_batch = {
         # Point clouds
-        "start_pcd": start_pointclouds,
+        "action_pcd": action_pointclouds,
+        "anchor_pcd": anchor_pointclouds,
         "cross_displacement": cross_displacement_pointclouds,
         "padding_mask": padding_mask,
         # Strings
