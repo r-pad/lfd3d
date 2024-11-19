@@ -266,6 +266,12 @@ class HOI4DDataset(data.Dataset):
         start_scene_pcd = self.get_scene_pcd(rgbs[0], depths[0], K)
         caption = f"{event_name} {obj_name}"
 
+        # Center on action_pcd
+        action_pcd_mean = start_tracks.mean(axis=0)
+        start_tracks -= action_pcd_mean
+        end_tracks -= action_pcd_mean
+        start_scene_pcd -= action_pcd_mean
+
         # collate_pcd_fn handles batching of the point clouds
         item = {
             "action_pcd": start_tracks,
@@ -277,6 +283,7 @@ class HOI4DDataset(data.Dataset):
             "depths": depths,
             "start2end": start2end,
             "vid_name": dir_name,
+            "action_pcd_mean": action_pcd_mean,
         }
         return item
 
@@ -357,6 +364,7 @@ def collate_pcd_fn(batch):
     rgbs = []
     depths = []
     start2ends = []
+    action_pcd_means = []
 
     # Separate items from batch
     for item in batch:
@@ -376,6 +384,7 @@ def collate_pcd_fn(batch):
         rgbs.append(torch.as_tensor(item["rgbs"]))
         depths.append(torch.as_tensor(item["depths"]))
         start2ends.append(torch.as_tensor(item["start2end"]))
+        action_pcd_means.append(torch.as_tensor(item["action_pcd_mean"]))
 
     # Create Pointclouds objects
     action_pointclouds = Pointclouds(points=action_pcds)
@@ -391,6 +400,7 @@ def collate_pcd_fn(batch):
     rgbs_batch = torch.stack(rgbs)
     depths_batch = torch.stack(depths)
     start2ends_batch = torch.stack(start2ends)
+    action_pcd_means_batch = torch.stack(action_pcd_means)
 
     # Create the output dictionary
     collated_batch = {
@@ -407,6 +417,7 @@ def collate_pcd_fn(batch):
         "rgbs": rgbs_batch,
         "depths": depths_batch,
         "start2end": start2ends_batch,
+        "action_pcd_mean": action_pcd_means_batch,
     }
 
     return collated_batch

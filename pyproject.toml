@@ -64,7 +64,7 @@ namespace_packages = true
 explicit_package_bases = true
 
 [[tool.mypy.overrides]]
-module = ["torchvision.*", "diffusers", "pytorch3d.transforms", "timm.*", "open3d", "sentence_transformers", "tqdm.auto", "tensorflow_datasets"]
+module = ["torchvision.*", "diffusers", "pytorch3d.transforms", "timm.*", "open3d", "sentence_transformers", "tqdm.auto", "tensorflow_datasets", "pytorch3d.structures"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

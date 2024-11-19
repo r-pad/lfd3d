@@ -291,6 +291,12 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         pred_pcd = pcd + pred
         gt_pcd = pcd + gt
 
+        # Move center back from action_pcd to the camera frame before viz
+        action_pcd_mean = batch["action_pcd_mean"][viz_idx].cpu().numpy()
+        pcd += action_pcd_mean
+        pred_pcd += action_pcd_mean
+        gt_pcd += action_pcd_mean
+
         # All points cloud are in the start image's coordinate frame
         # We need to visualize the end image, therefore need to apply transform
         # Transform the point clouds to align with end image coordinate frame
