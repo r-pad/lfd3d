@@ -7,7 +7,9 @@ import cv2
 import numpy as np
 import open3d as o3d
 import pytorch_lightning as pl
+import torch
 import torch.utils.data as data
+from pytorch3d.structures import Pointclouds
 
 
 class HOI4DDataset(data.Dataset):
@@ -18,12 +20,17 @@ class HOI4DDataset(data.Dataset):
         self.dataset_dir = self.root
 
         # SpatialTracker could not track the points in these files.
+        # or no gt depth available at some tracks
         self.blacklisted_files = set(
             [
                 f"{self.dataset_dir}/ZY20210800002/H2/C18/N26/S183/s01/T2/align_rgb/image.mp4",
                 f"{self.dataset_dir}/ZY20210800004/H4/C18/N19/S160/s05/T1/align_rgb/image.mp4",
                 f"{self.dataset_dir}/ZY20210800004/H4/C18/N26/S162/s02/T1/align_rgb/image.mp4",
                 f"{self.dataset_dir}/ZY20210800003/H3/C13/N50/S203/s02/T4/align_rgb/image.mp4",
+                f"{self.dataset_dir}/ZY20210800003/H3/C2/N35/S217/s04/T2/align_rgb/image.mp4",
+                f"{self.dataset_dir}/ZY20210800003/H3/C2/N36/S217/s04/T2/align_rgb/image.mp4",
+                f"{self.dataset_dir}/ZY20210800004/H4/C18/N22/S162/s01/T1/align_rgb/image.mp4",
+                f"{self.dataset_dir}/ZY20210800004/H4/C18/N40/S162/s02/T1/align_rgb/image.mp4",
             ]
         )
 
@@ -53,7 +60,8 @@ class HOI4DDataset(data.Dataset):
         self.dataset_cfg = dataset_cfg
 
         self.size = self.num_demos
-        self.PAD_SIZE = 1000
+        # Downsample factor for scene point cloud
+        self.DOWNSAMPLE_FACTOR = 1000
 
     def __len__(self):
         return self.size
@@ -164,6 +172,77 @@ class HOI4DDataset(data.Dataset):
         depths = np.array([depth_init, depth_end])
         return rgbs, depths
 
+    def process_and_register_tracks(
+        self, dir_name, event_start_idx, event_end_idx, depths, K, cam2world
+    ):
+        """
+        Load the tracks corresponding to the start and end of the event.
+        Unproject the tracks to 3D point clouds, register the point cloud
+        `end_tracks` to the `start_tracks` coordinate frame.
+        """
+        tracks = np.load(f"{dir_name}/spatracker_3d_tracks.npy")
+        start_tracks = tracks[event_start_idx]
+
+        # Clip to image boundaries, unproject
+        ty = np.clip(start_tracks[:, 1].round().astype(int), 0, depths[0].shape[0] - 1)
+        tx = np.clip(start_tracks[:, 0].round().astype(int), 0, depths[0].shape[1] - 1)
+        start_tracks[:, 2] = depths[0][ty, tx]
+        start_tracks[:, 0] = ((start_tracks[:, 0] - K[0, 2]) * start_tracks[:, 2]) / K[
+            0, 0
+        ]
+        start_tracks[:, 1] = ((start_tracks[:, 1] - K[1, 2]) * start_tracks[:, 2]) / K[
+            1, 1
+        ]
+
+        end_tracks = tracks[event_end_idx]
+
+        # Clip to image boundaries, unproject
+        ty = np.clip(end_tracks[:, 1].round().astype(int), 0, depths[0].shape[0] - 1)
+        tx = np.clip(end_tracks[:, 0].round().astype(int), 0, depths[0].shape[1] - 1)
+        end_tracks[:, 2] = depths[1][ty, tx]
+        end_tracks[:, 0] = ((end_tracks[:, 0] - K[0, 2]) * end_tracks[:, 2]) / K[0, 0]
+        end_tracks[:, 1] = ((end_tracks[:, 1] - K[1, 2]) * end_tracks[:, 2]) / K[1, 1]
+
+        # Register the tracks at the end of the chunk with respect
+        # to the coordinate frame at the beginning of the chunk
+        start2world = cam2world[event_start_idx]
+        end2world = cam2world[event_end_idx]
+        end_tracks = np.hstack((end_tracks, np.ones((end_tracks.shape[0], 1))))
+        start2end = start2world @ np.linalg.inv(end2world)
+        end_tracks = (start2end @ end_tracks.T).T[:, :3].astype(np.float32)
+
+        return start_tracks, end_tracks, start2end
+
+    def get_scene_pcd(self, rgb, depth, K):
+        height, width = depth.shape
+        # Create pixel coordinate grid
+        x = np.arange(width)
+        y = np.arange(height)
+        x_grid, y_grid = np.meshgrid(x, y)
+
+        # Flatten grid coordinates and depth
+        x_flat = x_grid.flatten()
+        y_flat = y_grid.flatten()
+        z_flat = depth.flatten()
+
+        # Remove points with invalid depth
+        valid_depth = z_flat > 0
+        x_flat = x_flat[valid_depth]
+        y_flat = y_flat[valid_depth]
+        z_flat = z_flat[valid_depth]
+
+        # Create homogeneous pixel coordinates
+        pixels = np.stack([x_flat, y_flat, np.ones_like(x_flat)], axis=0)
+
+        # Unproject points using K inverse
+        K_inv = np.linalg.inv(K)
+        points = K_inv @ pixels
+        points = points * z_flat
+        points = points.T  # Shape: (N, 3)
+
+        scene_pcd = points[:: self.DOWNSAMPLE_FACTOR]
+        return scene_pcd
+
     def __getitem__(self, index):
         vid_name, event_idx = self.data_files[index]
         dir_name = os.path.dirname(os.path.dirname(vid_name))
@@ -181,44 +260,22 @@ class HOI4DDataset(data.Dataset):
         event_name = event["event"]
 
         rgbs, depths = self.load_rgbd(dir_name, event_start_idx, event_end_idx)
-
-        tracks = np.load(f"{dir_name}/spatracker_3d_tracks.npy")
-
-        start_tracks = tracks[event_start_idx]
-        ty = np.clip(start_tracks[:, 1].round().astype(int), 0, rgbs[0].shape[0] - 1)
-        tx = np.clip(start_tracks[:, 0].round().astype(int), 0, rgbs[0].shape[1] - 1)
-        start_tracks[:, 2] = depths[0][ty, tx]
-        start_tracks = np.pad(
-            start_tracks, ((self.PAD_SIZE - start_tracks.shape[0], 0), (0, 0))
+        start_tracks, end_tracks, start2end = self.process_and_register_tracks(
+            dir_name, event_start_idx, event_end_idx, depths, K, cam2world
         )
-        start_tracks[:, 0] = ((start_tracks[:, 0] - K[0, 2]) * start_tracks[:, 2]) / K[
-            0, 0
-        ]
-        start_tracks[:, 1] = ((start_tracks[:, 1] - K[1, 2]) * start_tracks[:, 2]) / K[
-            1, 1
-        ]
-
-        end_tracks = tracks[event_end_idx]
-        ty = np.clip(end_tracks[:, 1].round().astype(int), 0, rgbs[0].shape[0] - 1)
-        tx = np.clip(end_tracks[:, 0].round().astype(int), 0, rgbs[0].shape[1] - 1)
-        end_tracks[:, 2] = depths[1][ty, tx]
-        end_tracks = np.pad(
-            end_tracks, ((self.PAD_SIZE - end_tracks.shape[0], 0), (0, 0))
-        )
-        end_tracks[:, 0] = ((end_tracks[:, 0] - K[0, 2]) * end_tracks[:, 2]) / K[0, 0]
-        end_tracks[:, 1] = ((end_tracks[:, 1] - K[1, 2]) * end_tracks[:, 2]) / K[1, 1]
-
-        # Register the tracks at the end of the chunk with respect
-        # to the coordinate frame at the beginning of the chunk
-        start2world = cam2world[event_start_idx]
-        end2world = cam2world[event_end_idx]
-        end_tracks = np.hstack((end_tracks, np.ones((end_tracks.shape[0], 1))))
-        start2end = start2world @ np.linalg.inv(end2world)
-        end_tracks = (start2end @ end_tracks.T).T[:, :3].astype(np.float32)
-
+        start_scene_pcd = self.get_scene_pcd(rgbs[0], depths[0], K)
         caption = f"{event_name} {obj_name}"
+
+        # Center on action_pcd
+        action_pcd_mean = start_tracks.mean(axis=0)
+        start_tracks -= action_pcd_mean
+        end_tracks -= action_pcd_mean
+        start_scene_pcd -= action_pcd_mean
+
+        # collate_pcd_fn handles batching of the point clouds
         item = {
-            "start_pcd": start_tracks,
+            "action_pcd": start_tracks,
+            "anchor_pcd": start_scene_pcd,
             "caption": caption,
             "cross_displacement": end_tracks - start_tracks,
             "intrinsics": K,
@@ -226,6 +283,7 @@ class HOI4DDataset(data.Dataset):
             "depths": depths,
             "start2end": start2end,
             "vid_name": dir_name,
+            "action_pcd_mean": action_pcd_mean,
         }
         return item
 
@@ -259,6 +317,7 @@ class HOI4DDataModule(pl.LightningDataModule):
             batch_size=self.batch_size,
             shuffle=True if self.stage == "train" else False,
             num_workers=self.num_workers,
+            collate_fn=collate_pcd_fn,
         )
 
     def val_dataloader(self):
@@ -267,6 +326,7 @@ class HOI4DDataModule(pl.LightningDataModule):
             batch_size=self.val_batch_size,
             shuffle=False,
             num_workers=self.num_workers,
+            collate_fn=collate_pcd_fn,
         )
         return val_dataloader
 
@@ -276,5 +336,88 @@ class HOI4DDataModule(pl.LightningDataModule):
             batch_size=self.val_batch_size,
             shuffle=False,
             num_workers=self.num_workers,
+            collate_fn=collate_pcd_fn,
         )
         return test_dataloader
+
+
+def collate_pcd_fn(batch):
+    """
+    Custom collate function that handles:
+    - Point clouds (action_pcd, anchor_pcd and cross_displacement)
+    - Strings (caption and vid_name)
+    - Regular tensors (intrinsics, rgbs, depths, start2end)
+
+    Args:
+        batch: List of dictionaries containing the items from dataset
+
+    Returns:
+        Collated dictionary with properly batched items
+    """
+    # Initialize lists to store items
+    action_pcds = []
+    anchor_pcds = []
+    cross_displacements = []
+    captions = []
+    vid_names = []
+    intrinsics = []
+    rgbs = []
+    depths = []
+    start2ends = []
+    action_pcd_means = []
+
+    # Separate items from batch
+    for item in batch:
+        # Convert point clouds to tensors if they aren't already
+        action_pcd = torch.as_tensor(item["action_pcd"]).float()
+        anchor_pcd = torch.as_tensor(item["anchor_pcd"]).float()
+        cross_displacement = torch.as_tensor(item["cross_displacement"]).float()
+
+        action_pcds.append(action_pcd)
+        anchor_pcds.append(anchor_pcd)
+        cross_displacements.append(cross_displacement)
+        captions.append(item["caption"])
+        vid_names.append(item["vid_name"])
+
+        # Convert other items to tensors if they aren't already
+        intrinsics.append(torch.as_tensor(item["intrinsics"]))
+        rgbs.append(torch.as_tensor(item["rgbs"]))
+        depths.append(torch.as_tensor(item["depths"]))
+        start2ends.append(torch.as_tensor(item["start2end"]))
+        action_pcd_means.append(torch.as_tensor(item["action_pcd_mean"]))
+
+    # Create Pointclouds objects
+    action_pointclouds = Pointclouds(points=action_pcds)
+    anchor_pointclouds = Pointclouds(points=anchor_pcds)
+    cross_displacement_pointclouds = Pointclouds(points=cross_displacements)
+
+    batch_size, max_points, _ = action_pointclouds.points_padded().shape
+    num_points = action_pointclouds.num_points_per_cloud()
+    padding_mask = torch.arange(max_points)[None, :] < num_points[:, None]
+
+    # Stack regular tensors
+    intrinsics_batch = torch.stack(intrinsics)
+    rgbs_batch = torch.stack(rgbs)
+    depths_batch = torch.stack(depths)
+    start2ends_batch = torch.stack(start2ends)
+    action_pcd_means_batch = torch.stack(action_pcd_means)
+
+    # Create the output dictionary
+    collated_batch = {
+        # Point clouds
+        "action_pcd": action_pointclouds,
+        "anchor_pcd": anchor_pointclouds,
+        "cross_displacement": cross_displacement_pointclouds,
+        "padding_mask": padding_mask,
+        # Strings
+        "caption": captions,
+        "vid_name": vid_names,
+        # Regular tensors
+        "intrinsics": intrinsics_batch,
+        "rgbs": rgbs_batch,
+        "depths": depths_batch,
+        "start2end": start2ends_batch,
+        "action_pcd_mean": action_pcd_means_batch,
+    }
+
+    return collated_batch

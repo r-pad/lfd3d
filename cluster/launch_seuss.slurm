@@ -7,7 +7,6 @@
 #SBATCH --time=96:00:00
 #SBATCH --gres=gpu:8
 #SBATCH --mem=512G
-#SBATCH --nodelist=compute-1-9
 #SBATCH --partition=GPU
 
 # Unset XDG_RUNTIME_DIR to avoid directory issue
@@ -45,12 +44,12 @@ SINGULARITYENV_WANDB_DOCKER_IMAGE=lfd3d \
     singularity exec \
     --nv \
     --pwd /opt/rpad/code \
-    -B /home/sskrishn/hoi4d/hoi4d_data:/opt/data \
+    -B /home/sskrishn/hoi4d/:/opt/data \
     -B /scratch/rpad/logs:/opt/logs \
     ${sif_name} \
     torchrun --nproc_per_node=8 scripts/train.py \
     model=df_cross \
     dataset=hoi4d \
-    dataset.data_dir=/opt/data \
+    dataset.data_dir=/opt/data/hoi4d_data \
     log_dir=/opt/logs \
     resources.gpus=-1
