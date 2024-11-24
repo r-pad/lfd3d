@@ -1,6 +1,5 @@
 import json
 import os
-import random
 from glob import glob
 
 import cv2
@@ -54,7 +53,7 @@ class HOI4DDataset(data.Dataset):
             set(self.data_files).intersection(set(split_files)) - self.blacklisted_files
         )
         self.data_files = sorted(list(self.data_files))
-        self.data_files = self.expand_all_events(split)
+        self.data_files = self.expand_all_events(self.data_files)
 
         self.num_demos = len(self.data_files)
         self.dataset_cfg = dataset_cfg
@@ -66,30 +65,30 @@ class HOI4DDataset(data.Dataset):
     def __len__(self):
         return self.size
 
-    def expand_all_events(self, split):
-        """During training, we randomly sample one event
-        from a video. For val and test, we want to evaluate
-        on *all* events in all videos. This function /expands/
-        each file to have an associated event_idx. However,
-        for train, it just sets the event_idx to None so that a
-        random event can be sampled."""
-        if split == "train":
-            expanded_data_files = [(f, None) for f in self.data_files]
-        else:
-            expanded_data_files = []
-            for f in self.data_files:
-                dir_name = os.path.dirname(os.path.dirname(f))
-                action_annotation = json.load(open(f"{dir_name}/action/color.json"))
-                if "events" in action_annotation:
-                    all_events = action_annotation["events"]
-                else:
-                    all_events = action_annotation["markResult"]["marks"]
-                valid_events = [
-                    i for i in all_events if i["event"] in self.valid_event_types
-                ]
-                expanded_data_files.extend(
-                    [(f, idx) for idx in range(len(valid_events))]
-                )
+    def expand_all_events(self, data_files):
+        """This function *expands* each file to have an associated event_idx.
+
+        Args:
+            data_files (list of str): List of file paths to the data files
+                  to be processed.
+
+        Returns:
+            expanded_data_files (list of tuples (str, int)): A list of tuples
+                  where each tuple contains the file path and the corresponding
+                  event index (int) for valid events.
+        """
+        expanded_data_files = []
+        for f in data_files:
+            dir_name = os.path.dirname(os.path.dirname(f))
+            action_annotation = json.load(open(f"{dir_name}/action/color.json"))
+            if "events" in action_annotation:
+                all_events = action_annotation["events"]
+            else:
+                all_events = action_annotation["markResult"]["marks"]
+            valid_events = [
+                i for i in all_events if i["event"] in self.valid_event_types
+            ]
+            expanded_data_files.extend([(f, idx) for idx in range(len(valid_events))])
         return expanded_data_files
 
     def load_split(self, split):
@@ -135,10 +134,7 @@ class HOI4DDataset(data.Dataset):
             all_events = action_annotation["markResult"]["marks"]
 
         valid_events = [i for i in all_events if i["event"] in self.valid_event_types]
-        if event_idx is None:
-            event = random.choice(valid_events)
-        else:
-            event = valid_events[event_idx]
+        event = valid_events[event_idx]
 
         try:
             # Convert timestamp in seconds to frame_idx
@@ -315,7 +311,7 @@ class HOI4DDataModule(pl.LightningDataModule):
         return data.DataLoader(
             self.train_dataset,
             batch_size=self.batch_size,
-            shuffle=True if self.stage == "train" else False,
+            shuffle=True if self.stage == "fit" else False,
             num_workers=self.num_workers,
             collate_fn=collate_pcd_fn,
         )
