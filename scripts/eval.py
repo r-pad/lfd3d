@@ -108,13 +108,15 @@ def main(cfg):
     # function is.
     ######################################################################
 
+    # Upload output to wandb
+    wandb.init(entity="r-pad", project="lfd3d", id=cfg.checkpoint.run_id, resume="must")
+
     dataloaders = [
+        datamodule.test_dataloader(),
         datamodule.train_subset_dataloader(),
         datamodule.val_dataloader(),
-        datamodule.test_dataloader(),
     ]
-    preds_dict = {"train_subset": {}, "val": {}, "test": {}}
-
+    preds_dict = {"test": {}, "train_subset": {}, "val": {}}
     preds = trainer.predict(model, dataloaders=dataloaders)
 
     # Keys to iterate over
@@ -129,9 +131,6 @@ def main(cfg):
                 preds_dict[pred_split][key] = []
                 for i in preds_split:
                     preds_dict[pred_split][key].extend(i[key])
-
-    # Upload output to wandb
-    wandb.init(entity="r-pad", project="lfd3d", id=cfg.checkpoint.run_id, resume="must")
 
     # Individual Statistics
     for pred_split in preds_dict.keys():

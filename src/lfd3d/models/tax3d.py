@@ -8,6 +8,7 @@ import pytorch_lightning as pl
 import torch
 import wandb
 from diffusers import get_cosine_schedule_with_warmup
+from pytorch3d.structures import Pointclouds
 from sentence_transformers import SentenceTransformer
 from torch import nn, optim
 
@@ -142,6 +143,7 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         self.mode = cfg.mode  # train or eval
         self.val_outputs: List[Dict] = []
         self.train_outputs: List[Dict] = []
+        self.predict_outputs: List[Dict] = []
 
         # prediction type-specific processing
         # TODO: eventually, this should be removed by updating dataset to use "point" instead of "pc"
@@ -492,6 +494,9 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
     def predict_step(self, batch, batch_idx, dataloader_idx=0):
         """
         Prediction step for model evaluation.
+
+        The test dataset is expected to be first dataloader_idx.
+        Visualizations are logged with dataloader_idx=0
         """
         pred_dict = self.predict(batch)
         pred = pred_dict[self.prediction_type]["pred"]
@@ -506,12 +511,70 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
             padding_mask,
         )
 
+        if dataloader_idx == 0:
+            self.predict_outputs.append(pred_dict)
+
         return {
             "rmse": pred_dict["rmse"],
             "chamfer_dist": pred_dict["chamfer_dist"],
             "vid_name": batch["vid_name"],
             "caption": batch["caption"],
         }
+
+    def on_predict_epoch_end(self):
+        """
+        TODO: Clean up this function. Refactor duplicated code
+        """
+        batch_size = self.predict_outputs[0]["rmse"].shape[0]
+        rmse = torch.cat([x["rmse"] for x in self.predict_outputs])
+        chamfer_dist = torch.cat([x["chamfer_dist"] for x in self.predict_outputs])
+        cross_displacement = []
+        for i in self.predict_outputs:
+            cross_displacement.extend(i["cross_displacement"]["pred"])
+
+        best_5_idx = rmse.argsort()[:5].tolist()
+        worst_5_idx = rmse.argsort()[-5:].tolist()
+
+        for idx in best_5_idx:
+            pred_dict = {
+                "rmse": [rmse[idx]],
+                "chamfer_dist": [chamfer_dist[idx]],
+                "cross_displacement": {"pred": cross_displacement[idx]},
+            }
+            viz_batch = {}
+            batch_num, within_batch_idx = idx // batch_size, idx % batch_size
+            for i, batch in enumerate(self.trainer.predict_dataloaders[0]):
+                if i == batch_num:
+                    for key in batch.keys():
+                        if type(batch[key]) == Pointclouds:
+                            pcd = batch[key].points_padded()[within_batch_idx]
+                            viz_batch[key] = Pointclouds(points=pcd[None])
+                        elif key in ["rgbs", "depths"]:
+                            viz_batch[key] = batch[key][within_batch_idx][None]
+                        else:
+                            viz_batch[key] = [batch[key][within_batch_idx]]
+            self.log_viz_to_wandb(viz_batch, pred_dict, "eval/best_rmse")
+
+        for idx in worst_5_idx:
+            pred_dict = {
+                "rmse": [rmse[idx]],
+                "chamfer_dist": [chamfer_dist[idx]],
+                "cross_displacement": {"pred": cross_displacement[idx]},
+            }
+            viz_batch = {}
+            batch_num, within_batch_idx = idx // batch_size, idx % batch_size
+            for i, batch in enumerate(self.trainer.predict_dataloaders[0]):
+                if i == batch_num:
+                    for key in batch.keys():
+                        if type(batch[key]) == Pointclouds:
+                            pcd = batch[key].points_padded()[within_batch_idx]
+                            viz_batch[key] = Pointclouds(points=pcd[None])
+                        elif key in ["rgbs", "depths"]:
+                            viz_batch[key] = batch[key][within_batch_idx][None]
+                        else:
+                            viz_batch[key] = [batch[key][within_batch_idx]]
+            self.log_viz_to_wandb(viz_batch, pred_dict, "eval/worst_rmse")
+        self.predict_outputs.clear()
 
 
 class SceneDisplacementModule(DenseDisplacementDiffusionModule):
