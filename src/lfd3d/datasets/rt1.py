@@ -66,7 +66,7 @@ class RT1DataModule(pl.LightningDataModule):
         return data.DataLoader(
             self.train_dataset,
             batch_size=self.batch_size,
-            shuffle=True if self.stage == "train" else False,
+            shuffle=True if self.stage == "fit" else False,
             num_workers=self.num_workers,
         )
 

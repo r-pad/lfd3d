@@ -22,6 +22,7 @@ from lfd3d.models.dit.models import (
 )
 from lfd3d.utils.viz_utils import (
     create_point_cloud_frames,
+    get_action_anchor_pcd,
     get_img_and_track_pcd,
     project_pcd_on_image,
 )
@@ -286,6 +287,7 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         goal_text = batch["caption"][viz_idx]
         vid_name = batch["vid_name"][viz_idx]
         rmse = pred_dict["rmse"][viz_idx]
+        anchor_pcd = batch["anchor_pcd"].points_padded()[viz_idx].cpu().numpy()
         pcd = batch["action_pcd"].points_padded()[viz_idx].cpu().numpy()
         gt = batch[self.prediction_type].points_padded()[viz_idx].cpu().numpy()
 
@@ -296,6 +298,7 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         # Move center back from action_pcd to the camera frame before viz
         action_pcd_mean = batch["action_pcd_mean"][viz_idx].cpu().numpy()
         pcd += action_pcd_mean
+        anchor_pcd += action_pcd_mean
         pred_pcd += action_pcd_mean
         gt_pcd += action_pcd_mean
 
@@ -350,6 +353,15 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         )
         ###
 
+        # Visualize action/anchor point cloud
+        action_anchor_pcd = get_action_anchor_pcd(
+            pcd,
+            anchor_pcd,
+            GREEN,
+            RED,
+        )
+        ###
+
         # Render video of point cloud
         pcd_video = create_point_cloud_frames(viz_pcd)
         pcd_video = np.transpose(pcd_video, (0, 3, 1, 2))
@@ -358,6 +370,7 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
             {
                 f"{tag}/track_projected_to_rgb": wandb_proj_img,
                 f"{tag}/image_and_tracks_pcd": wandb.Object3D(viz_pcd),
+                f"{tag}/action_anchor_pcd": wandb.Object3D(action_anchor_pcd),
                 f"{tag}/pcd_video": wandb.Video(pcd_video, fps=6, format="webm"),
                 "trainer/global_step": self.global_step,
             },
