@@ -108,26 +108,58 @@ def main(cfg):
     # function is.
     ######################################################################
 
-    test_preds_list = trainer.predict(model, dataloaders=[datamodule.test_dataloader()])
-    # Flatten into dict
-    test_preds = {}
-    for key in test_preds_list[0].keys():
-        if type(test_preds_list[0][key]) == torch.Tensor:
-            test_preds[key] = torch.cat([i[key] for i in test_preds_list])
-        else:
-            test_preds[key] = []
-            for i in test_preds_list:
-                test_preds[key].extend(i[key])
+    dataloaders = [
+        datamodule.train_subset_dataloader(),
+        datamodule.val_dataloader(),
+        datamodule.test_dataloader(),
+    ]
+    preds_dict = {"train_subset": {}, "val": {}, "test": {}}
+
+    preds = trainer.predict(model, dataloaders=dataloaders)
+
+    # Keys to iterate over
+    keys = preds[0][0].keys()
+    for i, pred_split in enumerate(preds_dict.keys()):
+        # Flatten the predictions for each split separately and store in preds_dict
+        preds_split = preds[i]
+        for key in keys:
+            if type(preds_split[0][key]) == torch.Tensor:
+                preds_dict[pred_split][key] = torch.cat([i[key] for i in preds_split])
+            else:
+                preds_dict[pred_split][key] = []
+                for i in preds_split:
+                    preds_dict[pred_split][key].extend(i[key])
 
     # Upload output to wandb
     wandb.init(entity="r-pad", project="lfd3d", id=cfg.checkpoint.run_id, resume="must")
-    table = wandb.Table(columns=list(test_preds.keys()))
-    num_rows = len(next(iter(test_preds.values())))
 
-    for i in range(num_rows):
-        row = [test_preds[key][i] for key in test_preds.keys()]
-        table.add_data(*row)
-    wandb.log({"test_results": table})
+    # Individual Statistics
+    for pred_split in preds_dict.keys():
+        table = wandb.Table(columns=list(preds_dict[pred_split].keys()))
+        num_rows = len(next(iter(preds_dict[pred_split].values())))
+
+        for i in range(num_rows):
+            row = [
+                preds_dict[pred_split][key][i] for key in preds_dict[pred_split].keys()
+            ]
+            table.add_data(*row)
+        wandb.log({f"{pred_split}/eval_results": table})
+
+    # Summary Statistics
+    summary_stats = []
+    for metric in [
+        "train_subset/rmse",
+        "train_subset/chamfer_dist",
+        "val/rmse",
+        "val/chamfer_dist",
+        "test/rmse",
+        "test/chamfer_dist",
+    ]:
+        pred_metric = preds_dict[metric.split("/")[0]][metric.split("/")[1]]
+        summary_stats.append([metric, pred_metric.mean()])
+    summary_table = wandb.Table(data=summary_stats, columns=["Metric", "Value"])
+    wandb.log({f"eval_results_summary": summary_table})
+
     wandb.finish()
 
 

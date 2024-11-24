@@ -297,6 +297,9 @@ class HOI4DDataModule(pl.LightningDataModule):
         data_dir = os.path.expanduser(dataset_cfg.data_dir)
         self.root = data_dir
 
+        # Subset of train to use for eval
+        self.TRAIN_SUBSET_SIZE = 500
+
     def prepare_data(self) -> None:
         pass
 
@@ -312,6 +315,19 @@ class HOI4DDataModule(pl.LightningDataModule):
             self.train_dataset,
             batch_size=self.batch_size,
             shuffle=True if self.stage == "fit" else False,
+            num_workers=self.num_workers,
+            collate_fn=collate_pcd_fn,
+        )
+
+    def train_subset_dataloader(self):
+        """A subset of train used for eval."""
+        indices = torch.randint(
+            0, len(self.train_dataset), (self.TRAIN_SUBSET_SIZE,)
+        ).tolist()
+        return data.DataLoader(
+            data.Subset(self.train_dataset, indices),
+            batch_size=self.batch_size,
+            shuffle=False,
             num_workers=self.num_workers,
             collate_fn=collate_pcd_fn,
         )
