@@ -536,7 +536,7 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
 
     def on_predict_epoch_end(self):
         """
-        TODO: Clean up this function. Refactor duplicated code
+        TODO: Fix up this function. Assumes batch contains only one of best/worst
         """
         batch_size = self.predict_outputs[0]["rmse"].shape[0]
         rmse = torch.cat([x["rmse"] for x in self.predict_outputs])
@@ -546,48 +546,45 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
             cross_displacement.extend(i["cross_displacement"]["pred"])
 
         best_5_idx = rmse.argsort()[:5].tolist()
+        best_batch_num = [i // batch_size for i in best_5_idx]
         worst_5_idx = rmse.argsort()[-5:].tolist()
+        worst_batch_num = [i // batch_size for i in worst_5_idx]
 
-        for idx in best_5_idx:
-            pred_dict = {
-                "rmse": [rmse[idx]],
-                "chamfer_dist": [chamfer_dist[idx]],
-                "cross_displacement": {"pred": cross_displacement[idx]},
-            }
-            viz_batch = {}
-            batch_num, within_batch_idx = idx // batch_size, idx % batch_size
-            for i, batch in enumerate(self.trainer.predict_dataloaders[0]):
-                if i == batch_num:
-                    for key in batch.keys():
-                        if type(batch[key]) == Pointclouds:
-                            pcd = batch[key].points_padded()[within_batch_idx]
-                            viz_batch[key] = Pointclouds(points=pcd[None])
-                        elif key in ["rgbs", "depths"]:
-                            viz_batch[key] = batch[key][within_batch_idx][None]
-                        else:
-                            viz_batch[key] = [batch[key][within_batch_idx]]
-            self.log_viz_to_wandb(viz_batch, pred_dict, "eval/best_rmse")
+        for i, batch in enumerate(self.trainer.predict_dataloaders[0]):
+            if i in best_batch_num or i in worst_batch_num:
+                if i in best_batch_num:
+                    log_key = "eval/best_rmse"
+                    idx = best_5_idx[best_batch_num.index(i)]
+                else:
+                    log_key = "eval/worst_rmse"
+                    idx = worst_5_idx[worst_batch_num.index(i)]
+                within_batch_idx = idx % batch_size
 
-        for idx in worst_5_idx:
-            pred_dict = {
-                "rmse": [rmse[idx]],
-                "chamfer_dist": [chamfer_dist[idx]],
-                "cross_displacement": {"pred": cross_displacement[idx]},
-            }
-            viz_batch = {}
-            batch_num, within_batch_idx = idx // batch_size, idx % batch_size
-            for i, batch in enumerate(self.trainer.predict_dataloaders[0]):
-                if i == batch_num:
-                    for key in batch.keys():
-                        if type(batch[key]) == Pointclouds:
-                            pcd = batch[key].points_padded()[within_batch_idx]
-                            viz_batch[key] = Pointclouds(points=pcd[None])
-                        elif key in ["rgbs", "depths"]:
-                            viz_batch[key] = batch[key][within_batch_idx][None]
-                        else:
-                            viz_batch[key] = [batch[key][within_batch_idx]]
-            self.log_viz_to_wandb(viz_batch, pred_dict, "eval/worst_rmse")
+                pred_dict = self.compose_pred_dict_for_viz(
+                    rmse, chamfer_dist, cross_displacement, idx
+                )
+                viz_batch = self.compose_batch_for_viz(batch, within_batch_idx)
+                self.log_viz_to_wandb(viz_batch, pred_dict, log_key)
         self.predict_outputs.clear()
+
+    def compose_pred_dict_for_viz(self, rmse, chamfer_dist, cross_displacement, idx):
+        return {
+            "rmse": [rmse[idx]],
+            "chamfer_dist": [chamfer_dist[idx]],
+            "cross_displacement": {"pred": cross_displacement[idx]},
+        }
+
+    def compose_batch_for_viz(self, batch, within_batch_idx):
+        viz_batch = {}
+        for key in batch.keys():
+            if type(batch[key]) == Pointclouds:
+                pcd = batch[key].points_padded()[within_batch_idx]
+                viz_batch[key] = Pointclouds(points=pcd[None])
+            elif key in ["rgbs", "depths"]:
+                viz_batch[key] = batch[key][within_batch_idx][None]
+            else:
+                viz_batch[key] = [batch[key][within_batch_idx]]
+        return viz_batch
 
 
 class SceneDisplacementModule(DenseDisplacementDiffusionModule):
