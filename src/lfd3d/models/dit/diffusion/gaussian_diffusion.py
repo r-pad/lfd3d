@@ -805,10 +805,11 @@ class GaussianDiffusion:
                 ModelMeanType.EPSILON: noise,
             }[self.model_mean_type]
             assert model_output.shape == target.shape == x_start.shape
-            err = ((target - model_output) ** 2).permute(0, 2, 1) * padding_mask[
-                :, :, None
-            ]
-            terms["mse"] = mean_flat(err)
+            # Mask out invalid points when computing loss
+            padding_mask = padding_mask[:, :, None]
+            valid_counts = padding_mask.sum(dim=(1, 2))
+            err = ((target - model_output) ** 2).permute(0, 2, 1) * padding_mask
+            terms["mse"] = err.sum(dim=(1, 2)) / valid_counts
             if "vb" in terms:
                 terms["loss"] = terms["mse"] + terms["vb"]
             else:

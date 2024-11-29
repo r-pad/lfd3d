@@ -8,6 +8,7 @@ import pytorch_lightning as pl
 import torch
 import wandb
 from diffusers import get_cosine_schedule_with_warmup
+from pytorch3d.structures import Pointclouds
 from sentence_transformers import SentenceTransformer
 from torch import nn, optim
 
@@ -21,6 +22,7 @@ from lfd3d.models.dit.models import (
 )
 from lfd3d.utils.viz_utils import (
     create_point_cloud_frames,
+    get_action_anchor_pcd,
     get_img_and_track_pcd,
     project_pcd_on_image,
 )
@@ -142,6 +144,7 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         self.mode = cfg.mode  # train or eval
         self.val_outputs: List[Dict] = []
         self.train_outputs: List[Dict] = []
+        self.predict_outputs: List[Dict] = []
 
         # prediction type-specific processing
         # TODO: eventually, this should be removed by updating dataset to use "point" instead of "pc"
@@ -284,6 +287,7 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         goal_text = batch["caption"][viz_idx]
         vid_name = batch["vid_name"][viz_idx]
         rmse = pred_dict["rmse"][viz_idx]
+        anchor_pcd = batch["anchor_pcd"].points_padded()[viz_idx].cpu().numpy()
         pcd = batch["action_pcd"].points_padded()[viz_idx].cpu().numpy()
         gt = batch[self.prediction_type].points_padded()[viz_idx].cpu().numpy()
 
@@ -294,6 +298,7 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         # Move center back from action_pcd to the camera frame before viz
         action_pcd_mean = batch["action_pcd_mean"][viz_idx].cpu().numpy()
         pcd += action_pcd_mean
+        anchor_pcd += action_pcd_mean
         pred_pcd += action_pcd_mean
         gt_pcd += action_pcd_mean
 
@@ -348,6 +353,15 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         )
         ###
 
+        # Visualize action/anchor point cloud
+        action_anchor_pcd = get_action_anchor_pcd(
+            pcd,
+            anchor_pcd,
+            GREEN,
+            RED,
+        )
+        ###
+
         # Render video of point cloud
         pcd_video = create_point_cloud_frames(viz_pcd)
         pcd_video = np.transpose(pcd_video, (0, 3, 1, 2))
@@ -356,6 +370,7 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
             {
                 f"{tag}/track_projected_to_rgb": wandb_proj_img,
                 f"{tag}/image_and_tracks_pcd": wandb.Object3D(viz_pcd),
+                f"{tag}/action_anchor_pcd": wandb.Object3D(action_anchor_pcd),
                 f"{tag}/pcd_video": wandb.Video(pcd_video, fps=6, format="webm"),
                 "trainer/global_step": self.global_step,
             },
@@ -492,6 +507,9 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
     def predict_step(self, batch, batch_idx, dataloader_idx=0):
         """
         Prediction step for model evaluation.
+
+        The test dataset is expected to be first dataloader_idx.
+        Visualizations are logged with dataloader_idx=0
         """
         pred_dict = self.predict(batch)
         pred = pred_dict[self.prediction_type]["pred"]
@@ -506,12 +524,67 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
             padding_mask,
         )
 
+        if dataloader_idx == 0:
+            self.predict_outputs.append(pred_dict)
+
         return {
             "rmse": pred_dict["rmse"],
             "chamfer_dist": pred_dict["chamfer_dist"],
             "vid_name": batch["vid_name"],
             "caption": batch["caption"],
         }
+
+    def on_predict_epoch_end(self):
+        """
+        TODO: Fix up this function. Assumes batch contains only one of best/worst
+        """
+        batch_size = self.predict_outputs[0]["rmse"].shape[0]
+        rmse = torch.cat([x["rmse"] for x in self.predict_outputs])
+        chamfer_dist = torch.cat([x["chamfer_dist"] for x in self.predict_outputs])
+        cross_displacement = []
+        for i in self.predict_outputs:
+            cross_displacement.extend(i["cross_displacement"]["pred"])
+
+        best_5_idx = rmse.argsort()[:5].tolist()
+        best_batch_num = [i // batch_size for i in best_5_idx]
+        worst_5_idx = rmse.argsort()[-5:].tolist()
+        worst_batch_num = [i // batch_size for i in worst_5_idx]
+
+        for i, batch in enumerate(self.trainer.predict_dataloaders[0]):
+            if i in best_batch_num or i in worst_batch_num:
+                if i in best_batch_num:
+                    log_key = "eval/best_rmse"
+                    idx = best_5_idx[best_batch_num.index(i)]
+                else:
+                    log_key = "eval/worst_rmse"
+                    idx = worst_5_idx[worst_batch_num.index(i)]
+                within_batch_idx = idx % batch_size
+
+                pred_dict = self.compose_pred_dict_for_viz(
+                    rmse, chamfer_dist, cross_displacement, idx
+                )
+                viz_batch = self.compose_batch_for_viz(batch, within_batch_idx)
+                self.log_viz_to_wandb(viz_batch, pred_dict, log_key)
+        self.predict_outputs.clear()
+
+    def compose_pred_dict_for_viz(self, rmse, chamfer_dist, cross_displacement, idx):
+        return {
+            "rmse": [rmse[idx]],
+            "chamfer_dist": [chamfer_dist[idx]],
+            "cross_displacement": {"pred": cross_displacement[idx]},
+        }
+
+    def compose_batch_for_viz(self, batch, within_batch_idx):
+        viz_batch = {}
+        for key in batch.keys():
+            if type(batch[key]) == Pointclouds:
+                pcd = batch[key].points_padded()[within_batch_idx]
+                viz_batch[key] = Pointclouds(points=pcd[None])
+            elif key in ["rgbs", "depths"]:
+                viz_batch[key] = batch[key][within_batch_idx][None]
+            else:
+                viz_batch[key] = [batch[key][within_batch_idx]]
+        return viz_batch
 
 
 class SceneDisplacementModule(DenseDisplacementDiffusionModule):

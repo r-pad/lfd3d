@@ -91,6 +91,27 @@ def get_img_and_track_pcd(
     return viz_pcd
 
 
+def get_action_anchor_pcd(
+    action_pcd,
+    anchor_pcd,
+    action_pcd_color,
+    anchor_pcd_color,
+):
+    action_pcd_color, anchor_pcd_color = (
+        np.array(action_pcd_color),
+        np.array(anchor_pcd_color),
+    )
+
+    action_pcd_color = np.repeat(action_pcd_color[None, :], action_pcd.shape[0], axis=0)
+    action_pcd = np.concatenate([action_pcd, action_pcd_color], axis=-1)
+
+    anchor_pcd_color = np.repeat(anchor_pcd_color[None, :], anchor_pcd.shape[0], axis=0)
+    anchor_pcd = np.concatenate([anchor_pcd, anchor_pcd_color], axis=-1)
+
+    viz_pcd = np.concatenate([action_pcd, anchor_pcd], axis=0)
+    return viz_pcd
+
+
 def create_point_cloud_frames(points_colors, n_frames=30, width=640, height=480):
     """
     Create frames of a rotating point cloud using headless rendering.
