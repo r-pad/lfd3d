@@ -11,6 +11,7 @@ from pytorch_lightning.loggers import WandbLogger
 
 from lfd3d.datasets.hoi4d import HOI4DDataModule
 from lfd3d.datasets.rt1 import RT1DataModule
+from lfd3d.datasets.synth_block import SynthBlockDataModule
 from lfd3d.models.tax3d import (
     CrossDisplacementModule,
     DiffusionTransformerNetwork,
@@ -49,6 +50,8 @@ def create_datamodule(cfg):
         datamodule_fn = HOI4DDataModule
     elif cfg.dataset.name == "rt1":
         datamodule_fn = RT1DataModule
+    elif cfg.dataset.name == "synth_block":
+        datamodule_fn = SynthBlockDataModule
     else:
         raise ValueError(f"Invalid dataset name: {cfg.dataset.name}")
 

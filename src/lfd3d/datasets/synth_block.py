@@ -1,0 +1,162 @@
+import os
+from glob import glob
+
+import cv2
+import numpy as np
+import pytorch_lightning as pl
+import torch
+import torch.utils.data as data
+
+from lfd3d.utils.data_utils import collate_pcd_fn
+
+
+class SynthBlockDataset(data.Dataset):
+    def __init__(self, root, dataset_cfg, split):
+        super().__init__()
+        self.root = root
+        self.split = split
+        self.dataset_dir = self.root
+
+        self.data_files = sorted(
+            glob(f"{self.dataset_dir}/**/action_pcd.npy", recursive=True)
+        )
+
+        if self.split == "train":
+            self.data_files = self.data_files[: int(0.8 * len(self.data_files))]
+        if self.split == "val":
+            self.data_files = self.data_files[
+                int(0.8 * len(self.data_files)) : int(0.9 * len(self.data_files))
+            ]
+        if self.split == "test":
+            self.data_files = self.data_files[int(0.9 * len(self.data_files)) :]
+
+        self.dataset_cfg = dataset_cfg
+        self.size = len(self.data_files)
+
+        self.K = np.load(f"{self.dataset_dir}/intrinsics.npy")
+
+    def __len__(self):
+        return self.size
+
+    def load_rgbd(self, dir_name):
+        # Return rgb/depth at beginning and end of event
+        rgb_init = cv2.cvtColor(
+            cv2.imread(f"{dir_name}/rgb_0.png"),
+            cv2.COLOR_BGR2RGB,
+        )
+        rgb_end = cv2.cvtColor(
+            cv2.imread(f"{dir_name}/rgb_1.png"),
+            cv2.COLOR_BGR2RGB,
+        )
+        rgbs = np.array([rgb_init, rgb_end])
+
+        depth_init = np.load(f"{dir_name}/depth_0.npy")
+        depth_end = np.load(f"{dir_name}/depth_1.npy")
+        depths = np.array([depth_init, depth_end])
+        return rgbs, depths
+
+    def __getitem__(self, index):
+        pcd_name = self.data_files[index]
+        dir_name = os.path.dirname(pcd_name)
+
+        action_pcd = np.load(f"{dir_name}/action_pcd.npy")
+        anchor_pcd = np.load(f"{dir_name}/pcd_0.npy")
+        caption = f"putdown block"
+
+        cross_displacement = np.load(f"{dir_name}/cross_displacement.npy")
+        rgbs, depths = self.load_rgbd(dir_name)
+
+        start2end = np.eye(4)
+
+        # Center on action_pcd
+        action_pcd_mean = action_pcd.mean(axis=0)
+        action_pcd -= action_pcd_mean
+        anchor_pcd -= action_pcd_mean
+
+        action_pcd = action_pcd[::10]
+        cross_displacement = cross_displacement[::10]
+        anchor_pcd = anchor_pcd[::100]
+
+        # collate_pcd_fn handles batching of the point clouds
+        item = {
+            "action_pcd": action_pcd,
+            "anchor_pcd": anchor_pcd,
+            "caption": caption,
+            "cross_displacement": cross_displacement,
+            "intrinsics": self.K,
+            "rgbs": rgbs,
+            "depths": depths,
+            "start2end": start2end,
+            "vid_name": dir_name,
+            "action_pcd_mean": action_pcd_mean,
+        }
+        return item
+
+
+class SynthBlockDataModule(pl.LightningDataModule):
+    def __init__(self, batch_size, val_batch_size, num_workers, dataset_cfg):
+        super().__init__()
+        self.batch_size = batch_size
+        self.val_batch_size = val_batch_size
+        self.num_workers = num_workers
+        self.stage = None
+        self.dataset_cfg = dataset_cfg
+
+        # setting root directory based on dataset type
+        data_dir = os.path.expanduser(dataset_cfg.data_dir)
+        self.root = data_dir
+
+        # Subset of train to use for eval
+        self.TRAIN_SUBSET_SIZE = 500
+
+    def prepare_data(self) -> None:
+        pass
+
+    def setup(self, stage: str = "fit"):
+        self.stage = stage
+
+        self.train_dataset = SynthBlockDataset(self.root, self.dataset_cfg, "train")
+        self.val_dataset = SynthBlockDataset(self.root, self.dataset_cfg, "val")
+        self.test_dataset = SynthBlockDataset(self.root, self.dataset_cfg, "test")
+
+    def train_dataloader(self):
+        return data.DataLoader(
+            self.train_dataset,
+            batch_size=self.batch_size,
+            shuffle=True if self.stage == "fit" else False,
+            num_workers=self.num_workers,
+            collate_fn=collate_pcd_fn,
+        )
+
+    def train_subset_dataloader(self):
+        """A subset of train used for eval."""
+        indices = torch.randint(
+            0, len(self.train_dataset), (self.TRAIN_SUBSET_SIZE,)
+        ).tolist()
+        return data.DataLoader(
+            data.Subset(self.train_dataset, indices),
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=self.num_workers,
+            collate_fn=collate_pcd_fn,
+        )
+
+    def val_dataloader(self):
+        val_dataloader = data.DataLoader(
+            self.val_dataset,
+            batch_size=self.val_batch_size,
+            shuffle=False,
+            num_workers=self.num_workers,
+            collate_fn=collate_pcd_fn,
+        )
+        return val_dataloader
+
+    def test_dataloader(self):
+        test_dataloader = data.DataLoader(
+            self.test_dataset,
+            batch_size=self.val_batch_size,
+            shuffle=False,
+            num_workers=self.num_workers,
+            collate_fn=collate_pcd_fn,
+        )
+        return test_dataloader

@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<mujoco>
+  <compiler angle="radian" coordinate="local"/>
+  <option gravity="0 0 -9.81"/>
+  <worldbody>
+    <!-- Plane -->
+    <geom name="ground" type="plane" size="10 10 0.1" rgba="0.8 0.8 0.8 1"/>
+    <!-- Cube -->
+    <body name="cube" pos="0 0 3">
+      <geom name="cube_geom" type="box" size="0.5 0.5 0.5" rgba="1 0 0 1"/>
+      <joint name="free" type="free"/>
+    </body>
+    <camera name="overview" pos="0 0 5" euler="0 0 0"/>
+    <!-- <camera name="top" pos="0 0 1.5" euler="0 0 0"/> -->
+    <light name="light1" pos="0 -5 10" dir="0 0.5 -1" diffuse="1 1 1"/>
+  </worldbody>
+</mujoco>
