@@ -975,8 +975,11 @@ class DiT_PointCloud_Cross(nn.Module):
             self.model_cfg.x_encoder is not None
             and self.model_cfg.x0_encoder is not None
         ):
-            # We are concatenating x and x0 features so we halve the hidden size
-            x_encoder_hidden_dims = hidden_size // 2
+            if self.model_cfg.use_p_prime:
+                x_encoder_hidden_dims = hidden_size // 3
+            else:
+                # We are concatenating x and x0 features so we halve the hidden size
+                x_encoder_hidden_dims = hidden_size // 2
 
         # Encoder for current timestep x features
         if self.model_cfg.x_encoder == "mlp":
@@ -1031,6 +1034,10 @@ class DiT_PointCloud_Cross(nn.Module):
 
         # Project text embedding
         self.text_projector = nn.Linear(384, hidden_size)
+
+        # Enable usage of p' = p + xt
+        # a representation of the current location of the action pcd
+        self.use_p_prime = self.model_cfg.use_p_prime
 
         # DiT blocks
         block_fn = DiTRelativeCrossBlock if self.model_cfg.rotary else DiTCrossBlock
@@ -1112,6 +1119,9 @@ class DiT_PointCloud_Cross(nn.Module):
                 x0 is not None
             ), "x0 features must be provided if x0_encoder is not None"
             x0_emb = self.x0_embedder(x0)
+            if self.use_p_prime:
+                x_prime_emb = self.x0_embedder(x0 + x)
+                x0_emb = torch.cat([x0_emb, x_prime_emb], dim=1)
             x_emb = torch.cat([x_emb, x0_emb], dim=1)
 
         if self.model_cfg.y_encoder is not None:

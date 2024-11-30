@@ -49,7 +49,7 @@ def Rel3D_DiT_pcu_cross_xS(**kwargs):
 
 def DiT_PointCloud_Cross_xS(use_rotary, **kwargs):
     # hidden size divisible by 3 for rotary embedding, and divisible by num_heads for multi-head attention
-    hidden_size = 132 if use_rotary else 128
+    hidden_size = 132 if use_rotary else 192
     return DiT_PointCloud_Cross(depth=5, hidden_size=hidden_size, num_heads=4, **kwargs)
 
 
@@ -421,6 +421,9 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         return loss
 
     def on_train_epoch_end(self):
+        if len(self.train_outputs) == 0:
+            return
+
         log_dictionary = {}
         loss = torch.stack([x["loss"] for x in self.train_outputs]).mean()
         log_dictionary["train/loss"] = loss
