@@ -8,7 +8,8 @@ import open3d as o3d
 import pytorch_lightning as pl
 import torch
 import torch.utils.data as data
-from pytorch3d.structures import Pointclouds
+
+from lfd3d.utils.data_utils import collate_pcd_fn
 
 
 class HOI4DDataset(data.Dataset):
@@ -351,85 +352,3 @@ class HOI4DDataModule(pl.LightningDataModule):
             collate_fn=collate_pcd_fn,
         )
         return test_dataloader
-
-
-def collate_pcd_fn(batch):
-    """
-    Custom collate function that handles:
-    - Point clouds (action_pcd, anchor_pcd and cross_displacement)
-    - Strings (caption and vid_name)
-    - Regular tensors (intrinsics, rgbs, depths, start2end)
-
-    Args:
-        batch: List of dictionaries containing the items from dataset
-
-    Returns:
-        Collated dictionary with properly batched items
-    """
-    # Initialize lists to store items
-    action_pcds = []
-    anchor_pcds = []
-    cross_displacements = []
-    captions = []
-    vid_names = []
-    intrinsics = []
-    rgbs = []
-    depths = []
-    start2ends = []
-    action_pcd_means = []
-
-    # Separate items from batch
-    for item in batch:
-        # Convert point clouds to tensors if they aren't already
-        action_pcd = torch.as_tensor(item["action_pcd"]).float()
-        anchor_pcd = torch.as_tensor(item["anchor_pcd"]).float()
-        cross_displacement = torch.as_tensor(item["cross_displacement"]).float()
-
-        action_pcds.append(action_pcd)
-        anchor_pcds.append(anchor_pcd)
-        cross_displacements.append(cross_displacement)
-        captions.append(item["caption"])
-        vid_names.append(item["vid_name"])
-
-        # Convert other items to tensors if they aren't already
-        intrinsics.append(torch.as_tensor(item["intrinsics"]))
-        rgbs.append(torch.as_tensor(item["rgbs"]))
-        depths.append(torch.as_tensor(item["depths"]))
-        start2ends.append(torch.as_tensor(item["start2end"]))
-        action_pcd_means.append(torch.as_tensor(item["action_pcd_mean"]))
-
-    # Create Pointclouds objects
-    action_pointclouds = Pointclouds(points=action_pcds)
-    anchor_pointclouds = Pointclouds(points=anchor_pcds)
-    cross_displacement_pointclouds = Pointclouds(points=cross_displacements)
-
-    batch_size, max_points, _ = action_pointclouds.points_padded().shape
-    num_points = action_pointclouds.num_points_per_cloud()
-    padding_mask = torch.arange(max_points)[None, :] < num_points[:, None]
-
-    # Stack regular tensors
-    intrinsics_batch = torch.stack(intrinsics)
-    rgbs_batch = torch.stack(rgbs)
-    depths_batch = torch.stack(depths)
-    start2ends_batch = torch.stack(start2ends)
-    action_pcd_means_batch = torch.stack(action_pcd_means)
-
-    # Create the output dictionary
-    collated_batch = {
-        # Point clouds
-        "action_pcd": action_pointclouds,
-        "anchor_pcd": anchor_pointclouds,
-        "cross_displacement": cross_displacement_pointclouds,
-        "padding_mask": padding_mask,
-        # Strings
-        "caption": captions,
-        "vid_name": vid_names,
-        # Regular tensors
-        "intrinsics": intrinsics_batch,
-        "rgbs": rgbs_batch,
-        "depths": depths_batch,
-        "start2end": start2ends_batch,
-        "action_pcd_mean": action_pcd_means_batch,
-    }
-
-    return collated_batch
