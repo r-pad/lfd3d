@@ -25,6 +25,7 @@ dependencies = [
   "timm == 0.9.12",
   "tensorflow-cpu == 2.8",
   "tensorflow-datasets",
+  "torchdatasets @ git+https://github.com/szymonmaszke/torchdatasets.git",
 ]
 
 [build-system]

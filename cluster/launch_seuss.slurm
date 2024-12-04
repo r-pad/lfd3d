@@ -2,7 +2,7 @@
 #SBATCH --job-name=train_model
 #SBATCH --output=./.slurm_logs/%j.out
 #SBATCH --error=./.slurm_logs/%j.err
-#SBATCH --ntasks-per-node=8
+#SBATCH --ntasks-per-node=48
 #SBATCH --nodes=1
 #SBATCH --time=96:00:00
 #SBATCH --gres=gpu:8
@@ -35,21 +35,17 @@ fi
 
 echo "Using SIF name: ${sif_name}"
 
-mkdir -p /scratch/rpad
-mkdir -p /scratch/rpad/data
 mkdir -p /scratch/rpad/logs
 
 SINGULARITYENV_WANDB_DOCKER_IMAGE=lfd3d \
     SINGULARITYENV_WANDB_API_KEY=$WANDB_API_KEY \
     singularity exec \
     --nv \
-    --pwd /opt/rpad/code \
-    -B /home/sskrishn/hoi4d/:/opt/data \
-    -B /scratch/rpad/logs:/opt/logs \
     ${sif_name} \
     torchrun --nproc_per_node=8 scripts/train.py \
     model=df_cross \
     dataset=hoi4d \
-    dataset.data_dir=/opt/data/hoi4d_data \
-    log_dir=/opt/logs \
+    dataset.data_dir=/home/sskrishn/hoi4d/hoi4d_data \
+    dataset.cache_dir=/scratch/rpad/hoi4d_cache \
+    log_dir=/scratch/rpad/logs \
     resources.gpus=-1

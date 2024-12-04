@@ -1,6 +1,7 @@
 import json
 import os
 from glob import glob
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -8,16 +9,19 @@ import open3d as o3d
 import pytorch_lightning as pl
 import torch
 import torch.utils.data as data
+import torchdatasets as td
 
 from lfd3d.utils.data_utils import collate_pcd_fn
 
 
-class HOI4DDataset(data.Dataset):
+class HOI4DDataset(td.Dataset):
     def __init__(self, root, dataset_cfg, split):
         super().__init__()
         self.root = root
         self.split = split
         self.dataset_dir = self.root
+
+        self.cache_dir = dataset_cfg.cache_dir
 
         # SpatialTracker could not track the points in these files.
         # or no gt depth available at some tracks
@@ -308,6 +312,10 @@ class HOI4DDataModule(pl.LightningDataModule):
         self.stage = stage
 
         self.train_dataset = HOI4DDataset(self.root, self.dataset_cfg, "train")
+        if self.train_dataset.cache_dir:
+            self.train_dataset.cache(
+                td.cachers.Pickle(Path(self.train_dataset.cache_dir))
+            )
         self.val_dataset = HOI4DDataset(self.root, self.dataset_cfg, "val")
         self.test_dataset = HOI4DDataset(self.root, self.dataset_cfg, "test")
 
@@ -331,6 +339,7 @@ class HOI4DDataModule(pl.LightningDataModule):
             shuffle=False,
             num_workers=self.num_workers,
             collate_fn=collate_pcd_fn,
+            pin_memory=True,
         )
 
     def val_dataloader(self):
