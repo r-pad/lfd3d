@@ -456,7 +456,6 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         self.log_dict(
             log_dictionary,
             add_dataloader_idx=False,
-            sync_dist=True,
             prog_bar=True,
         )
         self.train_outputs.clear()
@@ -509,7 +508,6 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
                 f"val/chamfer_dist": chamfer_dist,
             },
             add_dataloader_idx=False,
-            sync_dist=True,
         )
         self.val_outputs.clear()
 

@@ -5,7 +5,7 @@
 #SBATCH --ntasks-per-node=48
 #SBATCH --nodes=1
 #SBATCH --time=96:00:00
-#SBATCH --gres=gpu:8
+#SBATCH --gres=gpu:1
 #SBATCH --mem=512G
 #SBATCH --partition=GPU
 
@@ -42,12 +42,12 @@ SINGULARITYENV_WANDB_DOCKER_IMAGE=lfd3d \
     singularity exec \
     --nv \
     ${sif_name} \
-    torchrun --nproc_per_node=8 scripts/train.py \
+    python scripts/train.py \
     model=df_cross \
     dataset=hoi4d \
     dataset.data_dir=/home/sskrishn/hoi4d/hoi4d_data \
     dataset.cache_dir=/scratch/rpad/hoi4d_cache \
     log_dir=/scratch/rpad/logs \
-    resources.gpus=-1
+    #resources.gpus=-1
 
 #rm -rf /scratch/rpad/hoi4d_cache

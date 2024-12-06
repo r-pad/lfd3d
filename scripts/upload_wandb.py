@@ -23,5 +23,5 @@ wandb.init(entity="r-pad", project="lfd3d", id=args.run_id, resume="must")
 
 artifact = wandb.Artifact(f"model-{args.run_id}", type="model")
 artifact.add_file(local_path=args.checkpoint_path, name="model.ckpt")
-wandb.log_artifact(artifact, aliases=["latest"])
+wandb.log_artifact(artifact, aliases=["latest", "best"])
 wandb.finish()
