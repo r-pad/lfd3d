@@ -276,6 +276,11 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
             pred_dict: the prediction dictionary
             tag: the tag to use for logging
         """
+
+        # Some opengl issues with creating the video on the cluster
+        # It's not very useful anyway so keeping it disabled.
+        log_pcd_video = False
+
         batch_size = batch[self.label_key].points_padded().shape[0]
         # pick a random sample in the batch to visualize
         viz_idx = np.random.randint(0, batch_size)
@@ -362,19 +367,20 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         )
         ###
 
-        # Render video of point cloud
-        pcd_video = create_point_cloud_frames(viz_pcd)
-        pcd_video = np.transpose(pcd_video, (0, 3, 1, 2))
+        viz_dict = {
+            f"{tag}/track_projected_to_rgb": wandb_proj_img,
+            f"{tag}/image_and_tracks_pcd": wandb.Object3D(viz_pcd),
+            f"{tag}/action_anchor_pcd": wandb.Object3D(action_anchor_pcd),
+            "trainer/global_step": self.global_step,
+        }
 
-        wandb.log(
-            {
-                f"{tag}/track_projected_to_rgb": wandb_proj_img,
-                f"{tag}/image_and_tracks_pcd": wandb.Object3D(viz_pcd),
-                f"{tag}/action_anchor_pcd": wandb.Object3D(action_anchor_pcd),
-                f"{tag}/pcd_video": wandb.Video(pcd_video, fps=6, format="webm"),
-                "trainer/global_step": self.global_step,
-            },
-        )
+        if log_pcd_video:
+            # Render video of point cloud
+            pcd_video = create_point_cloud_frames(viz_pcd)
+            pcd_video = np.transpose(pcd_video, (0, 3, 1, 2))
+            viz_dict[f"{tag}/pcd_video"] = wandb.Video(pcd_video, fps=6, format="webm")
+
+        wandb.log(viz_dict)
         ###
 
     def training_step(self, batch, batch_idx):
@@ -450,7 +456,6 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         self.log_dict(
             log_dictionary,
             add_dataloader_idx=False,
-            sync_dist=True,
             prog_bar=True,
         )
         self.train_outputs.clear()
@@ -503,7 +508,6 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
                 f"val/chamfer_dist": chamfer_dist,
             },
             add_dataloader_idx=False,
-            sync_dist=True,
         )
         self.val_outputs.clear()
 
