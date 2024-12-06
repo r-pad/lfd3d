@@ -185,13 +185,13 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         self.sample_size_anchor = self.run_cfg.sample_size_anchor
 
         # diffusion params
-        # self.noise_schedule = model_cfg.diff_noise_schedule
+        self.noise_schedule = self.model_cfg.diff_noise_schedule
         # self.noise_scale = model_cfg.diff_noise_scale
         self.diff_steps = self.model_cfg.diff_train_steps  # TODO: rename to diff_steps
         self.diffusion = create_diffusion(
             timestep_respacing=None,
             diffusion_steps=self.diff_steps,
-            # noise_schedule=self.noise_schedule,
+            noise_schedule=self.noise_schedule,
         )
 
     def configure_optimizers(self):
