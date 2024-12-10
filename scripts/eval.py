@@ -111,7 +111,6 @@ def main(cfg):
     # Upload output to wandb
     wandb.init(entity="r-pad", project="lfd3d", id=cfg.checkpoint.run_id, resume="must")
 
-    datamodule.setup()
     dataloaders = [
         datamodule.test_dataloader(),
         datamodule.train_subset_dataloader(),
