@@ -110,10 +110,12 @@ class HOI4DDataset(td.Dataset):
                 all_events = action_annotation["events"]
             else:
                 all_events = action_annotation["markResult"]["marks"]
-            valid_events = [
-                i for i in all_events if i["event"] in self.valid_event_types
+            valid_event_idxs = [
+                idx
+                for idx, i in enumerate(all_events)
+                if i["event"] in self.valid_event_types
             ]
-            expanded_data_files.extend([(f, idx) for idx in range(len(valid_events))])
+            expanded_data_files.extend([(f, idx) for idx in valid_event_idxs])
         return expanded_data_files
 
     def load_split(self, split):
@@ -154,8 +156,7 @@ class HOI4DDataset(td.Dataset):
             fps = 300 / action_annotation["info"]["Duration"]
             all_events = action_annotation["markResult"]["marks"]
 
-        valid_events = [i for i in all_events if i["event"] in self.valid_event_types]
-        event = valid_events[event_idx]
+        event = all_events[event_idx]
 
         try:
             # Convert timestamp in seconds to frame_idx
@@ -199,8 +200,8 @@ class HOI4DDataset(td.Dataset):
         """
         # We want points which move atleast `norm_threshold` cm,
         # and atleast `num_points_threshold` such points in an event
-        norm_threshold = 0.05  # 5cm
-        num_points_threshold = 10
+        norm_threshold = 0.075
+        num_points_threshold = 25
 
         print("Number of events before filtering:", len(data_files))
         print("Beginning filtering of tracks:")
@@ -302,7 +303,7 @@ class HOI4DDataset(td.Dataset):
         z_flat = depth.flatten()
 
         # Remove points with invalid depth
-        valid_depth = np.logical_and(z_flat > 0, z_flat < 5)
+        valid_depth = np.logical_and(z_flat > 0, z_flat < 3)
         x_flat = x_flat[valid_depth]
         y_flat = y_flat[valid_depth]
         z_flat = z_flat[valid_depth]
