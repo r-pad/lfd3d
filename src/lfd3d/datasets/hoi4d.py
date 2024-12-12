@@ -303,7 +303,7 @@ class HOI4DDataset(td.Dataset):
         z_flat = depth.flatten()
 
         # Remove points with invalid depth
-        valid_depth = np.logical_and(z_flat > 0, z_flat < 3)
+        valid_depth = np.logical_and(z_flat > 0, z_flat < 5)
         x_flat = x_flat[valid_depth]
         y_flat = y_flat[valid_depth]
         z_flat = z_flat[valid_depth]

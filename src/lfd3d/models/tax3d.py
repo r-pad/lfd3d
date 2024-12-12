@@ -204,7 +204,13 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
             num_warmup_steps=self.lr_warmup_steps,
             num_training_steps=self.num_training_steps,
         )
-        return [optimizer], [lr_scheduler]
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {
+                "scheduler": lr_scheduler,
+                "interval": "step",  # Step after every batch
+            },
+        }
 
     def get_model_kwargs(self, batch):
         """
