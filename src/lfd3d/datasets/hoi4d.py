@@ -1,5 +1,6 @@
 import json
 import os
+import pickle
 from glob import glob
 from pathlib import Path
 
@@ -198,12 +199,23 @@ class HOI4DDataset(td.Dataset):
         And some events just have very minimal motion.
         All these tracks are filtered out in this function.
         """
+        print("Number of events before filtering:", len(data_files))
+
+        # Check if cached
+        cache_name = f"{self.cache_dir}/filter_{self.split}.pkl"
+        if os.path.exists(cache_name):
+            with open(cache_name, "rb") as f:
+                cache_data = pickle.load(f)
+            filtered_data_files = cache_data["filtered_data_files"]
+            filtered_tracks = cache_data["filtered_tracks"]
+            print("Number of events after filtering:", len(filtered_data_files))
+            return filtered_data_files, filtered_tracks
+
         # We want points which move atleast `norm_threshold` cm,
         # and atleast `num_points_threshold` such points in an event
         norm_threshold = 0.075
         num_points_threshold = 25
 
-        print("Number of events before filtering:", len(data_files))
         print("Beginning filtering of tracks:")
         filtered_data_files = []
         filtered_tracks = []
@@ -234,6 +246,16 @@ class HOI4DDataset(td.Dataset):
             if start_tracks.shape[0] > num_points_threshold:
                 filtered_data_files.append(data_files[index])
                 filtered_tracks.append((start_tracks, end_tracks, start2end))
+
+        # Cache dataset
+        if self.cache_dir and not os.path.exists(cache_name):
+            os.makedirs(self.cache_dir, exist_ok=True)
+            with open(cache_name, "wb") as f:
+                cache_data = {
+                    "filtered_data_files": filtered_data_files,
+                    "filtered_tracks": filtered_tracks,
+                }
+                pickle.dump(cache_data, f)
 
         print("Number of events after filtering:", len(filtered_data_files))
         return filtered_data_files, filtered_tracks
