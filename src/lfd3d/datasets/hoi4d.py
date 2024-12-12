@@ -10,6 +10,7 @@ import pytorch_lightning as pl
 import torch
 import torch.utils.data as data
 import torchdatasets as td
+from tqdm import tqdm
 
 from lfd3d.utils.data_utils import collate_pcd_fn
 
@@ -38,6 +39,7 @@ class HOI4DDataset(td.Dataset):
             ]
         )
 
+        self.intrinsic_dict = self.load_intrinsics()
         self.data_files = sorted(
             glob(f"{self.dataset_dir}/**/image.mp4", recursive=True)
         )
@@ -59,6 +61,7 @@ class HOI4DDataset(td.Dataset):
         )
         self.data_files = sorted(list(self.data_files))
         self.data_files = self.expand_all_events(self.data_files)
+        self.data_files, self.filtered_tracks = self.filter_all_tracks(self.data_files)
 
         self.num_demos = len(self.data_files)
         self.dataset_cfg = dataset_cfg
@@ -69,6 +72,23 @@ class HOI4DDataset(td.Dataset):
 
     def __len__(self):
         return self.size
+
+    def load_intrinsics(self):
+        """
+        Load camera intrinsics for HOI4D. A bit hacky.
+        Camera intrinsics are expected to be placed one level above hoi4d dir
+        with the directory name "camera_params"
+        """
+        intrinsic_dict = {}
+        for cam_name in [
+            "ZY20210800001",
+            "ZY20210800002",
+            "ZY20210800003",
+            "ZY20210800004",
+        ]:
+            cam_param_pathname = f"{self.dataset_dir}/../camera_params/{cam_name}/"
+            intrinsic_dict[cam_name] = np.load(f"{cam_param_pathname}/intrin.npy")
+        return intrinsic_dict
 
     def expand_all_events(self, data_files):
         """This function *expands* each file to have an associated event_idx.
@@ -90,10 +110,12 @@ class HOI4DDataset(td.Dataset):
                 all_events = action_annotation["events"]
             else:
                 all_events = action_annotation["markResult"]["marks"]
-            valid_events = [
-                i for i in all_events if i["event"] in self.valid_event_types
+            valid_event_idxs = [
+                idx
+                for idx, i in enumerate(all_events)
+                if i["event"] in self.valid_event_types
             ]
-            expanded_data_files.extend([(f, idx) for idx in range(len(valid_events))])
+            expanded_data_files.extend([(f, idx) for idx in valid_event_idxs])
         return expanded_data_files
 
     def load_split(self, split):
@@ -117,13 +139,9 @@ class HOI4DDataset(td.Dataset):
         cam_trajectory = o3d.io.read_pinhole_camera_trajectory(
             f"{dir_name}/3Dseg/output.log"
         )
-        # A bit hacky.
-        # Camera intrinsics are expected to be placed one level above hoi4d dir
-        # with the directory name "camera_params"
-        cam_name = dir_name.split("/")[-7]
-        cam_param_pathname = f"{self.dataset_dir}/../camera_params/{cam_name}/"
-        K = np.load(f"{cam_param_pathname}/intrin.npy")
         cam2world = np.array([i.extrinsic for i in cam_trajectory.parameters])
+        cam_name = dir_name.split("/")[-7]
+        K = self.intrinsic_dict[cam_name]
         return K, cam2world
 
     def load_event(self, dir_name, event_idx):
@@ -138,8 +156,7 @@ class HOI4DDataset(td.Dataset):
             fps = 300 / action_annotation["info"]["Duration"]
             all_events = action_annotation["markResult"]["marks"]
 
-        valid_events = [i for i in all_events if i["event"] in self.valid_event_types]
-        event = valid_events[event_idx]
+        event = all_events[event_idx]
 
         try:
             # Convert timestamp in seconds to frame_idx
@@ -173,20 +190,71 @@ class HOI4DDataset(td.Dataset):
         depths = np.array([depth_init, depth_end])
         return rgbs, depths
 
+    def filter_all_tracks(self, data_files):
+        """
+        We have some noisy data points in the dataset.
+        When there is a segmentation/depth mismatch, points in the background are tracked.
+        Some objects irrelevant to the current event are tracked.
+        And some events just have very minimal motion.
+        All these tracks are filtered out in this function.
+        """
+        # We want points which move atleast `norm_threshold` cm,
+        # and atleast `num_points_threshold` such points in an event
+        norm_threshold = 0.075
+        num_points_threshold = 25
+
+        print("Number of events before filtering:", len(data_files))
+        print("Beginning filtering of tracks:")
+        filtered_data_files = []
+        filtered_tracks = []
+        for index in tqdm(range(len(data_files))):
+            vid_name, event_idx = data_files[index]
+            dir_name = os.path.dirname(os.path.dirname(vid_name))
+
+            K, cam2world = self.load_camera_params(dir_name)
+            _, event_start_idx, event_end_idx = self.load_event(dir_name, event_idx)
+
+            _, depths = self.load_rgbd(dir_name, event_start_idx, event_end_idx)
+            start_tracks, end_tracks, start2end = self.process_and_register_tracks(
+                dir_name,
+                event_idx,
+                event_start_idx,
+                event_end_idx,
+                depths,
+                K,
+                cam2world,
+            )
+
+            cross_displacement = end_tracks - start_tracks
+            cd_mask = np.linalg.norm(cross_displacement, axis=1) > norm_threshold
+
+            start_tracks = start_tracks[cd_mask]
+            end_tracks = end_tracks[cd_mask]
+
+            if start_tracks.shape[0] > num_points_threshold:
+                filtered_data_files.append(data_files[index])
+                filtered_tracks.append((start_tracks, end_tracks, start2end))
+
+        print("Number of events after filtering:", len(filtered_data_files))
+        return filtered_data_files, filtered_tracks
+
     def process_and_register_tracks(
-        self, dir_name, event_start_idx, event_end_idx, depths, K, cam2world
+        self, dir_name, event_idx, event_start_idx, event_end_idx, depths, K, cam2world
     ):
         """
         Load the tracks corresponding to the start and end of the event.
         Unproject the tracks to 3D point clouds, register the point cloud
         `end_tracks` to the `start_tracks` coordinate frame.
         """
-        tracks = np.load(f"{dir_name}/spatracker_3d_tracks.npy")
-        start_tracks = tracks[event_start_idx]
+        tracks = np.load(f"{dir_name}/spatracker_3d_tracks.npz")
+        event_tracks = tracks[f"tracks_{event_idx}"]
+
+        start_tracks = event_tracks[0]
 
         # Clip to image boundaries, unproject
         ty = np.clip(start_tracks[:, 1].round().astype(int), 0, depths[0].shape[0] - 1)
         tx = np.clip(start_tracks[:, 0].round().astype(int), 0, depths[0].shape[1] - 1)
+        # Overwrite SpatialTracker depth with GT depth
         start_tracks[:, 2] = depths[0][ty, tx]
         start_tracks[:, 0] = ((start_tracks[:, 0] - K[0, 2]) * start_tracks[:, 2]) / K[
             0, 0
@@ -194,15 +262,23 @@ class HOI4DDataset(td.Dataset):
         start_tracks[:, 1] = ((start_tracks[:, 1] - K[1, 2]) * start_tracks[:, 2]) / K[
             1, 1
         ]
+        start_mask = np.linalg.norm(start_tracks, axis=1) != 0
 
-        end_tracks = tracks[event_end_idx]
+        end_tracks = event_tracks[-1]
 
         # Clip to image boundaries, unproject
         ty = np.clip(end_tracks[:, 1].round().astype(int), 0, depths[0].shape[0] - 1)
         tx = np.clip(end_tracks[:, 0].round().astype(int), 0, depths[0].shape[1] - 1)
+        # Overwrite SpatialTracker depth with GT depth
         end_tracks[:, 2] = depths[1][ty, tx]
         end_tracks[:, 0] = ((end_tracks[:, 0] - K[0, 2]) * end_tracks[:, 2]) / K[0, 0]
         end_tracks[:, 1] = ((end_tracks[:, 1] - K[1, 2]) * end_tracks[:, 2]) / K[1, 1]
+        end_mask = np.linalg.norm(end_tracks, axis=1) != 0
+
+        # Remove zero points
+        mask = np.logical_and(start_mask, end_mask)
+        start_tracks = start_tracks[mask]
+        end_tracks = end_tracks[mask]
 
         # Register the tracks at the end of the chunk with respect
         # to the coordinate frame at the beginning of the chunk
@@ -227,7 +303,7 @@ class HOI4DDataset(td.Dataset):
         z_flat = depth.flatten()
 
         # Remove points with invalid depth
-        valid_depth = z_flat > 0
+        valid_depth = np.logical_and(z_flat > 0, z_flat < 3)
         x_flat = x_flat[valid_depth]
         y_flat = y_flat[valid_depth]
         z_flat = z_flat[valid_depth]
@@ -244,28 +320,30 @@ class HOI4DDataset(td.Dataset):
         scene_pcd = points[:: self.DOWNSAMPLE_FACTOR]
         return scene_pcd
 
-    def __getitem__(self, index):
-        vid_name, event_idx = self.data_files[index]
-        dir_name = os.path.dirname(os.path.dirname(vid_name))
-
-        K, cam2world = self.load_camera_params(dir_name)
-
+    def compose_caption(self, dir_name, event):
+        """Compose the caption from the event name and the object."""
+        event_name = event["event"]
         # Get the object name from the pose file.
         # The dataset does not have a consistent naming scheme .......
         objpose_fname = f"{dir_name}/objpose/0.json"
         if not os.path.exists(objpose_fname):
             objpose_fname = f"{dir_name}/objpose/00000.json"
         obj_name = json.load(open(objpose_fname))["dataList"][0]["label"]
+        caption = f"{event_name} {obj_name}"
+        return caption
 
+    def __getitem__(self, index):
+        vid_name, event_idx = self.data_files[index]
+        dir_name = os.path.dirname(os.path.dirname(vid_name))
+
+        K, cam2world = self.load_camera_params(dir_name)
         event, event_start_idx, event_end_idx = self.load_event(dir_name, event_idx)
-        event_name = event["event"]
 
         rgbs, depths = self.load_rgbd(dir_name, event_start_idx, event_end_idx)
-        start_tracks, end_tracks, start2end = self.process_and_register_tracks(
-            dir_name, event_start_idx, event_end_idx, depths, K, cam2world
-        )
+        start_tracks, end_tracks, start2end = self.filtered_tracks[index]
+
         start_scene_pcd = self.get_scene_pcd(rgbs[0], depths[0], K)
-        caption = f"{event_name} {obj_name}"
+        caption = self.compose_caption(dir_name, event)
 
         # Center on action_pcd
         action_pcd_mean = start_tracks.mean(axis=0)

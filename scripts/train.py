@@ -123,7 +123,6 @@ def main(cfg):
         max_epochs=cfg.training.epochs,
         logger=logger,
         check_val_every_n_epoch=cfg.training.check_val_every_n_epochs,
-        log_every_n_steps=len(datamodule.train_dataloader()) // 16,
         gradient_clip_val=cfg.training.grad_clip_norm,
         callbacks=[
             ModelCheckpoint(

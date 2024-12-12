@@ -117,7 +117,7 @@ def get_named_beta_schedule(schedule_name, num_diffusion_timesteps):
             beta_end=scale * 0.02,
             num_diffusion_timesteps=num_diffusion_timesteps,
         )
-    elif schedule_name == "squaredcos_cap_v2":
+    elif schedule_name == "squaredcos_cap_v2" or schedule_name == "cosine":
         return betas_for_alpha_bar(
             num_diffusion_timesteps,
             lambda t: math.cos((t + 0.008) / 1.008 * math.pi / 2) ** 2,

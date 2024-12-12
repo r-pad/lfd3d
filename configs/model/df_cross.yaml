@@ -16,6 +16,6 @@ use_p_prime: True # Use p' = p + xt as additional input to the DiT
 # diffusion settings
 diff_train_steps: 100 # Number of diffusion steps during training
 diff_inference_steps: 100 # Number of diffusion steps during inference
-diff_noise_schedule: linear # (linear, cosine) Noise schedule for diffusion
+diff_noise_schedule: cosine # (linear, cosine) Noise schedule for diffusion
 diff_noise_scale: 1.0 # Scale of noise for diffusion
 diff_type: gaussian
