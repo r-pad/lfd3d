@@ -372,6 +372,11 @@ class HOI4DDataset(td.Dataset):
         start_tracks -= action_pcd_mean
         end_tracks -= action_pcd_mean
         start_scene_pcd -= action_pcd_mean
+        # Standardize on scene_pcd
+        scene_pcd_std = start_scene_pcd.std(axis=0)
+        start_tracks /= scene_pcd_std
+        end_tracks /= scene_pcd_std
+        start_scene_pcd /= scene_pcd_std
 
         # collate_pcd_fn handles batching of the point clouds
         item = {
@@ -384,7 +389,8 @@ class HOI4DDataset(td.Dataset):
             "depths": depths,
             "start2end": start2end,
             "vid_name": dir_name,
-            "action_pcd_mean": action_pcd_mean,
+            "pcd_mean": action_pcd_mean,
+            "pcd_std": scene_pcd_std,
         }
         return item
 
