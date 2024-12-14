@@ -51,8 +51,8 @@ class HOI4DDataset(td.Dataset):
         self.dataset_cfg = dataset_cfg
 
         self.size = self.num_demos
-        # Downsample factor for scene point cloud
-        self.DOWNSAMPLE_FACTOR = 1000
+        # Voxel size for downsampling
+        self.voxel_size = 0.06
 
     def __len__(self):
         return self.size
@@ -343,7 +343,13 @@ class HOI4DDataset(td.Dataset):
         points = points * z_flat
         points = points.T  # Shape: (N, 3)
 
-        scene_pcd = points[:: self.DOWNSAMPLE_FACTOR]
+        scene_pcd_o3d = o3d.geometry.PointCloud()
+        scene_pcd_o3d.points = o3d.utility.Vector3dVector(points)
+        scene_pcd_o3d_downsample = scene_pcd_o3d.voxel_down_sample(
+            voxel_size=self.voxel_size
+        )
+
+        scene_pcd = np.asarray(scene_pcd_o3d_downsample.points)
         return scene_pcd
 
     def compose_caption(self, dir_name, event):

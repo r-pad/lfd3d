@@ -71,8 +71,14 @@ def get_img_and_track_pcd(
     # Get corresponding colors
     colors = image.reshape(-1, 3)[valid_depth]
     image_pcd = np.concatenate([points, colors], axis=-1)
-    # Keep one in 100 points
-    image_pcd = image_pcd[::100]
+
+    image_pcd_o3d = o3d.geometry.PointCloud()
+    image_pcd_o3d.points = o3d.utility.Vector3dVector(image_pcd[:, :3])
+    image_pcd_o3d.colors = o3d.utility.Vector3dVector(image_pcd[:, 3:])
+    image_pcd_o3d_downsample = image_pcd_o3d.voxel_down_sample(voxel_size=0.02)
+    image_pcd_pts = np.asarray(image_pcd_o3d_downsample.points)
+    image_pcd_colors = np.asarray(image_pcd_o3d_downsample.colors)
+    image_pcd = np.concatenate([image_pcd_pts, image_pcd_colors], axis=-1)
 
     init_pcd = init_pcd[mask]
     init_pcd_color = np.repeat(init_pcd_color[None, :], init_pcd.shape[0], axis=0)
@@ -101,7 +107,9 @@ def get_action_anchor_pcd(
         np.array(action_pcd_color),
         np.array(anchor_pcd_color),
     )
+    eps = 1e-7
 
+    action_pcd += eps  # to prevent anchor overwriting action
     action_pcd_color = np.repeat(action_pcd_color[None, :], action_pcd.shape[0], axis=0)
     action_pcd = np.concatenate([action_pcd, action_pcd_color], axis=-1)
 
