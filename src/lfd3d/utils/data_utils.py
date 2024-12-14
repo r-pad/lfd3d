@@ -25,7 +25,8 @@ def collate_pcd_fn(batch):
     rgbs = []
     depths = []
     start2ends = []
-    action_pcd_means = []
+    pcd_means = []
+    pcd_stds = []
 
     # Separate items from batch
     for item in batch:
@@ -45,7 +46,8 @@ def collate_pcd_fn(batch):
         rgbs.append(torch.as_tensor(item["rgbs"]))
         depths.append(torch.as_tensor(item["depths"]))
         start2ends.append(torch.as_tensor(item["start2end"]))
-        action_pcd_means.append(torch.as_tensor(item["action_pcd_mean"]))
+        pcd_means.append(torch.as_tensor(item["pcd_mean"]))
+        pcd_stds.append(torch.as_tensor(item["pcd_std"]))
 
     # Create Pointclouds objects
     action_pointclouds = Pointclouds(points=action_pcds)
@@ -61,7 +63,8 @@ def collate_pcd_fn(batch):
     rgbs_batch = torch.stack(rgbs)
     depths_batch = torch.stack(depths)
     start2ends_batch = torch.stack(start2ends)
-    action_pcd_means_batch = torch.stack(action_pcd_means)
+    pcd_means_batch = torch.stack(pcd_means)
+    pcd_stds_batch = torch.stack(pcd_stds)
 
     # Create the output dictionary
     collated_batch = {
@@ -78,7 +81,8 @@ def collate_pcd_fn(batch):
         "rgbs": rgbs_batch,
         "depths": depths_batch,
         "start2end": start2ends_batch,
-        "action_pcd_mean": action_pcd_means_batch,
+        "pcd_mean": pcd_means_batch,
+        "pcd_std": pcd_stds_batch,
     }
 
     return collated_batch

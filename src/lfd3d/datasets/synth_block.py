@@ -72,6 +72,10 @@ class SynthBlockDataset(data.Dataset):
         action_pcd_mean = action_pcd.mean(axis=0)
         action_pcd -= action_pcd_mean
         anchor_pcd -= action_pcd_mean
+        # Standardize on scene_pcd
+        scene_pcd_std = anchor_pcd.std(axis=0)
+        action_pcd /= scene_pcd_std
+        anchor_pcd /= scene_pcd_std
 
         action_pcd = action_pcd[::10]
         cross_displacement = cross_displacement[::10]
@@ -88,7 +92,8 @@ class SynthBlockDataset(data.Dataset):
             "depths": depths,
             "start2end": start2end,
             "vid_name": dir_name,
-            "action_pcd_mean": action_pcd_mean,
+            "pcd_mean": action_pcd_mean,
+            "pcd_std": scene_pcd_std,
         }
         return item
 

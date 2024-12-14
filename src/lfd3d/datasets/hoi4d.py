@@ -1,5 +1,6 @@
 import json
 import os
+import pickle
 from glob import glob
 from pathlib import Path
 
@@ -198,12 +199,23 @@ class HOI4DDataset(td.Dataset):
         And some events just have very minimal motion.
         All these tracks are filtered out in this function.
         """
+        print("Number of events before filtering:", len(data_files))
+
+        # Check if cached
+        cache_name = f"{self.cache_dir}/filter_{self.split}.pkl"
+        if os.path.exists(cache_name):
+            with open(cache_name, "rb") as f:
+                cache_data = pickle.load(f)
+            filtered_data_files = cache_data["filtered_data_files"]
+            filtered_tracks = cache_data["filtered_tracks"]
+            print("Number of events after filtering:", len(filtered_data_files))
+            return filtered_data_files, filtered_tracks
+
         # We want points which move atleast `norm_threshold` cm,
         # and atleast `num_points_threshold` such points in an event
         norm_threshold = 0.075
         num_points_threshold = 25
 
-        print("Number of events before filtering:", len(data_files))
         print("Beginning filtering of tracks:")
         filtered_data_files = []
         filtered_tracks = []
@@ -234,6 +246,16 @@ class HOI4DDataset(td.Dataset):
             if start_tracks.shape[0] > num_points_threshold:
                 filtered_data_files.append(data_files[index])
                 filtered_tracks.append((start_tracks, end_tracks, start2end))
+
+        # Cache dataset
+        if self.cache_dir and not os.path.exists(cache_name):
+            os.makedirs(self.cache_dir, exist_ok=True)
+            with open(cache_name, "wb") as f:
+                cache_data = {
+                    "filtered_data_files": filtered_data_files,
+                    "filtered_tracks": filtered_tracks,
+                }
+                pickle.dump(cache_data, f)
 
         print("Number of events after filtering:", len(filtered_data_files))
         return filtered_data_files, filtered_tracks
@@ -303,7 +325,7 @@ class HOI4DDataset(td.Dataset):
         z_flat = depth.flatten()
 
         # Remove points with invalid depth
-        valid_depth = np.logical_and(z_flat > 0, z_flat < 3)
+        valid_depth = np.logical_and(z_flat > 0, z_flat < 5)
         x_flat = x_flat[valid_depth]
         y_flat = y_flat[valid_depth]
         z_flat = z_flat[valid_depth]
@@ -350,6 +372,11 @@ class HOI4DDataset(td.Dataset):
         start_tracks -= action_pcd_mean
         end_tracks -= action_pcd_mean
         start_scene_pcd -= action_pcd_mean
+        # Standardize on scene_pcd
+        scene_pcd_std = start_scene_pcd.std(axis=0)
+        start_tracks /= scene_pcd_std
+        end_tracks /= scene_pcd_std
+        start_scene_pcd /= scene_pcd_std
 
         # collate_pcd_fn handles batching of the point clouds
         item = {
@@ -362,7 +389,8 @@ class HOI4DDataset(td.Dataset):
             "depths": depths,
             "start2end": start2end,
             "vid_name": dir_name,
-            "action_pcd_mean": action_pcd_mean,
+            "pcd_mean": action_pcd_mean,
+            "pcd_std": scene_pcd_std,
         }
         return item
 

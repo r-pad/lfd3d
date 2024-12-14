@@ -70,7 +70,7 @@ def encode_without_parallelism(text_embed_model, text):
     return embeddings
 
 
-def calc_pcd_metrics(pred_dict, pcd, pred, gt, padding_mask):
+def calc_pcd_metrics(pred_dict, pcd, pred, gt, scale_factor, padding_mask):
     """
     Calculate pcd metrics and update pred_dict with the keys.
     Creates point clouds to be measured by applying the predicted
@@ -80,10 +80,11 @@ def calc_pcd_metrics(pred_dict, pcd, pred, gt, padding_mask):
     pcd: Metric Point Cloud
     pred: Predicted cross displacement
     gt: GT cross displacement
+    scale_factor: Scaling factor to bring to metric scale
     padding_mask: Padding mask
     """
-    pred_pcd = pcd + pred
-    gt_pcd = pcd + gt
+    pred_pcd = (pcd + pred) * scale_factor[:, None, :]
+    gt_pcd = (pcd + gt) * scale_factor[:, None, :]
 
     pred_dict["rmse"] = rmse_pcd(pred_pcd, gt_pcd, padding_mask)
     pred_dict["chamfer_dist"] = chamfer_distance(pred_pcd, gt_pcd, padding_mask)
@@ -204,7 +205,13 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
             num_warmup_steps=self.lr_warmup_steps,
             num_training_steps=self.num_training_steps,
         )
-        return [optimizer], [lr_scheduler]
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {
+                "scheduler": lr_scheduler,
+                "interval": "step",  # Step after every batch
+            },
+        }
 
     def get_model_kwargs(self, batch):
         """
@@ -301,11 +308,12 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         gt_pcd = pcd + gt
 
         # Move center back from action_pcd to the camera frame before viz
-        action_pcd_mean = batch["action_pcd_mean"][viz_idx].cpu().numpy()
-        pcd += action_pcd_mean
-        anchor_pcd += action_pcd_mean
-        pred_pcd += action_pcd_mean
-        gt_pcd += action_pcd_mean
+        pcd_mean = batch["pcd_mean"][viz_idx].cpu().numpy()
+        pcd_std = batch["pcd_std"][viz_idx].cpu().numpy()
+        pcd = (pcd * pcd_std) + pcd_mean
+        anchor_pcd = (anchor_pcd * pcd_std) + pcd_mean
+        pred_pcd = (pred_pcd * pcd_std) + pcd_mean
+        gt_pcd = (gt_pcd * pcd_std) + pcd_mean
 
         # All points cloud are in the start image's coordinate frame
         # We need to visualize the end image, therefore need to apply transform
@@ -408,12 +416,14 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
             pred_dict = self.predict(batch)
             pred = pred_dict[self.prediction_type]["pred"]
             padding_mask = batch["padding_mask"]
+            pcd_std = batch["pcd_std"]
             ground_truth = batch[self.label_key].to(self.device)
             pred_dict = calc_pcd_metrics(
                 pred_dict,
                 action_pcd.points_padded(),
                 pred,
                 ground_truth.points_padded(),
+                pcd_std,
                 padding_mask,
             )
             train_metrics.update(pred_dict)
@@ -478,11 +488,13 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         ground_truth = batch[self.label_key].to(self.device)
         action_pcd = batch["action_pcd"]
         padding_mask = batch["padding_mask"]
+        pcd_std = batch["pcd_std"]
         pred_dict = calc_pcd_metrics(
             pred_dict,
             action_pcd.points_padded(),
             pred,
             ground_truth.points_padded(),
+            pcd_std,
             padding_mask,
         )
         self.val_outputs.append(pred_dict)
@@ -523,11 +535,13 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         ground_truth = batch[self.label_key].to(self.device)
         action_pcd = batch["action_pcd"]
         padding_mask = batch["padding_mask"]
+        pcd_std = batch["pcd_std"]
         pred_dict = calc_pcd_metrics(
             pred_dict,
             action_pcd.points_padded(),
             pred,
             ground_truth.points_padded(),
+            pcd_std,
             padding_mask,
         )
 
