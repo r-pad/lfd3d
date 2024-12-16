@@ -25,21 +25,6 @@ class HOI4DDataset(td.Dataset):
 
         self.cache_dir = dataset_cfg.cache_dir
 
-        # SpatialTracker could not track the points in these files.
-        # or no gt depth available at some tracks
-        self.blacklisted_files = set(
-            [
-                f"{self.dataset_dir}/ZY20210800002/H2/C18/N26/S183/s01/T2/align_rgb/image.mp4",
-                f"{self.dataset_dir}/ZY20210800004/H4/C18/N19/S160/s05/T1/align_rgb/image.mp4",
-                f"{self.dataset_dir}/ZY20210800004/H4/C18/N26/S162/s02/T1/align_rgb/image.mp4",
-                f"{self.dataset_dir}/ZY20210800003/H3/C13/N50/S203/s02/T4/align_rgb/image.mp4",
-                f"{self.dataset_dir}/ZY20210800003/H3/C2/N35/S217/s04/T2/align_rgb/image.mp4",
-                f"{self.dataset_dir}/ZY20210800003/H3/C2/N36/S217/s04/T2/align_rgb/image.mp4",
-                f"{self.dataset_dir}/ZY20210800004/H4/C18/N22/S162/s01/T1/align_rgb/image.mp4",
-                f"{self.dataset_dir}/ZY20210800004/H4/C18/N40/S162/s02/T1/align_rgb/image.mp4",
-            ]
-        )
-
         self.intrinsic_dict = self.load_intrinsics()
         self.data_files = sorted(
             glob(f"{self.dataset_dir}/**/image.mp4", recursive=True)
@@ -57,9 +42,7 @@ class HOI4DDataset(td.Dataset):
 
         split_files = self.load_split(split)
         # Keep only the files that are in the requested split
-        self.data_files = (
-            set(self.data_files).intersection(set(split_files)) - self.blacklisted_files
-        )
+        self.data_files = set(self.data_files).intersection(set(split_files))
         self.data_files = sorted(list(self.data_files))
         self.data_files = self.expand_all_events(self.data_files)
         self.data_files, self.filtered_tracks = self.filter_all_tracks(self.data_files)
@@ -68,8 +51,8 @@ class HOI4DDataset(td.Dataset):
         self.dataset_cfg = dataset_cfg
 
         self.size = self.num_demos
-        # Downsample factor for scene point cloud
-        self.DOWNSAMPLE_FACTOR = 1000
+        # Voxel size for downsampling
+        self.voxel_size = 0.06
 
     def __len__(self):
         return self.size
@@ -302,6 +285,27 @@ class HOI4DDataset(td.Dataset):
         start_tracks = start_tracks[mask]
         end_tracks = end_tracks[mask]
 
+        # Remove statistical outliers
+        start_track_pcd = o3d.geometry.PointCloud()
+        start_mask = np.zeros(start_tracks.shape[0], dtype=bool)
+        start_track_pcd.points = o3d.utility.Vector3dVector(start_tracks)
+        _, inlier_indices = start_track_pcd.remove_statistical_outlier(
+            nb_neighbors=10, std_ratio=0.5
+        )
+        start_mask[inlier_indices] = True
+
+        end_track_pcd = o3d.geometry.PointCloud()
+        end_mask = np.zeros(end_tracks.shape[0], dtype=bool)
+        end_track_pcd.points = o3d.utility.Vector3dVector(end_tracks)
+        _, inlier_indices = end_track_pcd.remove_statistical_outlier(
+            nb_neighbors=10, std_ratio=0.5
+        )
+        end_mask[inlier_indices] = True
+
+        mask = np.logical_and(start_mask, end_mask)
+        start_tracks = start_tracks[mask]
+        end_tracks = end_tracks[mask]
+
         # Register the tracks at the end of the chunk with respect
         # to the coordinate frame at the beginning of the chunk
         start2world = cam2world[event_start_idx]
@@ -339,7 +343,13 @@ class HOI4DDataset(td.Dataset):
         points = points * z_flat
         points = points.T  # Shape: (N, 3)
 
-        scene_pcd = points[:: self.DOWNSAMPLE_FACTOR]
+        scene_pcd_o3d = o3d.geometry.PointCloud()
+        scene_pcd_o3d.points = o3d.utility.Vector3dVector(points)
+        scene_pcd_o3d_downsample = scene_pcd_o3d.voxel_down_sample(
+            voxel_size=self.voxel_size
+        )
+
+        scene_pcd = np.asarray(scene_pcd_o3d_downsample.points)
         return scene_pcd
 
     def compose_caption(self, dir_name, event):
