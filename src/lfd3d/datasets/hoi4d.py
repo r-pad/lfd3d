@@ -47,15 +47,13 @@ class HOI4DDataset(td.Dataset):
         self.data_files = self.expand_all_events(self.data_files)
         self.data_files, self.filtered_tracks = self.filter_all_tracks(self.data_files)
 
-        self.num_demos = len(self.data_files)
         self.dataset_cfg = dataset_cfg
-
-        self.size = self.num_demos
         # Voxel size for downsampling
         self.voxel_size = 0.06
 
     def __len__(self):
-        return self.size
+        assert len(self.data_files) == len(self.filtered_tracks)
+        return len(self.data_files)
 
     def load_intrinsics(self):
         """
@@ -379,14 +377,14 @@ class HOI4DDataset(td.Dataset):
 
         # Center on action_pcd
         action_pcd_mean = start_tracks.mean(axis=0)
-        start_tracks -= action_pcd_mean
-        end_tracks -= action_pcd_mean
-        start_scene_pcd -= action_pcd_mean
+        start_tracks = start_tracks - action_pcd_mean
+        end_tracks = end_tracks - action_pcd_mean
+        start_scene_pcd = start_scene_pcd - action_pcd_mean
         # Standardize on scene_pcd
         scene_pcd_std = start_scene_pcd.std(axis=0)
-        start_tracks /= scene_pcd_std
-        end_tracks /= scene_pcd_std
-        start_scene_pcd /= scene_pcd_std
+        start_tracks = start_tracks / scene_pcd_std
+        end_tracks = end_tracks / scene_pcd_std
+        start_scene_pcd = start_scene_pcd / scene_pcd_std
 
         # collate_pcd_fn handles batching of the point clouds
         item = {
