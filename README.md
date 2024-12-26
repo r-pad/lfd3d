@@ -30,9 +30,25 @@ pre-commit install
 
 To train a model:
 ```
-cd scripts/
-python train.py model=df_cross dataset=hoi4d dataset.data_dir=<path/to/dataset/>
+python scripts/train.py model=df_cross dataset=hoi4d dataset.data_dir=<path/to/dataset/>
 ```
+
+Optionally, also set `dataset.cache_dir` to save processed data for faster training.
+
+The best checkpoint is saved to WandB at the end of training. If training is interrupted or if you want to save an intermdiate checkpoint stored in `logs/`:
+```
+cd scripts/
+python upload_wandb.py --run_id <wandb-run-id> --checkpoint_path <path/to/checkpoint>
+```
+
+## Evaluation
+
+Evaluation:
+```
+python scripts/eval.py checkpoint.run_id=<wandb-run-id> dataset.data_dir=<path/to/dataset/>
+```
+
+If the model was trained on the cluster, `dataset.cache_dir` needs to be overridden and set to null.
 
 ## Docker
 
@@ -65,20 +81,6 @@ To push this:
 ```bash
 docker push $DOCKER_USERNAME/lfd3d:latest
 ```
-
-## Using the CI.
-
-Set up pushing to docker:
-
-Put the following secrets in the Github repository:
-* `DOCKERHUB_USERNAME`: Your Dockerhub username
-* `DOCKERHUB_TOKEN`: Your Dockerhub token
-
-You'll also need to Ctrl-F replace instances of beisner and baeisner with appropriate usernames.
-
-## Running on Clusters
-
-* [Autobot](autobot.md)
 
 ## Acknowledgements
 
