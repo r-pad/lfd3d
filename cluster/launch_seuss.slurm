@@ -50,4 +50,5 @@ SINGULARITYENV_WANDB_DOCKER_IMAGE=lfd3d \
     log_dir=/scratch/rpad/logs \
     resources.gpus=-1
 
+rsync -avh /scratch/rpad/logs /home/sskrishn/
 #rm -rf /scratch/rpad/hoi4d_cache

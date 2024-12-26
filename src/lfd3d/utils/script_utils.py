@@ -186,7 +186,7 @@ def load_checkpoint_config_from_wandb(
     for ovrd in task_overrides:
         key = ovrd.split("=")[0]
         # hack to skip data_dir overrides
-        if "data_dir" in key:
+        if "data_dir" in key or "cache_dir" in key:
             continue
         # only check for consistency with dataset/model keys
         if key.split(".")[0] not in ["dataset", "model"]:
@@ -202,6 +202,7 @@ def load_checkpoint_config_from_wandb(
 
     # hack to keep data_dir override
     current_data_dir = current_cfg.dataset.data_dir
+    current_cache_dir = current_cfg.dataset.cache_dir
 
     # update run config with dataset and model configs from original run config
     OmegaConf.update(
@@ -224,4 +225,5 @@ def load_checkpoint_config_from_wandb(
         current_cfg.dataset.train_size = None
         current_cfg.dataset.val_size = None
     current_cfg.dataset.data_dir = current_data_dir
+    current_cfg.dataset.cache_dir = current_cache_dir
     return current_cfg

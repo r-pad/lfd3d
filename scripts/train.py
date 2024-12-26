@@ -18,14 +18,6 @@ from lfd3d.utils.script_utils import (
 
 @hydra.main(config_path="../configs", config_name="train", version_base="1.3")
 def main(cfg):
-    print(
-        json.dumps(
-            omegaconf.OmegaConf.to_container(cfg, resolve=True, throw_on_missing=False),
-            sort_keys=True,
-            indent=4,
-        )
-    )
-
     ######################################################################
     # Torch settings.
     ######################################################################
@@ -146,6 +138,16 @@ def main(cfg):
 
     # Log the code used to train the model. Make sure not to log too much, because it will be too big.
     if trainer.is_global_zero:
+        print(
+            json.dumps(
+                omegaconf.OmegaConf.to_container(
+                    cfg, resolve=True, throw_on_missing=False
+                ),
+                sort_keys=True,
+                indent=4,
+            )
+        )
+
         logger.experiment.log_code(
             root=PROJECT_ROOT,
             include_fn=match_fn(

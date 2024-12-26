@@ -78,22 +78,31 @@ def get_img_and_track_pcd(
     image_pcd_o3d_downsample = image_pcd_o3d.voxel_down_sample(voxel_size=0.02)
     image_pcd_pts = np.asarray(image_pcd_o3d_downsample.points)
     image_pcd_colors = np.asarray(image_pcd_o3d_downsample.colors)
-    image_pcd = np.concatenate([image_pcd_pts, image_pcd_colors], axis=-1)
 
-    init_pcd = init_pcd[mask]
-    init_pcd_color = np.repeat(init_pcd_color[None, :], init_pcd.shape[0], axis=0)
-    init_pcd = np.concatenate([init_pcd, init_pcd_color], axis=-1)
+    init_pcd_pts = init_pcd[mask]
+    init_pcd_color = np.repeat(init_pcd_color[None, :], init_pcd_pts.shape[0], axis=0)
 
-    gt_pcd = gt_pcd[mask]
-    gt_color = np.repeat(gt_color[None, :], gt_pcd.shape[0], axis=0)
-    gt_pcd = np.concatenate([gt_pcd, gt_color], axis=-1)
+    gt_pcd_pts = gt_pcd[mask]
+    gt_color = np.repeat(gt_color[None, :], gt_pcd_pts.shape[0], axis=0)
 
-    pred_pcd = pred_pcd[mask]
-    pred_color = np.repeat(pred_color[None, :], pred_pcd.shape[0], axis=0)
-    pred_pcd = np.concatenate([pred_pcd, pred_color], axis=-1)
+    pred_pcd_pts = pred_pcd[mask]
+    pred_color = np.repeat(pred_color[None, :], pred_pcd_pts.shape[0], axis=0)
 
-    viz_pcd = np.concatenate([image_pcd, init_pcd, pred_pcd, gt_pcd], axis=0)
+    viz_pcd_pts = np.concatenate(
+        [image_pcd_pts, init_pcd_pts, pred_pcd_pts, gt_pcd_pts], axis=0
+    )
+    viz_pcd_colors = np.concatenate(
+        [image_pcd_colors, init_pcd_color, pred_color, gt_color], axis=0
+    )
 
+    # Flip about x-axis to prevent mirroring of pcd in wandb
+    flip_transform = np.array([[-1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
+
+    homogeneous_pts = np.hstack([viz_pcd_pts, np.ones((viz_pcd_pts.shape[0], 1))])
+    transformed_pts = homogeneous_pts @ flip_transform.T
+    transformed_pts_3d = transformed_pts[:, :3] / transformed_pts[:, 3:]
+
+    viz_pcd = np.concatenate([transformed_pts_3d, viz_pcd_colors], axis=-1)
     return viz_pcd
 
 
@@ -109,14 +118,20 @@ def get_action_anchor_pcd(
     )
     eps = 1e-7
 
-    action_pcd += eps  # to prevent anchor overwriting action
     action_pcd_color = np.repeat(action_pcd_color[None, :], action_pcd.shape[0], axis=0)
-    action_pcd = np.concatenate([action_pcd, action_pcd_color], axis=-1)
-
     anchor_pcd_color = np.repeat(anchor_pcd_color[None, :], anchor_pcd.shape[0], axis=0)
-    anchor_pcd = np.concatenate([anchor_pcd, anchor_pcd_color], axis=-1)
 
-    viz_pcd = np.concatenate([action_pcd, anchor_pcd], axis=0)
+    viz_pcd_pts = np.concatenate([action_pcd, anchor_pcd], axis=0)
+    viz_pcd_colors = np.concatenate([action_pcd_color, anchor_pcd_color], axis=0)
+
+    # Flip about x-axis to prevent mirroring of pcd in wandb
+    flip_transform = np.array([[-1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
+
+    homogeneous_pts = np.hstack([viz_pcd_pts, np.ones((viz_pcd_pts.shape[0], 1))])
+    transformed_pts = homogeneous_pts @ flip_transform.T
+    transformed_pts_3d = transformed_pts[:, :3] / transformed_pts[:, 3:]
+
+    viz_pcd = np.concatenate([transformed_pts_3d, viz_pcd_colors], axis=-1)
     return viz_pcd
 
 
