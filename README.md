@@ -26,6 +26,13 @@ pre-commit install
 
 ```
 
+## Feature Generation
+
+TODO: Add detailed steps and code.
+
+- HOI4D: Generate RGB/text features using SAM / SIGLIP (`src/lfd3d/datasets/hoi4d_processing/`), tracks generated with SpatialTracker
+- RT-1: Chunk captions (`src/lfd3d/datasets/rt1_processing/`), tracks generated with CoTracker and depth generated with RollingDepth
+
 ## Training
 
 To train a model:
