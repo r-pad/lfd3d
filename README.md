@@ -18,6 +18,14 @@ pip install -e ".[develop,notebook]"
 
 ```
 
+Install `flash-attn` separately:
+
+```bash
+
+pip install flash-attn --no-build-isolation
+
+```
+
 Then we install pre-commit hooks:
 
 ```bash
