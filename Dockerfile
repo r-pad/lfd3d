@@ -34,9 +34,7 @@ COPY ./src $CODING_ROOT/code/src
 COPY ./setup.py $CODING_ROOT/code/setup.py
 COPY ./pyproject.toml $CODING_ROOT/code/pyproject.toml
 COPY ./requirements.txt $CODING_ROOT/code/requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt
-RUN pip install --no-cache-dir -e .[develop]
-RUN pip install flash-attn --no-build-isolation
+RUN pip install --no-cache-dir -r requirements.txt && pip install --no-cache-dir -e .[develop] && pip install --no-cache-dir flash-attn --no-build-isolation
 
 # Changes to the configs and scripts will not require a rebuild
 COPY ./configs $CODING_ROOT/code/configs
