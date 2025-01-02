@@ -1,4 +1,5 @@
 import math
+import warnings
 from functools import partial
 from typing import Optional
 
@@ -563,10 +564,12 @@ class DiPTv3Adapter(nn.Module):
         t: torch.Tensor,
         x0: torch.Tensor,
         y: Optional[torch.Tensor] = None,
+        text_embed: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """
         Denoise the input (a point cloud).
         """
+        warnings.warn("NOTE: text embed is currently discarded")
 
         # Permute to (B, N, C)
         assert len(x.shape) == 3

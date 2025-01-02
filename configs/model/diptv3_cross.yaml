@@ -1,0 +1,13 @@
+name: diptv3_cross
+
+# Model settings
+type: cross_displacement # (flow, point) Type of model
+size: b # (xs, s, ...) Architecture of DiT
+in_channels: 8 # Number of input channels
+
+# diffusion settings
+diff_train_steps: 100 # Number of diffusion steps during training
+diff_inference_steps: 100 # Number of diffusion steps during inference
+diff_noise_schedule: cosine # (linear, cosine) Noise schedule for diffusion
+diff_noise_scale: 1.0 # Scale of noise for diffusion
+diff_type: gaussian
