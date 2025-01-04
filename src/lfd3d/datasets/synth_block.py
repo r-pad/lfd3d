@@ -66,16 +66,23 @@ class SynthBlockDataset(data.Dataset):
         cross_displacement = np.load(f"{dir_name}/cross_displacement.npy")
         rgbs, depths = self.load_rgbd(dir_name)
 
+        # Scale down values to 1/10m (else breaks visualization)
+        action_pcd = action_pcd / 10
+        cross_displacement = cross_displacement / 10
+        anchor_pcd = anchor_pcd / 10
+        depths = depths / 10
+
         start2end = np.eye(4)
 
         # Center on action_pcd
         action_pcd_mean = action_pcd.mean(axis=0)
-        action_pcd -= action_pcd_mean
-        anchor_pcd -= action_pcd_mean
+        action_pcd = action_pcd - action_pcd_mean
+        anchor_pcd = anchor_pcd - action_pcd_mean
         # Standardize on scene_pcd
         scene_pcd_std = anchor_pcd.std(axis=0)
-        action_pcd /= scene_pcd_std
-        anchor_pcd /= scene_pcd_std
+        action_pcd = action_pcd / scene_pcd_std
+        anchor_pcd = anchor_pcd / scene_pcd_std
+        cross_displacement = cross_displacement / scene_pcd_std
 
         action_pcd = action_pcd[::10]
         cross_displacement = cross_displacement[::10]
