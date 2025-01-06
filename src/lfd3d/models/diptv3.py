@@ -1,5 +1,4 @@
 import math
-import warnings
 from functools import partial
 from typing import Optional
 
@@ -510,6 +509,15 @@ class DiPTv3Adapter(nn.Module):
         self.model = model
         self.grid_size = grid_size
 
+        text_dim = 384
+        hidden_dim = 128
+        self.text_projection_dim = 32
+        self.text_projector = nn.Sequential(
+            nn.Linear(text_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, self.text_projection_dim),
+        )
+
         final_input_size = model.dec[-1][-1].mlp[0].fc2.out_features
         self.final_layer = FinalLayer(
             final_input_size, model.t_hidden_size, final_dimension
@@ -569,8 +577,6 @@ class DiPTv3Adapter(nn.Module):
         """
         Denoise the input (a point cloud).
         """
-        warnings.warn("NOTE: text embed is currently discarded")
-
         # Permute to (B, N, C)
         assert len(x.shape) == 3
         assert x.shape[1] == 3
@@ -605,6 +611,19 @@ class DiPTv3Adapter(nn.Module):
         else:
             labels = None
 
+        if text_embed is not None:
+            # Project text embedding
+            text_emb = self.text_projector(text_embed)
+            # Zero-pad tensor for anchor points
+            text_emb = torch.cat(
+                [
+                    text_emb,
+                    torch.zeros(B, N1, self.text_projection_dim, device=x.device),
+                ],
+                dim=1,
+            )
+            text_emb = text_emb.reshape(-1, self.text_projection_dim)
+
         # Reshape to (BxN, C), and create a batch vector with the indices.
         # Right now assuming that the batch has same number of points for each example.
         x0_flat = x0.reshape(-1, D)
@@ -615,10 +634,11 @@ class DiPTv3Adapter(nn.Module):
             torch.arange(B, device=x0.device), x0.shape[1]
         )
 
+        cat_feat = torch.cat([x0_flat, x_flat], dim=-1)
         if y is not None:
-            cat_feat = torch.cat([x0_flat, x_flat, labels], dim=-1)
-        else:
-            cat_feat = torch.cat([x0_flat, x_flat], dim=-1)
+            cat_feat = torch.cat([cat_feat, labels], dim=-1)
+        if text_embed is not None:
+            cat_feat = torch.cat([cat_feat, text_emb], dim=-1)
 
         data = Point(
             coord=x0_flat,

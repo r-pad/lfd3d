@@ -33,7 +33,7 @@ def create_model(cfg):
         module_fn = CrossDisplacementModule
     elif cfg.model.name == "diptv3_cross":
         network_fn = lambda model_cfg: DiPTv3Adapter(
-            DiPTv3(in_channels=8), final_dimension=6
+            DiPTv3(in_channels=40), final_dimension=6
         )
         module_fn = CrossDisplacementModule
     else:
