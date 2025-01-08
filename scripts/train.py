@@ -111,7 +111,7 @@ def main(cfg):
     trainer = pl.Trainer(
         accelerator="gpu",
         devices=cfg.resources.gpus,
-        precision="16-mixed",
+        precision="32",
         max_epochs=cfg.training.epochs,
         logger=logger,
         check_val_every_n_epoch=cfg.training.check_val_every_n_epochs,

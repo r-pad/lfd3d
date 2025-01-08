@@ -9,6 +9,7 @@ authors = [{ email = "baeisner@andrew.cmu.edu", name = "Ben Eisner" }]
 dependencies = [
   "diffusers == 0.26.3",
   "gif",
+  "typer",
   "sentence_transformers",
   "huggingface-hub == 0.25.2",
   "open3d",
@@ -26,6 +27,9 @@ dependencies = [
   "tensorflow-cpu == 2.8",
   "tensorflow-datasets",
   "torchdatasets @ git+https://github.com/szymonmaszke/torchdatasets.git",
+  "segment-anything @ git+https://github.com/facebookresearch/segment-anything.git",
+  "sentencepiece",
+  "spconv-cu118", # CUDA 11.8
 ]
 
 [build-system]

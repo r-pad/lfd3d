@@ -2,19 +2,20 @@
 
 ## Installation
 
-First, we'll need to install platform-specific dependencies for Pytorch. See [here](https://pytorch.org/get-started/locally/) for more details. For example, if we want to use CUDA 11.8 with Pytorch 2.
 
 ```bash
 
-pip install torch==2.0.1 torchvision==0.15.2 --index-url https://download.pytorch.org/whl/cu118/
+conda create -n flash_attn python=3.10
+pip install -r requirements.txt
+pip install -e ".[develop]"
 
 ```
 
-Then, we can install the package itself:
+Install `flash-attn` separately:
 
 ```bash
 
-pip install -e ".[develop,notebook]"
+pip install flash-attn --no-build-isolation
 
 ```
 
@@ -25,6 +26,22 @@ Then we install pre-commit hooks:
 pre-commit install
 
 ```
+
+Alternatively, use Docker (see below).
+
+## Feature Generation
+
+### HOI4D
+
+- Tracks: Generated using `hoi4d_inference.py` from [sriramsk1999/SpaTracker](https://github.com/sriramsk1999/spatracker)
+- RGB/text features: Generated using `src/lfd3d/datasets/hoi4d_processing/rgb_text_feature_gen.py`.
+
+### RT-1
+
+- Tracks: Generated using `rt1_inference.py` from [sriramsk1999/CoTracker](https://github.com/sriramsk1999/co-tracker)
+- Depth: Generated using `rt1_inference.py` from [sriramsk1999/RollingDepth](https://github.com/sriramsk1999/RollingDepth)
+- Preprocess captions with `src/lfd3d/datasets/rt1_processing/process_captions.py`.
+- RGB/text features: Generated using `src/lfd3d/datasets/rt1_processing/rgb_text_feature_gen.py`.
 
 ## Training
 

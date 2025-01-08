@@ -1094,11 +1094,11 @@ class DiT_PointCloud_Cross(nn.Module):
         Forward pass of DiT with scene cross attention.
 
         Args:
-            x (torch.Tensor): (B, D, N) tensor of batched current timestep x (e.g. noised action) features
+            x (torch.Tensor): (B, N, D) tensor of batched current timestep x (e.g. noised action) features
             t (torch.Tensor): (B,) tensor of diffusion timesteps
-            y (torch.Tensor): (B, D, N) tensor of un-noised scene (e.g. anchor) features
-            x0 (Optional[torch.Tensor]): (B, D, N) tensor of un-noised x (e.g. action) features
-            text_embed (Optional[torch.Tensor]): (B, K) tensor of text embedding features. Assumes K=384 (miniLM)
+            y (torch.Tensor): (B, N', D) tensor of un-noised scene (e.g. anchor) features
+            x0 (Optional[torch.Tensor]): (B, N, D) tensor of un-noised x (e.g. action) features
+            text_embed (Optional[torch.Tensor]): (B, N, K) tensor of text embedding features. Assumes K=384 (miniLM)
         """
         # noise-centering, if enabled
         if self.model_cfg.center_noise:

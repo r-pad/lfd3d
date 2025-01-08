@@ -12,6 +12,7 @@ from pytorch_lightning.loggers import WandbLogger
 from lfd3d.datasets.hoi4d import HOI4DDataModule
 from lfd3d.datasets.rt1 import RT1DataModule
 from lfd3d.datasets.synth_block import SynthBlockDataModule
+from lfd3d.models.diptv3 import DiPTv3, DiPTv3Adapter
 from lfd3d.models.tax3d import (
     CrossDisplacementModule,
     DiffusionTransformerNetwork,
@@ -30,6 +31,13 @@ def create_model(cfg):
         network_fn = DiffusionTransformerNetwork
         # module_fn = Tax3dModule
         module_fn = CrossDisplacementModule
+    elif cfg.model.name == "diptv3_cross":
+        network_fn = lambda model_cfg: DiPTv3Adapter(
+            DiPTv3(in_channels=40), final_dimension=6
+        )
+        module_fn = CrossDisplacementModule
+    else:
+        raise NotImplementedError(cfg.model.name)
 
     # create network and model
     network = network_fn(model_cfg=cfg.model)

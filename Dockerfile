@@ -1,5 +1,5 @@
 # Use the official Ubuntu 20.04 image as the base
-FROM ubuntu:20.04
+FROM nvidia/cuda:11.8.0-devel-ubuntu20.04
 
 # Set environment variables to avoid interactive prompts during installation
 ENV DEBIAN_FRONTEND=noninteractive
@@ -34,8 +34,7 @@ COPY ./src $CODING_ROOT/code/src
 COPY ./setup.py $CODING_ROOT/code/setup.py
 COPY ./pyproject.toml $CODING_ROOT/code/pyproject.toml
 COPY ./requirements.txt $CODING_ROOT/code/requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt
-RUN pip install --no-cache-dir -e .[develop]
+RUN pip install --no-cache-dir -r requirements.txt && pip install --no-cache-dir -e .[develop] && pip install --no-cache-dir flash-attn --no-build-isolation
 
 # Changes to the configs and scripts will not require a rebuild
 COPY ./configs $CODING_ROOT/code/configs

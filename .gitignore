@@ -386,3 +386,5 @@ logs/
 # Generated for pushing to seuss.
 .singularity_images/
 .slurm_logs/
+
+sam_vit_h_4b8939.pth
