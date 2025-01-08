@@ -1,10 +1,10 @@
-import glob
+import argparse
 import json
 import os
 
-import cv2
 import joblib
 import numpy as np
+import tensorflow_datasets as tfds
 import torch
 import torch.nn.functional as F
 from PIL import Image
@@ -13,22 +13,49 @@ from sklearn.decomposition import PCA
 from tqdm import tqdm
 from transformers import AutoModel, AutoProcessor
 
-IMG_HEIGHT, IMG_WIDTH = 270, 480  # HOI4D scaled down from 1920x1080
+parser = argparse.ArgumentParser(
+    description="Generate RGB/text features using SIGLIP/ConceptFusion."
+)
+parser.add_argument(
+    "--split",
+    default=-1,
+    type=int,
+    help="Integer in 1-10 identifying which tenth of the dataset to process. \
+    Basically just a manual way to distribute work on the cluster.",
+)
+args = parser.parse_args()
+
+IMG_HEIGHT, IMG_WIDTH = 256, 320  # RT1 resolution
 feat_dim = 1152  # Siglip feature dim
-HOI4D_DIR = "/data/sriram/hoi4d/hoi4d_data/"
+RT1_DIR = "/data/sriram/rt1/fractal20220817_data_0.1.0"
+SAVE_DIR = "/data/sriram/rt1/rt1_rgb_feat"
+
+
+def get_video_chunk_idxs(gripper_state, caption):
+    threshold = 0.5
+
+    if caption.split()[0] in ["open", "close"]:
+        return [0]
+
+    # first chunk -> till gripper_state > threshold
+    first_chunk_end = np.argmax(gripper_state > threshold)
+
+    # second chunk -> from first chunk, till gripper state < threshold or end of video
+    second_chunk_offset = np.argmax(gripper_state[first_chunk_end:] < threshold)
+    if second_chunk_offset == 0:
+        second_chunk_end = -1
+    else:
+        second_chunk_end = first_chunk_end + second_chunk_offset
+
+    return [0, first_chunk_end]
 
 
 def compute_pixel_aligned_embedding(
-    img_path, caption, mask_generator, siglip, siglip_processor, cosine_similarity
+    img, caption, mask_generator, siglip, siglip_processor, cosine_similarity
 ):
     """
     Adapted from ConceptFusion
     """
-    img = cv2.imread(img_path)
-    img = cv2.resize(img, (0, 0), fx=0.25, fy=0.25)
-    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    img_tensor = torch.tensor(img).cuda()
-
     masks = mask_generator.generate(img)
 
     # Process inputs
@@ -169,17 +196,28 @@ siglip_processor = AutoProcessor.from_pretrained("google/siglip-so400m-patch14-3
 
 cosine_similarity = torch.nn.CosineSimilarity(dim=-1)
 
+builder = tfds.builder_from_directory(builder_dir=RT1_DIR)
+dataset = builder.as_dataset(split="train")
+dataset_size = len(dataset)
+
+split_num = args.split
+valid_idxs = range(dataset_size)
+if split_num >= 0 and split_num < 10:
+    valid_idxs = valid_idxs[
+        split_num * (dataset_size // 10) : (split_num + 1) * (dataset_size // 10)
+    ]
+
 # Prepare PCA
 if not os.path.exists("pca_model.pkl"):
     print("Collecting some features to fit PCA")
-    img_paths = glob.glob(
-        f"{HOI4D_DIR}/**/00200.jpg", recursive=True
-    )  # Random image just for computing PCA
     pca_fit_features = []
     # Fit a PCA with first 10 images.
-    for idx, img_path in tqdm(enumerate(img_paths[:10]), total=10):
+    for idx, item in tqdm(enumerate(dataset), total=10):
+        steps = [i for i in item["steps"]]
+        img = np.array(steps[0]["observation"]["image"])
+
         pix_align_embedding, _ = compute_pixel_aligned_embedding(
-            img_path,
+            img,
             "test caption",
             mask_generator,
             siglip,
@@ -188,11 +226,14 @@ if not os.path.exists("pca_model.pkl"):
         )
         pca_fit_features.append(pix_align_embedding)
 
+        if idx == 9:
+            break
+
     pca_model = PCA(n_components=256)
     features_proc = np.array(pca_fit_features).transpose(0, 3, 1, 2)
     downsample_features = F.interpolate(
         torch.from_numpy(features_proc),
-        scale_factor=1 / 5,
+        scale_factor=1 / 2,
         mode="bilinear",
         align_corners=False,
     )
@@ -204,50 +245,38 @@ if not os.path.exists("pca_model.pkl"):
     joblib.dump(pca_model, "pca_model.pkl")
 
 pca_model = joblib.load("pca_model.pkl")
+with open(f"{RT1_DIR}/../chunked_captions.json", "r") as f:
+    chunked_captions = json.load(f)
 
-hoi4d_videos = sorted(glob.glob(f"{HOI4D_DIR}/**/image.mp4", recursive=True))
-base_dirs = [os.path.dirname(os.path.dirname(f)) for f in hoi4d_videos]
+os.makedirs(SAVE_DIR, exist_ok=True)
 
-# Process hoi4d video
-for idx, dir_name in tqdm(enumerate(base_dirs), total=len(base_dirs)):
-    os.makedirs(f"{dir_name}/rgb_text_features", exist_ok=True)
+# Process rt1 video
+for idx, item in tqdm(enumerate(dataset), total=dataset_size):
+    if idx not in valid_idxs:
+        continue
 
-    action_annotation = json.load(open(f"{dir_name}/action/color.json"))
-    if "events" in action_annotation:
-        all_events = action_annotation["events"]
-    else:
-        all_events = action_annotation["markResult"]["marks"]
+    steps = [i for i in item["steps"]]
 
-    objpose_fname = f"{dir_name}/objpose/0.json"
-    if not os.path.exists(objpose_fname):
-        objpose_fname = f"{dir_name}/objpose/00000.json"
-    obj_name = json.load(open(objpose_fname))["dataList"][0]["label"]
+    gripper_state = np.array(
+        [i["observation"]["gripper_closed"].numpy() for i in steps]
+    )
+    overall_caption = (
+        steps[0]["observation"]["natural_language_instruction"].numpy().decode("utf-8")
+    )
 
-    for event_idx, event in enumerate(all_events):
-        save_name = f"{dir_name}/rgb_text_features/{event_idx}_compressed.npz"
+    chunk_idxs = get_video_chunk_idxs(gripper_state, overall_caption)
+
+    for i, chunk_idx in enumerate(chunk_idxs):
+        save_name = f"{SAVE_DIR}/{idx}_{i}_compressed.npz"
 
         if os.path.exists(save_name):
             continue
 
-        event_name = event["event"]
-        caption = f"{event_name} {obj_name}"
-
-        # 300 frames per video, 30 or 15 fps depending on length of video
-        try:
-            fps = 300 / action_annotation["info"]["duration"]
-        except KeyError:
-            fps = 300 / action_annotation["info"]["Duration"]
-
-        # Convert timestamp in seconds to frame_idx
-        try:
-            event_start_idx = int(event["startTime"] * fps)
-        except KeyError:
-            event_start_idx = int(event["hdTimeStart"] * fps)
-
-        img_path = f"{dir_name}/align_rgb/{str(event_start_idx).zfill(5)}.jpg"
+        caption = chunked_captions[idx]["chunked"][i]
+        img = np.array(steps[chunk_idx]["observation"]["image"])
 
         img_embedding, text_embedding = compute_pixel_aligned_embedding(
-            img_path,
+            img,
             caption,
             mask_generator,
             siglip,
