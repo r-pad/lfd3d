@@ -9,6 +9,7 @@ authors = [{ email = "baeisner@andrew.cmu.edu", name = "Ben Eisner" }]
 dependencies = [
   "diffusers == 0.26.3",
   "gif",
+  "typer",
   "sentence_transformers",
   "huggingface-hub == 0.25.2",
   "open3d",
