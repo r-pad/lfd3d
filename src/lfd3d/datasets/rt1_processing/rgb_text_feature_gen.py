@@ -34,7 +34,7 @@ SAVE_DIR = "/data/sriram/rt1/rt1_rgb_feat"
 def get_video_chunk_idxs(gripper_state, caption):
     threshold = 0.5
 
-    if caption.split()[0] in ["open", "close"]:
+    if caption == "" or caption.split()[0] in ["open", "close"]:
         return [0]
 
     # first chunk -> till gripper_state > threshold
@@ -82,7 +82,7 @@ def compute_pixel_aligned_embedding(
         seg = masks[maskidx]["segmentation"]
         nonzero_inds = torch.argwhere(torch.from_numpy(masks[maskidx]["segmentation"]))
         # Note: Image is (H, W, 3). In SAM output, y coords are along height, x along width
-        img_roi = img[_y : _y + _h, _x : _x + _w, :]
+        img_roi = img[int(_y) : int(_y + _h), int(_x) : int(_x + _w), :]
 
         if (img_roi.shape[0] * img_roi.shape[1]) < (0.01 * IMG_HEIGHT * IMG_WIDTH):
             continue
