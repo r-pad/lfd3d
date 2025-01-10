@@ -409,6 +409,7 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         do_additional_logging = (
             self.global_step % self.additional_train_logging_period == 0
             and self.trainer.is_global_zero
+            and self.global_step != 0
         )
 
         # additional logging
