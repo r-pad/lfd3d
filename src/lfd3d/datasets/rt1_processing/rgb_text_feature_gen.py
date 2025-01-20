@@ -13,23 +13,6 @@ from sklearn.decomposition import PCA
 from tqdm import tqdm
 from transformers import AutoModel, AutoProcessor
 
-parser = argparse.ArgumentParser(
-    description="Generate RGB/text features using SIGLIP/ConceptFusion."
-)
-parser.add_argument(
-    "--split",
-    default=-1,
-    type=int,
-    help="Integer in 1-10 identifying which tenth of the dataset to process. \
-    Basically just a manual way to distribute work on the cluster.",
-)
-args = parser.parse_args()
-
-IMG_HEIGHT, IMG_WIDTH = 256, 320  # RT1 resolution
-feat_dim = 1152  # Siglip feature dim
-RT1_DIR = "/data/sriram/rt1/fractal20220817_data_0.1.0"
-SAVE_DIR = "/data/sriram/rt1/rt1_rgb_feat"
-
 
 def get_video_chunk_idxs(gripper_state, caption):
     threshold = 0.5
@@ -176,120 +159,140 @@ def measure_compression_error(pca_model, features, compressed_features):
     )
 
 
-# Load models
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description="Generate RGB/text features using SIGLIP/ConceptFusion."
+    )
+    parser.add_argument(
+        "--split",
+        default=-1,
+        type=int,
+        help="Integer in 1-10 identifying which tenth of the dataset to process. \
+        Basically just a manual way to distribute work on the cluster.",
+    )
+    args = parser.parse_args()
 
-torch.autograd.set_grad_enabled(False)
+    IMG_HEIGHT, IMG_WIDTH = 256, 320  # RT1 resolution
+    feat_dim = 1152  # Siglip feature dim
+    RT1_DIR = "/data/sriram/rt1/fractal20220817_data_0.1.0"
+    SAVE_DIR = "/data/sriram/rt1/rt1_rgb_feat"
 
-# wget https://dl.fbaipublicfiles.com/segment_anything/sam_vit_h_4b8939.pth
-sam = sam_model_registry["vit_h"](checkpoint="../sam_vit_h_4b8939.pth")
-sam.to(device="cuda")
-mask_generator = SamAutomaticMaskGenerator(
-    model=sam,
-    points_per_side=8,
-    pred_iou_thresh=0.92,
-    crop_n_layers=1,
-    crop_n_points_downscale_factor=2,
-)
+    # Load models
 
-siglip = AutoModel.from_pretrained("google/siglip-so400m-patch14-384").to("cuda")
-siglip_processor = AutoProcessor.from_pretrained("google/siglip-so400m-patch14-384")
+    torch.autograd.set_grad_enabled(False)
 
-cosine_similarity = torch.nn.CosineSimilarity(dim=-1)
+    # wget https://dl.fbaipublicfiles.com/segment_anything/sam_vit_h_4b8939.pth
+    sam = sam_model_registry["vit_h"](checkpoint="../sam_vit_h_4b8939.pth")
+    sam.to(device="cuda")
+    mask_generator = SamAutomaticMaskGenerator(
+        model=sam,
+        points_per_side=8,
+        pred_iou_thresh=0.92,
+        crop_n_layers=1,
+        crop_n_points_downscale_factor=2,
+    )
 
-builder = tfds.builder_from_directory(builder_dir=RT1_DIR)
-dataset = builder.as_dataset(split="train")
-dataset_size = len(dataset)
+    siglip = AutoModel.from_pretrained("google/siglip-so400m-patch14-384").to("cuda")
+    siglip_processor = AutoProcessor.from_pretrained("google/siglip-so400m-patch14-384")
 
-split_num = args.split
-valid_idxs = range(dataset_size)
-if split_num >= 0 and split_num < 10:
-    valid_idxs = valid_idxs[
-        split_num * (dataset_size // 10) : (split_num + 1) * (dataset_size // 10)
-    ]
+    cosine_similarity = torch.nn.CosineSimilarity(dim=-1)
 
-# Prepare PCA
-if not os.path.exists("pca_model.pkl"):
-    print("Collecting some features to fit PCA")
-    pca_fit_features = []
-    # Fit a PCA with first 10 images.
-    for idx, item in tqdm(enumerate(dataset), total=10):
-        steps = [i for i in item["steps"]]
-        img = np.array(steps[0]["observation"]["image"])
+    builder = tfds.builder_from_directory(builder_dir=RT1_DIR)
+    dataset = builder.as_dataset(split="train")
+    dataset_size = len(dataset)
 
-        pix_align_embedding, _ = compute_pixel_aligned_embedding(
-            img,
-            "test caption",
-            mask_generator,
-            siglip,
-            siglip_processor,
-            cosine_similarity,
+    split_num = args.split
+    valid_idxs = range(dataset_size)
+    if split_num >= 0 and split_num < 10:
+        valid_idxs = valid_idxs[
+            split_num * (dataset_size // 10) : (split_num + 1) * (dataset_size // 10)
+        ]
+
+    # Prepare PCA
+    if not os.path.exists("pca_model.pkl"):
+        print("Collecting some features to fit PCA")
+        pca_fit_features = []
+        # Fit a PCA with first 10 images.
+        for idx, item in tqdm(enumerate(dataset), total=10):
+            steps = [i for i in item["steps"]]
+            img = np.array(steps[0]["observation"]["image"])
+
+            pix_align_embedding, _ = compute_pixel_aligned_embedding(
+                img,
+                "test caption",
+                mask_generator,
+                siglip,
+                siglip_processor,
+                cosine_similarity,
+            )
+            pca_fit_features.append(pix_align_embedding)
+
+            if idx == 9:
+                break
+
+        pca_model = PCA(n_components=256)
+        features_proc = np.array(pca_fit_features).transpose(0, 3, 1, 2)
+        downsample_features = F.interpolate(
+            torch.from_numpy(features_proc),
+            scale_factor=1 / 2,
+            mode="bilinear",
+            align_corners=False,
         )
-        pca_fit_features.append(pix_align_embedding)
+        downsample_features = (
+            downsample_features.numpy().transpose(0, 2, 3, 1).reshape(-1, feat_dim)
+        )
+        pca_model.fit(downsample_features)
 
-        if idx == 9:
-            break
+        joblib.dump(pca_model, "pca_model.pkl")
 
-    pca_model = PCA(n_components=256)
-    features_proc = np.array(pca_fit_features).transpose(0, 3, 1, 2)
-    downsample_features = F.interpolate(
-        torch.from_numpy(features_proc),
-        scale_factor=1 / 2,
-        mode="bilinear",
-        align_corners=False,
-    )
-    downsample_features = (
-        downsample_features.numpy().transpose(0, 2, 3, 1).reshape(-1, feat_dim)
-    )
-    pca_model.fit(downsample_features)
+    pca_model = joblib.load("pca_model.pkl")
+    with open(f"{RT1_DIR}/../chunked_captions.json", "r") as f:
+        chunked_captions = json.load(f)
 
-    joblib.dump(pca_model, "pca_model.pkl")
+    os.makedirs(SAVE_DIR, exist_ok=True)
 
-pca_model = joblib.load("pca_model.pkl")
-with open(f"{RT1_DIR}/../chunked_captions.json", "r") as f:
-    chunked_captions = json.load(f)
-
-os.makedirs(SAVE_DIR, exist_ok=True)
-
-# Process rt1 video
-for idx, item in tqdm(enumerate(dataset), total=dataset_size):
-    if idx not in valid_idxs:
-        continue
-
-    steps = [i for i in item["steps"]]
-
-    gripper_state = np.array(
-        [i["observation"]["gripper_closed"].numpy() for i in steps]
-    )
-    overall_caption = (
-        steps[0]["observation"]["natural_language_instruction"].numpy().decode("utf-8")
-    )
-
-    chunk_idxs = get_video_chunk_idxs(gripper_state, overall_caption)
-
-    for i, chunk_idx in enumerate(chunk_idxs):
-        save_name = f"{SAVE_DIR}/{idx}_{i}_compressed.npz"
-
-        if os.path.exists(save_name):
+    # Process rt1 video
+    for idx, item in tqdm(enumerate(dataset), total=dataset_size):
+        if idx not in valid_idxs:
             continue
 
-        caption = chunked_captions[idx]["chunked"][i]
-        img = np.array(steps[chunk_idx]["observation"]["image"])
+        steps = [i for i in item["steps"]]
 
-        img_embedding, text_embedding = compute_pixel_aligned_embedding(
-            img,
-            caption,
-            mask_generator,
-            siglip,
-            siglip_processor,
-            cosine_similarity,
+        gripper_state = np.array(
+            [i["observation"]["gripper_closed"].numpy() for i in steps]
         )
-        img_embedding_compressed = compress_features(pca_model, img_embedding).astype(
-            np.float32
+        overall_caption = (
+            steps[0]["observation"]["natural_language_instruction"]
+            .numpy()
+            .decode("utf-8")
         )
-        # measure_compression_error(pca_model, img_embedding, img_embedding_compressed)
 
-        np.savez_compressed(
-            save_name,
-            rgb_embed=img_embedding_compressed.astype(np.float16),
-            text_embed=text_embedding.astype(np.float16),
-        )
+        chunk_idxs = get_video_chunk_idxs(gripper_state, overall_caption)
+
+        for i, chunk_idx in enumerate(chunk_idxs):
+            save_name = f"{SAVE_DIR}/{idx}_{i}_compressed.npz"
+
+            if os.path.exists(save_name):
+                continue
+
+            caption = chunked_captions[idx]["chunked"][i]
+            img = np.array(steps[chunk_idx]["observation"]["image"])
+
+            img_embedding, text_embedding = compute_pixel_aligned_embedding(
+                img,
+                caption,
+                mask_generator,
+                siglip,
+                siglip_processor,
+                cosine_similarity,
+            )
+            img_embedding_compressed = compress_features(
+                pca_model, img_embedding
+            ).astype(np.float32)
+            # measure_compression_error(pca_model, img_embedding, img_embedding_compressed)
+
+            np.savez_compressed(
+                save_name,
+                rgb_embed=img_embedding_compressed.astype(np.float16),
+                text_embed=text_embedding.astype(np.float16),
+            )

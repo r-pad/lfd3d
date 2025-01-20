@@ -1,5 +1,6 @@
 name: rt1
 data_dir: ""
+cache_dir: null
 type: cross_displacement # (flow, point) Type of dataset
 source: real # (real, dedo, etc.) Source of the dataset
 
