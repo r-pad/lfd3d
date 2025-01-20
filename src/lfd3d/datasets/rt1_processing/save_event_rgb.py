@@ -48,11 +48,27 @@ out_dir = f"{root}/rt1_rgb_chunk"
 os.makedirs(out_dir, exist_ok=True)
 
 for idx, item in tqdm(dataset):
-    os.makedirs(f"{out_dir}/{idx}", exist_ok=True)
     steps = [it for it in item["steps"]]
     caption = captions[idx]["original"]
     chunk_indexes = get_start_end_indexes(steps, caption)
 
+    # Filter out bad videos in RT-1
+
+    # Too short
+    if len(steps) < 10:
+        continue
+
+    # In some videos, the task isn't actually completed and the gripper doesn't close
+    # We end up with repeating indexes in the chunk and we filter out here
+    if len(chunk_indexes) != len(set(chunk_indexes)):
+        continue
+
+    # Tracking failed on some videos
+    tracks = np.load(f"{root}/rt1_tracks/cotracker_{idx}.npz")["tracks"]
+    if tracks.shape[1] == 0:
+        continue
+
+    os.makedirs(f"{out_dir}/{idx}", exist_ok=True)
     for c_idx in chunk_indexes:
         rgb = steps[c_idx]["observation"]["image"].numpy()
         plt.imsave(f"{out_dir}/{idx}/{str(c_idx).zfill(5)}.png", rgb)

@@ -40,8 +40,12 @@ Alternatively, use Docker (see below).
 
 - Tracks: Generated using `rt1_inference.py` from [sriramsk1999/CoTracker](https://github.com/sriramsk1999/co-tracker)
 - Depth: Generated using `rt1_inference.py` from [sriramsk1999/RollingDepth](https://github.com/sriramsk1999/RollingDepth)
-- Preprocess captions with `src/lfd3d/datasets/rt1_processing/process_captions.py`.
-- RGB/text features: Generated using `src/lfd3d/datasets/rt1_processing/rgb_text_feature_gen.py`.
+
+After generating tracks and depth:
+
+1. Preprocess captions with `src/lfd3d/datasets/rt1_processing/process_captions.py`.
+2. RGB/text features: Generated using `src/lfd3d/datasets/rt1_processing/rgb_text_feature_gen.py`.
+3. Chunking and filtering: Generated using `src/lfd3d/datasets/rt1_processing/save_event_rgb.py`.
 
 ## Training
 

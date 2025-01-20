@@ -37,7 +37,9 @@ class RT1Dataset(td.Dataset):
         # Voxel size for downsampling
         self.voxel_size = 0.05
 
-        self.size = len(os.listdir(self.rgb_dir))
+        # TODO: handle expansion for each sub event
+        self.rt1_index = os.listdir(self.rgb_dir)
+        self.size = len(self.rt1_index)
 
     def __len__(self):
         return self.size
@@ -159,7 +161,9 @@ class RT1Dataset(td.Dataset):
         scene_pcd = np.asarray(scene_pcd_o3d_downsample.points)
         return scene_pcd
 
-    def __getitem__(self, index):
+    def __getitem__(self, idx):
+        index = int(self.rt1_index[idx])
+
         chunk_idx = self.select_event_chunk(index)
         caption = self.captions[index]["chunked"][chunk_idx]
 
