@@ -12,6 +12,7 @@ x_encoder: mlp # Encoder current timestep x
 y_encoder: mlp # (mlp, dgcnn) Encoder for y object (e.g. anchor pcd)
 x0_encoder: mlp # (mlp, dgcnn) Encoder for x0 object (e.g. action pcd)
 use_p_prime: True # Use p' = p + xt as additional input to the DiT
+enable_flash: True # Enable FlashAttention
 
 # diffusion settings
 diff_train_steps: 100 # Number of diffusion steps during training
