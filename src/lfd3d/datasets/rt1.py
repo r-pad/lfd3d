@@ -83,7 +83,10 @@ class RT1Dataset(td.Dataset):
         depth_vid = np.load(f"{self.depth_dir}/{index}_pred.npz")["arr_0"]
         depths = depth_vid[[event_start_idx, event_end_idx]]
 
-        depths *= -1  # RollingDepth estimates inverse relative depth
+        # RollingDepth estimates *inverse* relative depth, thus -ive sign in scale
+        # Scaling/shifting by 2 for viz
+        # Doesn't matter for network input since we standardize the pcd anyway
+        depths = (depths * -2) + 2
         return rgbs, depths
 
     def load_tracks(self, index, event_start_idx, event_end_idx, depths):
@@ -95,7 +98,7 @@ class RT1Dataset(td.Dataset):
         event_end_idx: int - End index of event
         """
         tracks = np.load(f"{self.track_dir}/cotracker_{index}.npz")["tracks"]
-        start_tracks, end_tracks = tracks[event_start_idx], tracks[event_start_idx]
+        start_tracks, end_tracks = tracks[event_start_idx], tracks[event_end_idx]
 
         # Unproject tracks to 3D
 
