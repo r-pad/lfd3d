@@ -1,6 +1,5 @@
 import json
 import os
-import random
 from pathlib import Path
 
 import cv2
@@ -37,8 +36,9 @@ class RT1Dataset(td.Dataset):
         # Voxel size for downsampling
         self.voxel_size = 0.05
 
-        # TODO: handle expansion for each sub event
         self.rt1_index = self.load_split(split)
+        self.rt1_index = self.expand_all_events(self.rt1_index)
+
         self.size = len(self.rt1_index)
 
     def __len__(self):
@@ -55,13 +55,33 @@ class RT1Dataset(td.Dataset):
         split_idxs = [int(i) for i in split_idxs]
         return split_idxs
 
-    def select_event_chunk(self, index):
-        """Many RT-1 events are decomposed into two sub-events.
-        For those events, sample one of the two randomly.
+    def expand_all_events(self, rt1_index):
+        """This function *expands* each event to have an associated chunk_idx.
+        RT-1 events have either 1/2 chunks depending on the event.
+        If no chunks were generated due to bad data/other issues,
+        the event is removed from the index.
 
-        index: int - Index in RT-1 TFDS
+        Args:
+            rt1_index (list of int): List of indexes in RT-1 to be processed.
+
+        Returns:
+            expanded_rt_index (list of tuples (int, int)): A list of tuples
+                  where each tuple contains the event index and the corresponding
+                  chunk index.
         """
-        return random.randint(0, len(self.captions[index]["chunked"]) - 1)
+        expanded_rt_index = []
+        for idx in rt1_index:
+            if not os.path.exists(f"{self.rgb_dir}/{idx}"):
+                continue
+
+            caption = self.captions[idx]["original"]
+            if caption == "" or caption.split()[0] in ["open", "close"]:
+                expanded_event = [(idx, 0)]
+            else:
+                expanded_event = [(idx, 0), (idx, 1)]
+
+            expanded_rt_index.extend(expanded_event)
+        return expanded_rt_index
 
     def load_event_indexes(self, index, chunk_idx):
         """Load the indexes of the images corresponding to the chunk in the specified event."""
@@ -176,11 +196,9 @@ class RT1Dataset(td.Dataset):
         return scene_pcd
 
     def __getitem__(self, idx):
-        index = int(self.rt1_index[idx])
+        index, chunk_idx = self.rt1_index[idx]
 
-        chunk_idx = self.select_event_chunk(index)
         caption = self.captions[index]["chunked"][chunk_idx]
-
         start2end = torch.eye(4)  # Static camera in RT-1
 
         event_start_idx, event_end_idx = self.load_event_indexes(index, chunk_idx)
