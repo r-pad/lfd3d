@@ -38,11 +38,22 @@ class RT1Dataset(td.Dataset):
         self.voxel_size = 0.05
 
         # TODO: handle expansion for each sub event
-        self.rt1_index = os.listdir(self.rgb_dir)
+        self.rt1_index = self.load_split(split)
         self.size = len(self.rt1_index)
 
     def __len__(self):
         return self.size
+
+    def load_split(self, split):
+        """
+        Load the filenames corresponding to each split - [train, val, test]
+        Test splits are from 3D-VLA. Train/val were manually generated.
+        """
+        current_dir = os.path.dirname(__file__)
+        with open(f"{current_dir}/fractal20220817_data_{split}.txt", "r") as f:
+            split_idxs = f.readlines()
+        split_idxs = [int(i) for i in split_idxs]
+        return split_idxs
 
     def select_event_chunk(self, index):
         """Many RT-1 events are decomposed into two sub-events.

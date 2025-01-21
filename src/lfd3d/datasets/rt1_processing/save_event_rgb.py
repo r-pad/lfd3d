@@ -48,6 +48,9 @@ out_dir = f"{root}/rt1_rgb_chunk"
 os.makedirs(out_dir, exist_ok=True)
 
 for idx, item in tqdm(dataset):
+    if os.path.exists(f"{out_dir}/{idx}"):
+        continue
+
     steps = [it for it in item["steps"]]
     caption = captions[idx]["original"]
     chunk_indexes = get_start_end_indexes(steps, caption)
