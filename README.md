@@ -36,12 +36,20 @@ Alternatively, use Docker (see below).
 - Tracks: Generated using `hoi4d_inference.py` from [sriramsk1999/SpaTracker](https://github.com/sriramsk1999/spatracker)
 - RGB/text features: Generated using `src/lfd3d/datasets/hoi4d_processing/rgb_text_feature_gen.py`.
 
+Test split generated using [sriramsk1999/general-flow](https://github.com/sriramsk1999/general-flow/)
+
 ### RT-1
 
 - Tracks: Generated using `rt1_inference.py` from [sriramsk1999/CoTracker](https://github.com/sriramsk1999/co-tracker)
 - Depth: Generated using `rt1_inference.py` from [sriramsk1999/RollingDepth](https://github.com/sriramsk1999/RollingDepth)
-- Preprocess captions with `src/lfd3d/datasets/rt1_processing/process_captions.py`.
-- RGB/text features: Generated using `src/lfd3d/datasets/rt1_processing/rgb_text_feature_gen.py`.
+
+After generating tracks and depth:
+
+1. Preprocess captions with `src/lfd3d/datasets/rt1_processing/process_captions.py`.
+2. RGB/text features: Generated using `src/lfd3d/datasets/rt1_processing/rgb_text_feature_gen.py`.
+3. Chunking and filtering: Generated using `src/lfd3d/datasets/rt1_processing/save_event_rgb.py`.
+
+Test split taken from [3D-VLA](https://github.com/UMass-Foundation-Model/3D-VLA)
 
 ## Training
 
