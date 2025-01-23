@@ -41,6 +41,19 @@ class HOI4DDataset(td.Dataset):
         ]
 
         split_files = self.load_split(split)
+
+        with open("/data/sriram/hoi4d_general_flow_event/metadata.json", "r") as f:
+            self.event_metadata = json.load(f)["test"]
+        self.event_metadata_dict = {
+            (i["index"], i["img"]): (idx, i)
+            for idx, i in enumerate(self.event_metadata)
+        }
+
+        with open(
+            "/data/sriram/hoi4d_general_flow_event/kpst_hoi4d_test_traj.pkl", "rb"
+        ) as f:
+            self.dtraj_list = pickle.load(f)["dtraj"]
+
         # Keep only the files that are in the requested split
         self.data_files = set(self.data_files).intersection(set(split_files))
         self.data_files = sorted(list(self.data_files))
@@ -224,9 +237,17 @@ class HOI4DDataset(td.Dataset):
             start_tracks = start_tracks[cd_mask]
             end_tracks = end_tracks[cd_mask]
 
-            if start_tracks.shape[0] > num_points_threshold:
-                filtered_data_files.append(data_files[index])
-                filtered_tracks.append((start_tracks, end_tracks, start2end))
+            try:  # TODO: Why are some events missing?
+                idx, data = self.event_metadata_dict[
+                    (vid_name[vid_name.find("Z") : -20], event_start_idx)
+                ]
+            except KeyError:
+                print("missing", (vid_name[vid_name.find("Z") : -20], event_start_idx))
+                continue
+
+            filtered_data_files.append(data_files[index])
+            filtered_tracks.append((start_tracks, end_tracks, start2end))
+            # if start_tracks.shape[0] > num_points_threshold:
 
         # Cache dataset
         if self.cache_dir and not os.path.exists(cache_name):
@@ -369,11 +390,19 @@ class HOI4DDataset(td.Dataset):
         K, cam2world = self.load_camera_params(dir_name)
         event, event_start_idx, event_end_idx = self.load_event(dir_name, event_idx)
 
+        idx, data = self.event_metadata_dict[
+            (vid_name[vid_name.find("Z") : -20], event_start_idx)
+        ]
+
         rgbs, depths = self.load_rgbd(dir_name, event_start_idx, event_end_idx)
         start_tracks, end_tracks, start2end = self.filtered_tracks[index]
 
+        # Use General-Flow tracks instead
+        traj_data = self.dtraj_list[idx]
+        start_tracks, end_tracks = traj_data[:, 0, :], traj_data[:, -1, :]
+
         start_scene_pcd = self.get_scene_pcd(rgbs[0], depths[0], K)
-        caption = self.compose_caption(dir_name, event)
+        caption = f"{data['action']} {data['object']}"
 
         # Center on action_pcd
         action_pcd_mean = start_tracks.mean(axis=0)
