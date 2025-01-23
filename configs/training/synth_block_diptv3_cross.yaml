@@ -2,6 +2,7 @@ lr: 1e-4
 lr_warmup_steps: 100
 weight_decay: 1e-5
 epochs: 1000
+precision: bf16
 batch_size: 16
 val_batch_size: 16
 grad_clip_norm: 1.0

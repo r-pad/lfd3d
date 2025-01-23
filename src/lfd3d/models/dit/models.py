@@ -165,8 +165,10 @@ class Attention(nn.Module):
         if self.enable_flash:
             # Skipping q_norm, k_norm to avoid unpacking qkv tensor
             x = flash_attn_qkvpacked_func(
-                qkv.half(), dropout_p=self.attn_drop.p if self.training else 0.0
-            ).to(x.dtype)
+                qkv,
+                dropout_p=self.attn_drop.p if self.training else 0.0,
+                deterministic=True,
+            )
         else:
             qkv = qkv.permute(2, 0, 3, 1, 4)
             q, k, v = qkv.unbind(0)
@@ -234,10 +236,11 @@ class CrossAttention(nn.Module):
             # Pack K, V for FlashAttention
             kv = torch.stack([k, v], dim=2)  # Shape (B, seq_len, 2, nheads, head_dim)
             attn_output = flash_attn_kvpacked_func(
-                q.half(),
-                kv.half(),
+                q,
+                kv,
                 dropout_p=self.attn_drop.p if self.training else 0.0,
-            ).to(q.dtype)
+                deterministic=True,
+            )
         else:
             # Traditional attention calculation
             q, k, v = q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)
