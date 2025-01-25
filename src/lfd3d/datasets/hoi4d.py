@@ -25,6 +25,8 @@ class HOI4DDataset(td.Dataset):
 
         self.cache_dir = dataset_cfg.cache_dir
         self.use_gflow_tracks = dataset_cfg.use_gflow_tracks
+        # Scale factor for resizing images
+        self.scale_factor = 0.25
 
         self.intrinsic_dict = self.load_intrinsics()
         self.data_files = sorted(
@@ -173,9 +175,15 @@ class HOI4DDataset(td.Dataset):
             cv2.imread(f"{dir_name}/align_rgb/{str(event_start_idx).zfill(5)}.jpg"),
             cv2.COLOR_BGR2RGB,
         )
+        rgb_init = cv2.resize(
+            rgb_init, (0, 0), fx=self.scale_factor, fy=self.scale_factor
+        )
         rgb_end = cv2.cvtColor(
             cv2.imread(f"{dir_name}/align_rgb/{str(event_end_idx).zfill(5)}.jpg"),
             cv2.COLOR_BGR2RGB,
+        )
+        rgb_end = cv2.resize(
+            rgb_end, (0, 0), fx=self.scale_factor, fy=self.scale_factor
         )
         rgbs = np.array([rgb_init, rgb_end])
 
@@ -183,10 +191,16 @@ class HOI4DDataset(td.Dataset):
             f"{dir_name}/align_depth/{str(event_start_idx).zfill(5)}.png", -1
         )
         depth_init = depth_init / 1000.0  # Convert to metres
+        depth_init = cv2.resize(
+            depth_init, (0, 0), fx=self.scale_factor, fy=self.scale_factor
+        )
         depth_end = cv2.imread(
             f"{dir_name}/align_depth/{str(event_end_idx).zfill(5)}.png", -1
         )
         depth_end = depth_end / 1000.0  # Convert to metres
+        depth_end = cv2.resize(
+            depth_end, (0, 0), fx=self.scale_factor, fy=self.scale_factor
+        )
         depths = np.array([depth_init, depth_end])
         return rgbs, depths
 
@@ -274,6 +288,14 @@ class HOI4DDataset(td.Dataset):
         print("Number of events after filtering:", len(filtered_data_files))
         return filtered_data_files, filtered_tracks
 
+    def get_scaled_intrinsics(self, K):
+        K_ = K.copy()
+        K_[0, 0] *= self.scale_factor  # fx
+        K_[1, 1] *= self.scale_factor  # fy
+        K_[0, 2] *= self.scale_factor  # cx
+        K_[1, 2] *= self.scale_factor  # cy
+        return K_
+
     def process_and_register_tracks(
         self, dir_name, event_idx, event_start_idx, event_end_idx, depths, K, cam2world
     ):
@@ -282,33 +304,36 @@ class HOI4DDataset(td.Dataset):
         Unproject the tracks to 3D point clouds, register the point cloud
         `end_tracks` to the `start_tracks` coordinate frame.
         """
+        K_ = self.get_scaled_intrinsics(K)
         tracks = np.load(f"{dir_name}/spatracker_3d_tracks.npz")
         event_tracks = tracks[f"tracks_{event_idx}"]
 
         start_tracks = event_tracks[0]
+        start_tracks = start_tracks * self.scale_factor
 
         # Clip to image boundaries, unproject
         ty = np.clip(start_tracks[:, 1].round().astype(int), 0, depths[0].shape[0] - 1)
         tx = np.clip(start_tracks[:, 0].round().astype(int), 0, depths[0].shape[1] - 1)
         # Overwrite SpatialTracker depth with GT depth
         start_tracks[:, 2] = depths[0][ty, tx]
-        start_tracks[:, 0] = ((start_tracks[:, 0] - K[0, 2]) * start_tracks[:, 2]) / K[
-            0, 0
-        ]
-        start_tracks[:, 1] = ((start_tracks[:, 1] - K[1, 2]) * start_tracks[:, 2]) / K[
-            1, 1
-        ]
+        start_tracks[:, 0] = (
+            (start_tracks[:, 0] - K_[0, 2]) * start_tracks[:, 2]
+        ) / K_[0, 0]
+        start_tracks[:, 1] = (
+            (start_tracks[:, 1] - K_[1, 2]) * start_tracks[:, 2]
+        ) / K_[1, 1]
         start_mask = np.linalg.norm(start_tracks, axis=1) != 0
 
         end_tracks = event_tracks[-1]
+        end_tracks = end_tracks * self.scale_factor
 
         # Clip to image boundaries, unproject
         ty = np.clip(end_tracks[:, 1].round().astype(int), 0, depths[0].shape[0] - 1)
         tx = np.clip(end_tracks[:, 0].round().astype(int), 0, depths[0].shape[1] - 1)
         # Overwrite SpatialTracker depth with GT depth
         end_tracks[:, 2] = depths[1][ty, tx]
-        end_tracks[:, 0] = ((end_tracks[:, 0] - K[0, 2]) * end_tracks[:, 2]) / K[0, 0]
-        end_tracks[:, 1] = ((end_tracks[:, 1] - K[1, 2]) * end_tracks[:, 2]) / K[1, 1]
+        end_tracks[:, 0] = ((end_tracks[:, 0] - K_[0, 2]) * end_tracks[:, 2]) / K_[0, 0]
+        end_tracks[:, 1] = ((end_tracks[:, 1] - K_[1, 2]) * end_tracks[:, 2]) / K_[1, 1]
         end_mask = np.linalg.norm(end_tracks, axis=1) != 0
 
         # Remove zero points
@@ -400,13 +425,14 @@ class HOI4DDataset(td.Dataset):
         dir_name = os.path.dirname(os.path.dirname(vid_name))
 
         K, cam2world = self.load_camera_params(dir_name)
+        K_ = self.get_scaled_intrinsics(K)
         event, event_start_idx, event_end_idx = self.load_event(dir_name, event_idx)
 
         rgbs, depths = self.load_rgbd(dir_name, event_start_idx, event_end_idx)
         start_tracks, end_tracks, start2end = self.filtered_tracks[index]
 
         caption = self.compose_caption(dir_name, event)
-        start_scene_pcd = self.get_scene_pcd(rgbs[0], depths[0], K)
+        start_scene_pcd = self.get_scene_pcd(rgbs[0], depths[0], K_)
 
         # Use General-Flow tracks instead
         if self.use_gflow_tracks:
@@ -434,7 +460,7 @@ class HOI4DDataset(td.Dataset):
             "anchor_pcd": start_scene_pcd,
             "caption": caption,
             "cross_displacement": end_tracks - start_tracks,
-            "intrinsics": K,
+            "intrinsics": K_,
             "rgbs": rgbs,
             "depths": depths,
             "start2end": start2end,

@@ -341,7 +341,6 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         end_rgb_proj = project_pcd_on_image(gt_pcd, padding_mask, rgb_end, K, RED)
         pred_rgb_proj = project_pcd_on_image(pred_pcd, padding_mask, rgb_end, K, BLUE)
         rgb_proj_viz = cv2.hconcat([init_rgb_proj, end_rgb_proj, pred_rgb_proj])
-        rgb_proj_viz = cv2.resize(rgb_proj_viz, (0, 0), fx=0.25, fy=0.25)
 
         wandb_proj_img = wandb.Image(
             rgb_proj_viz,

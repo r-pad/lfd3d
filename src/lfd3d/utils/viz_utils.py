@@ -19,7 +19,7 @@ def project_pcd_on_image(pcd, mask, image, K, color):
 
     coords = np.clip(projected_image_coords, 0, [width - 1, height - 1])
     for point in coords:
-        cv2.circle(viz_image, point, color=color, thickness=-1, radius=5)
+        cv2.circle(viz_image, point, color=color, thickness=-1, radius=0.5)
 
     return viz_image
 
