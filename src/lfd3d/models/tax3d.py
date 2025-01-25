@@ -408,7 +408,6 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         # determine if additional logging should be done
         do_additional_logging = (
             self.global_step % self.additional_train_logging_period == 0
-            and self.trainer.is_global_zero
             and self.global_step != 0
         )
 
@@ -429,10 +428,11 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
             )
             train_metrics.update(pred_dict)
 
-            ####################################################
-            # logging visualizations
-            ####################################################
-            self.log_viz_to_wandb(batch, pred_dict, "train")
+            if self.trainer.is_global_zero:
+                ####################################################
+                # logging visualizations
+                ####################################################
+                self.log_viz_to_wandb(batch, pred_dict, "train")
 
         self.train_outputs.append(train_metrics)
         return loss
@@ -468,6 +468,7 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
             log_dictionary,
             add_dataloader_idx=False,
             prog_bar=True,
+            sync_dist=True,
         )
         self.train_outputs.clear()
 
@@ -521,6 +522,7 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
                 f"val/chamfer_dist": chamfer_dist,
             },
             add_dataloader_idx=False,
+            sync_dist=True,
         )
         self.val_outputs.clear()
 

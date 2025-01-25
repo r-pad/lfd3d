@@ -24,6 +24,7 @@ class HOI4DDataset(td.Dataset):
         self.dataset_dir = self.root
 
         self.cache_dir = dataset_cfg.cache_dir
+        self.use_gflow_tracks = dataset_cfg.use_gflow_tracks
 
         self.intrinsic_dict = self.load_intrinsics()
         self.data_files = sorted(
@@ -41,6 +42,23 @@ class HOI4DDataset(td.Dataset):
         ]
 
         split_files = self.load_split(split)
+
+        if self.use_gflow_tracks:
+            # Use tracks generated from General Flow's label_gen_event.py in sriramsk1999/general-flow
+            with open(
+                f"{self.root}/../hoi4d_general_flow_event_traj/metadata.json", "r"
+            ) as f:
+                self.event_metadata = json.load(f)["test"]
+            self.event_metadata_dict = {
+                (i["index"], i["img"]): (idx, i)
+                for idx, i in enumerate(self.event_metadata)
+            }
+            with open(
+                f"{self.root}/../hoi4d_general_flow_event_traj/kpst_hoi4d_test_traj.pkl",
+                "rb",
+            ) as f:
+                self.dtraj_list = pickle.load(f)["dtraj"]
+
         # Keep only the files that are in the requested split
         self.data_files = set(self.data_files).intersection(set(split_files))
         self.data_files = sorted(list(self.data_files))
@@ -218,15 +236,30 @@ class HOI4DDataset(td.Dataset):
                 cam2world,
             )
 
-            cross_displacement = end_tracks - start_tracks
-            cd_mask = np.linalg.norm(cross_displacement, axis=1) > norm_threshold
-
-            start_tracks = start_tracks[cd_mask]
-            end_tracks = end_tracks[cd_mask]
-
-            if start_tracks.shape[0] > num_points_threshold:
+            # If we're using general-flow tracks, we only need start2end
+            if self.use_gflow_tracks:
+                # Some events are missing because they've been filtered out during General Flow preprocessing.
+                try:
+                    idx, data = self.event_metadata_dict[
+                        (vid_name[vid_name.find("Z") : -20], event_start_idx)
+                    ]
+                except KeyError:
+                    print(
+                        "Missing", (vid_name[vid_name.find("Z") : -20], event_start_idx)
+                    )
+                    continue
+                filtered_tracks.append((None, None, start2end))
                 filtered_data_files.append(data_files[index])
-                filtered_tracks.append((start_tracks, end_tracks, start2end))
+            else:
+                cross_displacement = end_tracks - start_tracks
+                cd_mask = np.linalg.norm(cross_displacement, axis=1) > norm_threshold
+
+                start_tracks = start_tracks[cd_mask]
+                end_tracks = end_tracks[cd_mask]
+
+                if start_tracks.shape[0] > num_points_threshold:
+                    filtered_data_files.append(data_files[index])
+                    filtered_tracks.append((start_tracks, end_tracks, start2end))
 
         # Cache dataset
         if self.cache_dir and not os.path.exists(cache_name):
@@ -372,8 +405,17 @@ class HOI4DDataset(td.Dataset):
         rgbs, depths = self.load_rgbd(dir_name, event_start_idx, event_end_idx)
         start_tracks, end_tracks, start2end = self.filtered_tracks[index]
 
-        start_scene_pcd = self.get_scene_pcd(rgbs[0], depths[0], K)
         caption = self.compose_caption(dir_name, event)
+        start_scene_pcd = self.get_scene_pcd(rgbs[0], depths[0], K)
+
+        # Use General-Flow tracks instead
+        if self.use_gflow_tracks:
+            idx, data = self.event_metadata_dict[
+                (vid_name[vid_name.find("Z") : -20], event_start_idx)
+            ]
+            traj_data = self.dtraj_list[idx]
+            start_tracks, end_tracks = traj_data[:, 0, :], traj_data[:, -1, :]
+            caption = f"{data['action']} {data['object']}"
 
         # Center on action_pcd
         action_pcd_mean = start_tracks.mean(axis=0)
