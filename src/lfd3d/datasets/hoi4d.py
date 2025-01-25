@@ -192,14 +192,22 @@ class HOI4DDataset(td.Dataset):
         )
         depth_init = depth_init / 1000.0  # Convert to metres
         depth_init = cv2.resize(
-            depth_init, (0, 0), fx=self.scale_factor, fy=self.scale_factor
+            depth_init,
+            (0, 0),
+            fx=self.scale_factor,
+            fy=self.scale_factor,
+            interpolation=cv2.INTER_NEAREST,
         )
         depth_end = cv2.imread(
             f"{dir_name}/align_depth/{str(event_end_idx).zfill(5)}.png", -1
         )
         depth_end = depth_end / 1000.0  # Convert to metres
         depth_end = cv2.resize(
-            depth_end, (0, 0), fx=self.scale_factor, fy=self.scale_factor
+            depth_end,
+            (0, 0),
+            fx=self.scale_factor,
+            fy=self.scale_factor,
+            interpolation=cv2.INTER_NEAREST,
         )
         depths = np.array([depth_init, depth_end])
         return rgbs, depths

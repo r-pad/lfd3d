@@ -1,4 +1,3 @@
-import os
 import random
 from typing import Dict, List
 
@@ -9,7 +8,6 @@ import torch
 import wandb
 from diffusers import get_cosine_schedule_with_warmup
 from pytorch3d.structures import Pointclouds
-from sentence_transformers import SentenceTransformer
 from torch import nn, optim
 
 from lfd3d.metrics.pcd_metrics import chamfer_distance, rmse_pcd
@@ -57,17 +55,6 @@ def DiT_PointCloud_xS(use_rotary, **kwargs):
     # hidden size divisible by 3 for rotary embedding, and divisible by num_heads for multi-head attention
     hidden_size = 132 if use_rotary else 128
     return DiT_PointCloud(depth=5, hidden_size=hidden_size, num_heads=4, **kwargs)
-
-
-def encode_without_parallelism(text_embed_model, text):
-    original_parallelism = os.environ.get("TOKENIZERS_PARALLELISM", None)
-    os.environ["TOKENIZERS_PARALLELISM"] = "false"
-    embeddings = text_embed_model.encode(text, show_progress_bar=False)
-    if original_parallelism is not None:
-        os.environ["TOKENIZERS_PARALLELISM"] = original_parallelism
-    else:
-        del os.environ["TOKENIZERS_PARALLELISM"]
-    return embeddings
 
 
 def calc_pcd_metrics(pred_dict, pcd, pred, gt, scale_factor, padding_mask):
@@ -157,10 +144,6 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
             self.label_key = "cross_displacement"
         else:
             raise ValueError(f"Invalid prediction type: {self.prediction_type}")
-
-        self.text_embed = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
-        for param in self.text_embed.parameters():
-            param.requires_grad = False
 
         # mode-specific processing
         if self.mode == "train":
@@ -649,12 +632,10 @@ class CrossDisplacementModule(DenseDisplacementDiffusionModule):
         pc_action = batch["action_pcd"].points_padded()
         pc_anchor = batch["anchor_pcd"].points_padded()
 
-        text_embedding = torch.tensor(
-            encode_without_parallelism(self.text_embed, batch["caption"]),
-            device=self.device,
+        # TODO: Temp hack
+        text_embedding = torch.zeros(
+            pc_action.shape[0], pc_action.shape[1], 384, device=pc_action.device
         )
-        # Repeat embedding to apply to every point for conditioning
-        text_embedding = text_embedding.unsqueeze(1).repeat(1, pc_action.shape[1], 1)
 
         pc_action = pc_action.permute(0, 2, 1)  # channel first
         pc_anchor = pc_anchor.permute(0, 2, 1)  # channel first
