@@ -9,6 +9,7 @@ import numpy as np
 import open3d as o3d
 import pytorch_lightning as pl
 import torch
+import torch.nn.functional as F
 import torch.utils.data as data
 import torchdatasets as td
 from tqdm import tqdm
@@ -380,7 +381,7 @@ class HOI4DDataset(td.Dataset):
 
         return start_tracks, end_tracks, start2end
 
-    def get_scene_pcd(self, rgb, depth, K):
+    def get_scene_pcd(self, rgb_embed, depth, K):
         height, width = depth.shape
         # Create pixel coordinate grid
         x = np.arange(width)
@@ -391,12 +392,14 @@ class HOI4DDataset(td.Dataset):
         x_flat = x_grid.flatten()
         y_flat = y_grid.flatten()
         z_flat = depth.flatten()
+        feat_flat = rgb_embed.reshape(-1, rgb_embed.shape[-1])
 
         # Remove points with invalid depth
         valid_depth = np.logical_and(z_flat > 0, z_flat < 5)
         x_flat = x_flat[valid_depth]
         y_flat = y_flat[valid_depth]
         z_flat = z_flat[valid_depth]
+        feat_flat = feat_flat[valid_depth]
 
         # Create homogeneous pixel coordinates
         pixels = np.stack([x_flat, y_flat, np.ones_like(x_flat)], axis=0)
@@ -414,7 +417,14 @@ class HOI4DDataset(td.Dataset):
         )
 
         scene_pcd = np.asarray(scene_pcd_o3d_downsample.points)
-        return scene_pcd
+
+        # Find closest indices in the original point cloud so we can index the features
+        downsampled_indices = [
+            np.argmin(np.linalg.norm(points - scene_pcd[i], axis=1))
+            for i in range(scene_pcd.shape[0])
+        ]
+        scene_feat_pcd = feat_flat[downsampled_indices]
+        return scene_pcd, scene_feat_pcd
 
     def compose_caption(self, dir_name, event):
         """Compose the caption from the event name and the object."""
@@ -428,6 +438,33 @@ class HOI4DDataset(td.Dataset):
         caption = f"{event_name} {obj_name}"
         return caption
 
+    def load_rgb_text_feat(self, dir_name, event_idx, height, width):
+        """
+        Load RGB/text features generated with SIGLIP using ConceptFusion.
+        """
+        features = np.load(f"{dir_name}/rgb_text_features/{event_idx}_compressed.npz")
+        rgb_embed, text_embed = features["rgb_embed"], features["text_embed"].squeeze()
+
+        upscale_by = 2
+        _, pca_feat_dim = rgb_embed.shape
+        rgb_embed = (
+            rgb_embed.transpose(1, 0)
+            .reshape(1, pca_feat_dim, height // upscale_by, width // upscale_by)
+            .astype(np.float32)
+        )
+        rgb_embed = (
+            F.interpolate(
+                torch.from_numpy(rgb_embed),
+                scale_factor=upscale_by,
+                mode="bilinear",
+                align_corners=False,
+            )
+            .numpy()
+            .squeeze()
+            .transpose(1, 2, 0)
+        )
+        return rgb_embed, text_embed
+
     def __getitem__(self, index):
         vid_name, event_idx = self.data_files[index]
         dir_name = os.path.dirname(os.path.dirname(vid_name))
@@ -440,7 +477,12 @@ class HOI4DDataset(td.Dataset):
         start_tracks, end_tracks, start2end = self.filtered_tracks[index]
 
         caption = self.compose_caption(dir_name, event)
-        start_scene_pcd = self.get_scene_pcd(rgbs[0], depths[0], K_)
+        rgb_embed, text_embed = self.load_rgb_text_feat(
+            dir_name, event_idx, rgbs[0].shape[0], rgbs[0].shape[1]
+        )
+        start_scene_pcd, start_scene_feat_pcd = self.get_scene_pcd(
+            rgb_embed, depths[0], K_
+        )
 
         # Use General-Flow tracks instead
         if self.use_gflow_tracks:
@@ -466,7 +508,9 @@ class HOI4DDataset(td.Dataset):
         item = {
             "action_pcd": start_tracks,
             "anchor_pcd": start_scene_pcd,
+            "anchor_feat_pcd": start_scene_feat_pcd,
             "caption": caption,
+            "text_embed": text_embed,
             "cross_displacement": end_tracks - start_tracks,
             "intrinsics": K_,
             "rgbs": rgbs,

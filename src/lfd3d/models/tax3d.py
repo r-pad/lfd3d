@@ -631,15 +631,17 @@ class CrossDisplacementModule(DenseDisplacementDiffusionModule):
     def get_model_kwargs(self, batch):
         pc_action = batch["action_pcd"].points_padded()
         pc_anchor = batch["anchor_pcd"].points_padded()
-
-        # TODO: Temp hack
-        text_embedding = torch.zeros(
-            pc_action.shape[0], pc_action.shape[1], 384, device=pc_action.device
+        pc_anchor_feat = batch["anchor_pcd"].features_padded()
+        text_embedding = (
+            batch["text_embed"].unsqueeze(1).repeat(1, pc_action.shape[1], 1)
         )
 
         pc_action = pc_action.permute(0, 2, 1)  # channel first
         pc_anchor = pc_anchor.permute(0, 2, 1)  # channel first
-        model_kwargs = dict(x0=pc_action, y=pc_anchor, text_embed=text_embedding)
+        pc_anchor_feat = pc_anchor_feat.permute(0, 2, 1)  # channel first
+        model_kwargs = dict(
+            x0=pc_action, y=pc_anchor, y_feat=pc_anchor_feat, text_embed=text_embedding
+        )
         return model_kwargs
 
     def get_viz_args(self, batch, viz_idx):
