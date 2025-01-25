@@ -38,6 +38,8 @@ Alternatively, use Docker (see below).
 
 Test split generated using [sriramsk1999/general-flow](https://github.com/sriramsk1999/general-flow/)
 
+Additionally, if `use_gflow_tracks=True`, generate event-wise tracks from `label_gen_event.py` in [sriramsk1999/general-flow](https://github.com/sriramsk1999/general-flow/). When training with these tracks, the projections of the tracks won't align perfectly, likely due to the errors in the object pose annotation when generating these tracks.
+
 ### RT-1
 
 - Tracks: Generated using `rt1_inference.py` from [sriramsk1999/CoTracker](https://github.com/sriramsk1999/co-tracker)
