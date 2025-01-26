@@ -1251,23 +1251,34 @@ class DiT_PointCloud_Cross(nn.Module):
         # timestep embedding
         t_emb = self.t_embedder(t)
 
-        inputs = [x, y_emb, t_emb]
-
         if text_embed is not None:
             # Project text embedding to the same dimension as x
             text_emb = self.text_projector(text_embed)
-            inputs.append(text_emb)
 
         if y_feat is not None:
             y_feat_emb = self.y_feat_embedder(y_feat)
             y_feat_emb = y_feat_emb.permute(0, 2, 1)
-            inputs.append(y_feat_emb)
 
         # forward pass through DiT blocks
         for block in self.blocks:
             if self.model_cfg.rotary:
-                inputs.extend([x_pos, y_pos])
-            x = block(*inputs)
+                x = block(
+                    x,
+                    y_emb,
+                    t_emb,
+                    text_embed=text_emb if text_embed is not None else None,
+                    y_embed=y_feat_emb if y_feat is not None else None,
+                    x_pos=x_pos,
+                    y_pos=y_pos,
+                )
+            else:
+                x = block(
+                    x,
+                    y_emb,
+                    t_emb,
+                    text_embed=text_emb if text_embed is not None else None,
+                    y_embed=y_feat_emb if y_feat is not None else None,
+                )
 
         # final layer
         x = self.final_layer(x, t_emb)
