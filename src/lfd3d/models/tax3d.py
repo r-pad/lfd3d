@@ -395,8 +395,12 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
 
         # additional logging
         if do_additional_logging:
-            pred_dict = self.predict(batch)
-            pred = pred_dict[self.prediction_type]["pred"]
+            self.eval()
+            with torch.no_grad():
+                pred_dict = self.predict(batch)
+                pred = pred_dict[self.prediction_type]["pred"]
+            self.train()  # Switch back to training mode
+
             padding_mask = batch["padding_mask"]
             pcd_std = batch["pcd_std"]
             ground_truth = batch[self.label_key].to(self.device)

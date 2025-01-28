@@ -10,6 +10,7 @@ rotary: False # Use rotary embedding for diffusion
 
 x_encoder: mlp # Encoder current timestep x
 y_encoder: mlp # (mlp, dgcnn) Encoder for y object (e.g. anchor pcd)
+y_feat_encoder: mlp # (mlp, dgcnn, null) Encoder for y object features (e.g. anchor pcd RGB features)
 x0_encoder: mlp # (mlp, dgcnn) Encoder for x0 object (e.g. action pcd)
 use_p_prime: True # Use p' = p + xt as additional input to the DiT
 enable_flash: True # Enable FlashAttention

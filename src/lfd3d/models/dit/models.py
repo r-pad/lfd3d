@@ -362,7 +362,7 @@ class DiTCrossBlock(nn.Module):
             hidden_size, num_heads=num_heads, qkv_bias=True, **block_kwargs
         )
         self.norm2 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
-        self.geom_cross_attn = CrossAttention(
+        self.cross_attn = CrossAttention(
             dim_x=hidden_size,
             dim_y=hidden_size,
             num_heads=num_heads,
@@ -370,14 +370,6 @@ class DiTCrossBlock(nn.Module):
             **block_kwargs,
         )
         self.norm3 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
-        self.rgb_cross_attn = CrossAttention(
-            dim_x=hidden_size,
-            dim_y=hidden_size,
-            num_heads=num_heads,
-            qkv_bias=True,
-            **block_kwargs,
-        )
-        self.norm4 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
         self.text_cross_attn = CrossAttention(
             dim_x=hidden_size,
             dim_y=hidden_size,
@@ -386,7 +378,7 @@ class DiTCrossBlock(nn.Module):
             **block_kwargs,
         )
 
-        self.norm5 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
+        self.norm4 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
         mlp_hidden_dim = int(hidden_size * mlp_ratio)
         approx_gelu = lambda: nn.GELU(approximate="tanh")
         self.mlp = Mlp(
@@ -396,48 +388,38 @@ class DiTCrossBlock(nn.Module):
             drop=0,
         )
         self.adaLN_modulation = nn.Sequential(
-            nn.SiLU(), nn.Linear(hidden_size, 15 * hidden_size, bias=True)
+            nn.SiLU(), nn.Linear(hidden_size, 12 * hidden_size, bias=True)
         )
 
-    def forward(self, x, y, t, text_embed=None, y_embed=None):
-        # msa - self-attention
-        # gca - geometric cross-attention
-        # sca - semantic cross-attention
+    def forward(self, x, y, t, text_embed):
+        # msa - multi-head self-attention
+        # mca - multi-head cross-attention
         # tca - text cross-attention
         (
             shift_msa,
             scale_msa,
             gate_msa,
-            shift_gca,
-            scale_gca,
-            gate_gca,
-            shift_sca,
-            scale_sca,
-            gate_sca,
+            shift_mca,
+            scale_mca,
+            gate_mca,
             shift_tca,
             scale_tca,
             gate_tca,
             shift_x,
             scale_x,
             gate_x,
-        ) = self.adaLN_modulation(t).chunk(15, dim=1)
+        ) = self.adaLN_modulation(t).chunk(12, dim=1)
         x = x + gate_msa.unsqueeze(1) * self.self_attn(
             modulate(self.norm1(x), shift_msa, scale_msa)
         )
-        x = x + gate_gca.unsqueeze(1) * self.geom_cross_attn(
-            modulate(self.norm2(x), shift_gca, scale_gca), y
+        x = x + gate_mca.unsqueeze(1) * self.cross_attn(
+            modulate(self.norm2(x), shift_mca, scale_mca), y
         )
-        if y_embed is not None:
-            x = x + gate_sca.unsqueeze(1) * self.rgb_cross_attn(
-                modulate(self.norm3(x), shift_sca, scale_sca), y_embed
-            )
-        if text_embed is not None:
-            x = x + gate_tca.unsqueeze(1) * self.text_cross_attn(
-                modulate(self.norm4(x), shift_tca, scale_tca), text_embed
-            )
-
+        x = x + gate_tca.unsqueeze(1) * self.text_cross_attn(
+            modulate(self.norm3(x), shift_tca, scale_tca), text_embed
+        )
         x = x + gate_x.unsqueeze(1) * self.mlp(
-            modulate(self.norm5(x), shift_x, scale_x)
+            modulate(self.norm4(x), shift_x, scale_x)
         )
         return x
 
@@ -1092,32 +1074,42 @@ class DiT_PointCloud_Cross(nn.Module):
         else:
             raise ValueError(f"Invalid x_encoder: {self.model_cfg.x_encoder}")
 
+        # If RGB features are provided, embed geometric/semantic features
+        # at hidden_size // 2 and concatenate.
+        y_hidden_size = (
+            hidden_size if self.model_cfg.y_feat_encoder is None else hidden_size // 2
+        )
         # Encoder for y features
         if self.model_cfg.y_encoder == "mlp":
             self.y_embedder = nn.Conv1d(
                 in_channels,
-                hidden_size,
-                kernel_size=1,
-                stride=1,
-                padding=0,
-                bias=True,
-            )
-
-            self.y_feat_embedder = nn.Conv1d(
-                self.in_feat_channels,
-                hidden_size,
+                y_hidden_size,
                 kernel_size=1,
                 stride=1,
                 padding=0,
                 bias=True,
             )
         elif self.model_cfg.y_encoder == "dgcnn":
-            self.y_embedder = DGCNN(input_dims=in_channels, emb_dims=hidden_size)
-            self.y_feat_embedder = DGCNN(
-                input_dims=self.in_feat_channels, emb_dims=hidden_size
-            )
+            self.y_embedder = DGCNN(input_dims=in_channels, emb_dims=y_hidden_size)
         else:
             raise ValueError(f"Invalid y_encoder: {self.model_cfg.y_encoder}")
+
+        y_feat_hidden_size = hidden_size // 2
+        if self.model_cfg.y_feat_encoder == "mlp":
+            self.y_feat_embedder = nn.Conv1d(
+                self.in_feat_channels,
+                y_feat_hidden_size,
+                kernel_size=1,
+                stride=1,
+                padding=0,
+                bias=True,
+            )
+        elif self.model_cfg.y_feat_encoder == "dgcnn":
+            self.y_feat_embedder = DGCNN(
+                input_dims=self.in_feat_channels, emb_dims=y_feat_hidden_size
+            )
+        else:
+            self.y_feat_embedder = None
 
         # Encoder for x0 features
         if self.model_cfg.x0_encoder == "mlp":
@@ -1204,9 +1196,9 @@ class DiT_PointCloud_Cross(nn.Module):
         x: torch.Tensor,
         t: torch.Tensor,
         y: torch.Tensor,
+        text_embed: torch.Tensor,
         y_feat: Optional[torch.Tensor] = None,
         x0: Optional[torch.Tensor] = None,
-        text_embed: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """
         Forward pass of DiT with scene cross attention.
@@ -1215,9 +1207,9 @@ class DiT_PointCloud_Cross(nn.Module):
             x (torch.Tensor): (B, P, N) tensor of batched current timestep x (e.g. noised action) points
             t (torch.Tensor): (B,) tensor of diffusion timesteps
             y (torch.Tensor): (B, P, M) tensor of un-noised scene (e.g. anchor) points
+            text_embed (torch.Tensor): (B, N, L) tensor of text embedding features. Assumes L=1152 (SIGLIP)
             y_feat (Optional[torch.Tensor]): (B, K, M) tensor of un-noised scene (e.g. anchor) features. Assumes K=256 (SIGLIP after PCA)
             x0 (Optional[torch.Tensor]): (B, P, N) tensor of un-noised x (e.g. action) features.
-            text_embed (Optional[torch.Tensor]): (B, N, L) tensor of text embedding features. Assumes L=1152 (SIGLIP)
         """
         # noise-centering, if enabled
         if self.model_cfg.center_noise:
@@ -1251,13 +1243,13 @@ class DiT_PointCloud_Cross(nn.Module):
         # timestep embedding
         t_emb = self.t_embedder(t)
 
-        if text_embed is not None:
-            # Project text embedding to the same dimension as x
-            text_emb = self.text_projector(text_embed)
+        # Project text embedding to the same dimension as x
+        text_emb = self.text_projector(text_embed)
 
-        if y_feat is not None:
+        if self.y_feat_embedder is not None:
             y_feat_emb = self.y_feat_embedder(y_feat)
             y_feat_emb = y_feat_emb.permute(0, 2, 1)
+            y_emb = torch.cat([y_emb, y_feat_emb], axis=-1)
 
         # forward pass through DiT blocks
         for block in self.blocks:
@@ -1266,8 +1258,7 @@ class DiT_PointCloud_Cross(nn.Module):
                     x,
                     y_emb,
                     t_emb,
-                    text_embed=text_emb if text_embed is not None else None,
-                    y_embed=y_feat_emb if y_feat is not None else None,
+                    text_emb,
                     x_pos=x_pos,
                     y_pos=y_pos,
                 )
@@ -1276,8 +1267,7 @@ class DiT_PointCloud_Cross(nn.Module):
                     x,
                     y_emb,
                     t_emb,
-                    text_embed=text_emb if text_embed is not None else None,
-                    y_embed=y_feat_emb if y_feat is not None else None,
+                    text_emb,
                 )
 
         # final layer
