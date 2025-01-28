@@ -35,7 +35,7 @@ class RT1Dataset(td.Dataset):
         # No camera intrinsics available, an arbitrary choice based on RT-1 resolution (256, 320)
         self.K = np.array([[257.0, 0, 160], [0, 257.0, 128], [0, 0, 1]])
         # Voxel size for downsampling
-        self.voxel_size = 0.05
+        self.voxel_size = 0.06
 
         self.rt1_index = self.load_split(split)
         self.rt1_index = self.expand_all_events(self.rt1_index)
@@ -116,9 +116,9 @@ class RT1Dataset(td.Dataset):
         depths = depth_vid[[event_start_idx, event_end_idx]]
 
         # RollingDepth estimates *inverse* relative depth, thus -ive sign in scale
-        # Scaling/shifting by 2 for viz
+        # Shifting by 0.5 for viz
         # Doesn't matter for network input since we standardize the pcd anyway
-        depths = (depths * -2) + 2
+        depths = (depths * -1) + 0.5
         return rgbs, depths
 
     def load_tracks(self, index, event_start_idx, event_end_idx, depths):
