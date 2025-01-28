@@ -18,8 +18,10 @@ def collate_pcd_fn(batch):
     # Initialize lists to store items
     action_pcds = []
     anchor_pcds = []
+    anchor_feat_pcds = []
     cross_displacements = []
     captions = []
+    text_embeds = []
     vid_names = []
     intrinsics = []
     rgbs = []
@@ -33,9 +35,11 @@ def collate_pcd_fn(batch):
         # Convert point clouds to tensors if they aren't already
         action_pcd = torch.as_tensor(item["action_pcd"]).float()
         anchor_pcd = torch.as_tensor(item["anchor_pcd"]).float()
+        anchor_feat_pcd = torch.as_tensor(item["anchor_feat_pcd"]).float()
         cross_displacement = torch.as_tensor(item["cross_displacement"]).float()
 
         action_pcds.append(action_pcd)
+        anchor_feat_pcds.append(anchor_feat_pcd)
         anchor_pcds.append(anchor_pcd)
         cross_displacements.append(cross_displacement)
         captions.append(item["caption"])
@@ -43,6 +47,7 @@ def collate_pcd_fn(batch):
 
         # Convert other items to tensors if they aren't already
         intrinsics.append(torch.as_tensor(item["intrinsics"]))
+        text_embeds.append(torch.as_tensor(item["text_embed"]))
         rgbs.append(torch.as_tensor(item["rgbs"]))
         depths.append(torch.as_tensor(item["depths"]))
         start2ends.append(torch.as_tensor(item["start2end"]))
@@ -51,7 +56,7 @@ def collate_pcd_fn(batch):
 
     # Create Pointclouds objects
     action_pointclouds = Pointclouds(points=action_pcds)
-    anchor_pointclouds = Pointclouds(points=anchor_pcds)
+    anchor_pointclouds = Pointclouds(points=anchor_pcds, features=anchor_feat_pcds)
     cross_displacement_pointclouds = Pointclouds(points=cross_displacements)
 
     batch_size, max_points, _ = action_pointclouds.points_padded().shape
@@ -60,6 +65,7 @@ def collate_pcd_fn(batch):
 
     # Stack regular tensors
     intrinsics_batch = torch.stack(intrinsics)
+    text_embeds_batch = torch.stack(text_embeds)
     rgbs_batch = torch.stack(rgbs)
     depths_batch = torch.stack(depths)
     start2ends_batch = torch.stack(start2ends)
@@ -78,6 +84,7 @@ def collate_pcd_fn(batch):
         "vid_name": vid_names,
         # Regular tensors
         "intrinsics": intrinsics_batch,
+        "text_embed": text_embeds_batch,
         "rgbs": rgbs_batch,
         "depths": depths_batch,
         "start2end": start2ends_batch,

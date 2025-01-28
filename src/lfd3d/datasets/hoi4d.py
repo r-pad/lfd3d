@@ -9,6 +9,7 @@ import numpy as np
 import open3d as o3d
 import pytorch_lightning as pl
 import torch
+import torch.nn.functional as F
 import torch.utils.data as data
 import torchdatasets as td
 from tqdm import tqdm
@@ -25,6 +26,8 @@ class HOI4DDataset(td.Dataset):
 
         self.cache_dir = dataset_cfg.cache_dir
         self.use_gflow_tracks = dataset_cfg.use_gflow_tracks
+        # Scale factor for resizing images
+        self.scale_factor = 0.25
 
         self.intrinsic_dict = self.load_intrinsics()
         self.data_files = sorted(
@@ -173,9 +176,15 @@ class HOI4DDataset(td.Dataset):
             cv2.imread(f"{dir_name}/align_rgb/{str(event_start_idx).zfill(5)}.jpg"),
             cv2.COLOR_BGR2RGB,
         )
+        rgb_init = cv2.resize(
+            rgb_init, (0, 0), fx=self.scale_factor, fy=self.scale_factor
+        )
         rgb_end = cv2.cvtColor(
             cv2.imread(f"{dir_name}/align_rgb/{str(event_end_idx).zfill(5)}.jpg"),
             cv2.COLOR_BGR2RGB,
+        )
+        rgb_end = cv2.resize(
+            rgb_end, (0, 0), fx=self.scale_factor, fy=self.scale_factor
         )
         rgbs = np.array([rgb_init, rgb_end])
 
@@ -183,10 +192,24 @@ class HOI4DDataset(td.Dataset):
             f"{dir_name}/align_depth/{str(event_start_idx).zfill(5)}.png", -1
         )
         depth_init = depth_init / 1000.0  # Convert to metres
+        depth_init = cv2.resize(
+            depth_init,
+            (0, 0),
+            fx=self.scale_factor,
+            fy=self.scale_factor,
+            interpolation=cv2.INTER_NEAREST,
+        )
         depth_end = cv2.imread(
             f"{dir_name}/align_depth/{str(event_end_idx).zfill(5)}.png", -1
         )
         depth_end = depth_end / 1000.0  # Convert to metres
+        depth_end = cv2.resize(
+            depth_end,
+            (0, 0),
+            fx=self.scale_factor,
+            fy=self.scale_factor,
+            interpolation=cv2.INTER_NEAREST,
+        )
         depths = np.array([depth_init, depth_end])
         return rgbs, depths
 
@@ -274,6 +297,14 @@ class HOI4DDataset(td.Dataset):
         print("Number of events after filtering:", len(filtered_data_files))
         return filtered_data_files, filtered_tracks
 
+    def get_scaled_intrinsics(self, K):
+        K_ = K.copy()
+        K_[0, 0] *= self.scale_factor  # fx
+        K_[1, 1] *= self.scale_factor  # fy
+        K_[0, 2] *= self.scale_factor  # cx
+        K_[1, 2] *= self.scale_factor  # cy
+        return K_
+
     def process_and_register_tracks(
         self, dir_name, event_idx, event_start_idx, event_end_idx, depths, K, cam2world
     ):
@@ -282,33 +313,36 @@ class HOI4DDataset(td.Dataset):
         Unproject the tracks to 3D point clouds, register the point cloud
         `end_tracks` to the `start_tracks` coordinate frame.
         """
+        K_ = self.get_scaled_intrinsics(K)
         tracks = np.load(f"{dir_name}/spatracker_3d_tracks.npz")
         event_tracks = tracks[f"tracks_{event_idx}"]
 
         start_tracks = event_tracks[0]
+        start_tracks = start_tracks * self.scale_factor
 
         # Clip to image boundaries, unproject
         ty = np.clip(start_tracks[:, 1].round().astype(int), 0, depths[0].shape[0] - 1)
         tx = np.clip(start_tracks[:, 0].round().astype(int), 0, depths[0].shape[1] - 1)
         # Overwrite SpatialTracker depth with GT depth
         start_tracks[:, 2] = depths[0][ty, tx]
-        start_tracks[:, 0] = ((start_tracks[:, 0] - K[0, 2]) * start_tracks[:, 2]) / K[
-            0, 0
-        ]
-        start_tracks[:, 1] = ((start_tracks[:, 1] - K[1, 2]) * start_tracks[:, 2]) / K[
-            1, 1
-        ]
+        start_tracks[:, 0] = (
+            (start_tracks[:, 0] - K_[0, 2]) * start_tracks[:, 2]
+        ) / K_[0, 0]
+        start_tracks[:, 1] = (
+            (start_tracks[:, 1] - K_[1, 2]) * start_tracks[:, 2]
+        ) / K_[1, 1]
         start_mask = np.linalg.norm(start_tracks, axis=1) != 0
 
         end_tracks = event_tracks[-1]
+        end_tracks = end_tracks * self.scale_factor
 
         # Clip to image boundaries, unproject
         ty = np.clip(end_tracks[:, 1].round().astype(int), 0, depths[0].shape[0] - 1)
         tx = np.clip(end_tracks[:, 0].round().astype(int), 0, depths[0].shape[1] - 1)
         # Overwrite SpatialTracker depth with GT depth
         end_tracks[:, 2] = depths[1][ty, tx]
-        end_tracks[:, 0] = ((end_tracks[:, 0] - K[0, 2]) * end_tracks[:, 2]) / K[0, 0]
-        end_tracks[:, 1] = ((end_tracks[:, 1] - K[1, 2]) * end_tracks[:, 2]) / K[1, 1]
+        end_tracks[:, 0] = ((end_tracks[:, 0] - K_[0, 2]) * end_tracks[:, 2]) / K_[0, 0]
+        end_tracks[:, 1] = ((end_tracks[:, 1] - K_[1, 2]) * end_tracks[:, 2]) / K_[1, 1]
         end_mask = np.linalg.norm(end_tracks, axis=1) != 0
 
         # Remove zero points
@@ -347,7 +381,7 @@ class HOI4DDataset(td.Dataset):
 
         return start_tracks, end_tracks, start2end
 
-    def get_scene_pcd(self, rgb, depth, K):
+    def get_scene_pcd(self, rgb_embed, depth, K):
         height, width = depth.shape
         # Create pixel coordinate grid
         x = np.arange(width)
@@ -358,12 +392,14 @@ class HOI4DDataset(td.Dataset):
         x_flat = x_grid.flatten()
         y_flat = y_grid.flatten()
         z_flat = depth.flatten()
+        feat_flat = rgb_embed.reshape(-1, rgb_embed.shape[-1])
 
         # Remove points with invalid depth
         valid_depth = np.logical_and(z_flat > 0, z_flat < 5)
         x_flat = x_flat[valid_depth]
         y_flat = y_flat[valid_depth]
         z_flat = z_flat[valid_depth]
+        feat_flat = feat_flat[valid_depth]
 
         # Create homogeneous pixel coordinates
         pixels = np.stack([x_flat, y_flat, np.ones_like(x_flat)], axis=0)
@@ -381,7 +417,14 @@ class HOI4DDataset(td.Dataset):
         )
 
         scene_pcd = np.asarray(scene_pcd_o3d_downsample.points)
-        return scene_pcd
+
+        # Find closest indices in the original point cloud so we can index the features
+        downsampled_indices = [
+            np.argmin(np.linalg.norm(points - scene_pcd[i], axis=1))
+            for i in range(scene_pcd.shape[0])
+        ]
+        scene_feat_pcd = feat_flat[downsampled_indices]
+        return scene_pcd, scene_feat_pcd
 
     def compose_caption(self, dir_name, event):
         """Compose the caption from the event name and the object."""
@@ -395,18 +438,51 @@ class HOI4DDataset(td.Dataset):
         caption = f"{event_name} {obj_name}"
         return caption
 
+    def load_rgb_text_feat(self, dir_name, event_idx, height, width):
+        """
+        Load RGB/text features generated with SIGLIP using ConceptFusion.
+        """
+        features = np.load(f"{dir_name}/rgb_text_features/{event_idx}_compressed.npz")
+        rgb_embed, text_embed = features["rgb_embed"], features["text_embed"].squeeze()
+
+        upscale_by = 2
+        _, pca_feat_dim = rgb_embed.shape
+        rgb_embed = (
+            rgb_embed.transpose(1, 0)
+            .reshape(1, pca_feat_dim, height // upscale_by, width // upscale_by)
+            .astype(np.float32)
+        )
+        rgb_embed = (
+            F.interpolate(
+                torch.from_numpy(rgb_embed),
+                scale_factor=upscale_by,
+                mode="bilinear",
+                align_corners=False,
+            )
+            .numpy()
+            .squeeze()
+            .transpose(1, 2, 0)
+        )
+        return rgb_embed, text_embed
+
     def __getitem__(self, index):
         vid_name, event_idx = self.data_files[index]
         dir_name = os.path.dirname(os.path.dirname(vid_name))
 
         K, cam2world = self.load_camera_params(dir_name)
+        K_ = self.get_scaled_intrinsics(K)
         event, event_start_idx, event_end_idx = self.load_event(dir_name, event_idx)
 
         rgbs, depths = self.load_rgbd(dir_name, event_start_idx, event_end_idx)
         start_tracks, end_tracks, start2end = self.filtered_tracks[index]
 
         caption = self.compose_caption(dir_name, event)
-        start_scene_pcd = self.get_scene_pcd(rgbs[0], depths[0], K)
+        rgb_embed, text_embed = self.load_rgb_text_feat(
+            dir_name, event_idx, rgbs[0].shape[0], rgbs[0].shape[1]
+        )
+        start_scene_pcd, start_scene_feat_pcd = self.get_scene_pcd(
+            rgb_embed, depths[0], K_
+        )
 
         # Use General-Flow tracks instead
         if self.use_gflow_tracks:
@@ -432,9 +508,11 @@ class HOI4DDataset(td.Dataset):
         item = {
             "action_pcd": start_tracks,
             "anchor_pcd": start_scene_pcd,
+            "anchor_feat_pcd": start_scene_feat_pcd,
             "caption": caption,
+            "text_embed": text_embed,
             "cross_displacement": end_tracks - start_tracks,
-            "intrinsics": K,
+            "intrinsics": K_,
             "rgbs": rgbs,
             "depths": depths,
             "start2end": start2end,

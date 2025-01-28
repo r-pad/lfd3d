@@ -377,6 +377,7 @@ class DiTCrossBlock(nn.Module):
             qkv_bias=True,
             **block_kwargs,
         )
+
         self.norm4 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
         mlp_hidden_dim = int(hidden_size * mlp_ratio)
         approx_gelu = lambda: nn.GELU(approximate="tanh")
@@ -390,7 +391,7 @@ class DiTCrossBlock(nn.Module):
             nn.SiLU(), nn.Linear(hidden_size, 12 * hidden_size, bias=True)
         )
 
-    def forward(self, x, y, c, text_embed):
+    def forward(self, x, y, t, text_embed):
         # msa - multi-head self-attention
         # mca - multi-head cross-attention
         # tca - text cross-attention
@@ -407,7 +408,7 @@ class DiTCrossBlock(nn.Module):
             shift_x,
             scale_x,
             gate_x,
-        ) = self.adaLN_modulation(c).chunk(12, dim=1)
+        ) = self.adaLN_modulation(t).chunk(12, dim=1)
         x = x + gate_msa.unsqueeze(1) * self.self_attn(
             modulate(self.norm1(x), shift_msa, scale_msa)
         )
@@ -1036,6 +1037,7 @@ class DiT_PointCloud_Cross(nn.Module):
         super().__init__()
         self.learn_sigma = learn_sigma
         self.in_channels = in_channels
+        self.in_feat_channels = 256  # SIGLIP feat_dim after PCA
         # self.out_channels = in_channels * 2 if learn_sigma else in_channels
         self.out_channels = 6 if learn_sigma else 3
         self.num_heads = num_heads
@@ -1072,20 +1074,42 @@ class DiT_PointCloud_Cross(nn.Module):
         else:
             raise ValueError(f"Invalid x_encoder: {self.model_cfg.x_encoder}")
 
+        # If RGB features are provided, embed geometric/semantic features
+        # at hidden_size // 2 and concatenate.
+        y_hidden_size = (
+            hidden_size if self.model_cfg.y_feat_encoder is None else hidden_size // 2
+        )
         # Encoder for y features
         if self.model_cfg.y_encoder == "mlp":
             self.y_embedder = nn.Conv1d(
                 in_channels,
-                hidden_size,
+                y_hidden_size,
                 kernel_size=1,
                 stride=1,
                 padding=0,
                 bias=True,
             )
         elif self.model_cfg.y_encoder == "dgcnn":
-            self.y_embedder = DGCNN(input_dims=in_channels, emb_dims=hidden_size)
+            self.y_embedder = DGCNN(input_dims=in_channels, emb_dims=y_hidden_size)
         else:
             raise ValueError(f"Invalid y_encoder: {self.model_cfg.y_encoder}")
+
+        y_feat_hidden_size = hidden_size // 2
+        if self.model_cfg.y_feat_encoder == "mlp":
+            self.y_feat_embedder = nn.Conv1d(
+                self.in_feat_channels,
+                y_feat_hidden_size,
+                kernel_size=1,
+                stride=1,
+                padding=0,
+                bias=True,
+            )
+        elif self.model_cfg.y_feat_encoder == "dgcnn":
+            self.y_feat_embedder = DGCNN(
+                input_dims=self.in_feat_channels, emb_dims=y_feat_hidden_size
+            )
+        else:
+            self.y_feat_embedder = None
 
         # Encoder for x0 features
         if self.model_cfg.x0_encoder == "mlp":
@@ -1110,7 +1134,7 @@ class DiT_PointCloud_Cross(nn.Module):
         self.t_embedder = TimestepEmbedder(hidden_size)
 
         # Project text embedding
-        self.text_projector = nn.Linear(384, hidden_size)
+        self.text_projector = nn.Linear(1152, hidden_size)
 
         # Enable usage of p' = p + xt
         # a representation of the current location of the action pcd
@@ -1172,18 +1196,20 @@ class DiT_PointCloud_Cross(nn.Module):
         x: torch.Tensor,
         t: torch.Tensor,
         y: torch.Tensor,
+        text_embed: torch.Tensor,
+        y_feat: Optional[torch.Tensor] = None,
         x0: Optional[torch.Tensor] = None,
-        text_embed: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """
         Forward pass of DiT with scene cross attention.
 
         Args:
-            x (torch.Tensor): (B, N, D) tensor of batched current timestep x (e.g. noised action) features
+            x (torch.Tensor): (B, P, N) tensor of batched current timestep x (e.g. noised action) points
             t (torch.Tensor): (B,) tensor of diffusion timesteps
-            y (torch.Tensor): (B, N', D) tensor of un-noised scene (e.g. anchor) features
-            x0 (Optional[torch.Tensor]): (B, N, D) tensor of un-noised x (e.g. action) features
-            text_embed (Optional[torch.Tensor]): (B, N, K) tensor of text embedding features. Assumes K=384 (miniLM)
+            y (torch.Tensor): (B, P, M) tensor of un-noised scene (e.g. anchor) points
+            text_embed (torch.Tensor): (B, N, L) tensor of text embedding features. Assumes L=1152 (SIGLIP)
+            y_feat (Optional[torch.Tensor]): (B, K, M) tensor of un-noised scene (e.g. anchor) features. Assumes K=256 (SIGLIP after PCA)
+            x0 (Optional[torch.Tensor]): (B, P, N) tensor of un-noised x (e.g. action) features.
         """
         # noise-centering, if enabled
         if self.model_cfg.center_noise:
@@ -1209,25 +1235,40 @@ class DiT_PointCloud_Cross(nn.Module):
                 x0_emb = torch.cat([x0_emb, x_prime_emb], dim=1)
             x_emb = torch.cat([x_emb, x0_emb], dim=1)
 
-        if self.model_cfg.y_encoder is not None:
-            y_emb = self.y_embedder(y)
-            y_emb = y_emb.permute(0, 2, 1)
-
         x = x_emb.permute(0, 2, 1)
+
+        y_emb = self.y_embedder(y)
+        y_emb = y_emb.permute(0, 2, 1)
 
         # timestep embedding
         t_emb = self.t_embedder(t)
 
-        if text_embed is not None:
-            # Project text embedding to the same dimension as x
-            text_emb = self.text_projector(text_embed)
+        # Project text embedding to the same dimension as x
+        text_emb = self.text_projector(text_embed)
+
+        if self.y_feat_embedder is not None:
+            y_feat_emb = self.y_feat_embedder(y_feat)
+            y_feat_emb = y_feat_emb.permute(0, 2, 1)
+            y_emb = torch.cat([y_emb, y_feat_emb], axis=-1)
 
         # forward pass through DiT blocks
         for block in self.blocks:
             if self.model_cfg.rotary:
-                x = block(x, y_emb, t_emb, text_emb, x_pos, y_pos)
+                x = block(
+                    x,
+                    y_emb,
+                    t_emb,
+                    text_emb,
+                    x_pos=x_pos,
+                    y_pos=y_pos,
+                )
             else:
-                x = block(x, y_emb, t_emb, text_emb)
+                x = block(
+                    x,
+                    y_emb,
+                    t_emb,
+                    text_emb,
+                )
 
         # final layer
         x = self.final_layer(x, t_emb)
