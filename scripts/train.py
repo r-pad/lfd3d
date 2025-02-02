@@ -108,6 +108,10 @@ def main(cfg):
     #       loss), and logs it to wandb.
     ######################################################################
 
+    # For multi-dataset training, we define our own distributed sampler
+    # to handle issues described in src/lfd3d/datasets/multi_dataset.py
+    use_distributed_sampler = False if cfg.dataset.name == "multi" else True
+
     trainer = pl.Trainer(
         accelerator="gpu",
         devices=cfg.resources.gpus,
@@ -116,6 +120,7 @@ def main(cfg):
         logger=logger,
         check_val_every_n_epoch=cfg.training.check_val_every_n_epochs,
         gradient_clip_val=cfg.training.grad_clip_norm,
+        use_distributed_sampler=use_distributed_sampler,
         callbacks=[
             ModelCheckpoint(
                 dirpath=cfg.lightning.checkpoint_dir,
