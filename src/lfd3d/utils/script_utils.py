@@ -10,6 +10,7 @@ from omegaconf import OmegaConf
 from pytorch_lightning.loggers import WandbLogger
 
 from lfd3d.datasets.hoi4d import HOI4DDataModule
+from lfd3d.datasets.multi_dataset import MultiDatasetDataModule
 from lfd3d.datasets.rt1 import RT1DataModule
 from lfd3d.datasets.synth_block import SynthBlockDataModule
 from lfd3d.models.diptv3 import DiPTv3, DiPTv3Adapter
@@ -60,6 +61,8 @@ def create_datamodule(cfg):
         datamodule_fn = RT1DataModule
     elif cfg.dataset.name == "synth_block":
         datamodule_fn = SynthBlockDataModule
+    elif cfg.dataset.name == "multi":
+        datamodule_fn = MultiDatasetDataModule
     else:
         raise ValueError(f"Invalid dataset name: {cfg.dataset.name}")
 
