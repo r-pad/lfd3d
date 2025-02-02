@@ -82,15 +82,6 @@ def create_datamodule(cfg):
     )
     datamodule.setup(stage)
 
-    # updating job config sample sizes
-    if cfg.dataset.scene:
-        job_cfg.sample_size = (
-            cfg.dataset.sample_size_action + cfg.dataset.sample_size_anchor
-        )
-    else:
-        job_cfg.sample_size = cfg.dataset.sample_size_action
-        job_cfg.sample_size_anchor = cfg.dataset.sample_size_anchor
-
     # training-specific job config setup
     if cfg.mode == "train":
         job_cfg.num_training_steps = len(datamodule.train_dataloader()) * job_cfg.epochs

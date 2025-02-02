@@ -6,8 +6,4 @@ source: real # (real, dedo, etc.) Source of the dataset
 train_size: null # (int, null) Length of the train dataset
 val_size: null # (int, null) Length of the validation dataset
 
-sample_size_action: 512
-sample_size_anchor: 512
 downsample_type: fps
-
-scene: True
