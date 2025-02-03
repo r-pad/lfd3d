@@ -1,0 +1,6 @@
+name: multi
+type: cross_displacement
+
+defaults:
+  - rt1@datasets.rt1
+  - hoi4d@datasets.hoi4d

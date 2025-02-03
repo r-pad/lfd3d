@@ -164,9 +164,6 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         # data params
         self.batch_size = self.run_cfg.batch_size
         self.val_batch_size = self.run_cfg.val_batch_size
-        # TODO: it is debatable if the module needs to know about the sample size
-        self.sample_size = self.run_cfg.sample_size
-        self.sample_size_anchor = self.run_cfg.sample_size_anchor
 
         # diffusion params
         self.noise_schedule = self.model_cfg.diff_noise_schedule

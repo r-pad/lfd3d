@@ -10,6 +10,7 @@ from omegaconf import OmegaConf
 from pytorch_lightning.loggers import WandbLogger
 
 from lfd3d.datasets.hoi4d import HOI4DDataModule
+from lfd3d.datasets.multi_dataset import MultiDatasetDataModule
 from lfd3d.datasets.rt1 import RT1DataModule
 from lfd3d.datasets.synth_block import SynthBlockDataModule
 from lfd3d.models.diptv3 import DiPTv3, DiPTv3Adapter
@@ -60,6 +61,8 @@ def create_datamodule(cfg):
         datamodule_fn = RT1DataModule
     elif cfg.dataset.name == "synth_block":
         datamodule_fn = SynthBlockDataModule
+    elif cfg.dataset.name == "multi":
+        datamodule_fn = MultiDatasetDataModule
     else:
         raise ValueError(f"Invalid dataset name: {cfg.dataset.name}")
 
@@ -81,15 +84,6 @@ def create_datamodule(cfg):
         dataset_cfg=cfg.dataset,
     )
     datamodule.setup(stage)
-
-    # updating job config sample sizes
-    if cfg.dataset.scene:
-        job_cfg.sample_size = (
-            cfg.dataset.sample_size_action + cfg.dataset.sample_size_anchor
-        )
-    else:
-        job_cfg.sample_size = cfg.dataset.sample_size_action
-        job_cfg.sample_size_anchor = cfg.dataset.sample_size_anchor
 
     # training-specific job config setup
     if cfg.mode == "train":

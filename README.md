@@ -62,6 +62,16 @@ python scripts/train.py model=df_cross dataset=hoi4d dataset.data_dir=<path/to/d
 
 Optionally, also set `dataset.cache_dir` to save processed data for faster training.
 
+Training with multiple datasets:
+```
+python scripts/train.py model=df_cross dataset=multi \
+    dataset.datasets.rt1.data_dir=/data/sriram/rt1 \
+    dataset.datasets.rt1.cache_dir=/home/sriram/Desktop/lfd3d/rt1_cache \
+    dataset.datasets.hoi4d.data_dir=/data/sriram/hoi4d/hoi4d_data \
+    dataset.datasets.hoi4d.cache_dir=/home/sriram/Desktop/lfd3d/hoi4d_cache
+```
+
+
 The best checkpoint is saved to WandB at the end of training. If training is interrupted or if you want to save an intermdiate checkpoint stored in `logs/`:
 ```
 cd scripts/
