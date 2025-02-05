@@ -1,3 +1,4 @@
+import math
 import random
 from pathlib import Path
 
@@ -144,37 +145,58 @@ class MultiDatasetDataModule(pl.LightningDataModule):
 
 class ChunkDatasetBatchSampler(torch.utils.data.BatchSampler):
     """This batch sampler ensures each batch contains data only
-    from a single dataset."""
+    from a single dataset, and for multiple datasets, it only uses as many samples
+    from each as the smallest dataset.
+    """
 
     def __init__(self, dataset_indices, batch_size, shuffle=True, drop_last=False):
+        """
+        Args:
+            dataset_indices (List[List[int]]): List of index lists, one per dataset.
+            batch_size (int): Batch size for each dataset.
+            shuffle (bool): Whether to shuffle each dataset's indices.
+            drop_last (bool): Whether to drop the last incomplete batch.
+        """
         self.dataset_indices = dataset_indices
         self.batch_size = batch_size
         self.shuffle = shuffle
-        # integer division to round up for incomplete batches
+        self.drop_last = drop_last
+
+        # Compute the effective number of indices per dataset based on the smallest dataset.
+        self.effective_length = min(len(indices) for indices in self.dataset_indices)
+
+        # Precompute length (total number of batches)
         self._length = sum(
-            (len(indices) + self.batch_size - 1) // self.batch_size
-            for indices in self.dataset_indices
+            math.floor(self.effective_length / self.batch_size)
+            if drop_last
+            else math.ceil(self.effective_length / self.batch_size)
+            for _ in self.dataset_indices
         )
 
     def __len__(self):
         return self._length
 
     def __iter__(self):
-        if not hasattr(self, "_batches"):
+        # We'll build batches for each dataset, using only effective_length samples.
+        batches = []
+        for indices in self.dataset_indices:
+            # Work on a copy to avoid side effects.
+            inds = indices.copy()
             if self.shuffle:
-                [random.shuffle(i) for i in self.dataset_indices]
-
-            all_batches = [
-                torch.split(torch.tensor(i), self.batch_size)
-                for i in self.dataset_indices
-            ]
-            all_batches = list(sum(all_batches, ()))
-            self._batches = [batch.tolist() for batch in all_batches]
-            if self.shuffle:
-                random.shuffle(self._batches)
-
-        yield from self._batches
-        delattr(self, "_batches")
+                random.shuffle(inds)
+            # Subsample only as many as the smallest dataset.
+            inds = inds[: self.effective_length]
+            # Split into batches.
+            # Note: torch.split returns tensors, so convert them back to lists.
+            batched = torch.split(torch.tensor(inds), self.batch_size)
+            # Optionally drop the last incomplete batch.
+            for batch in batched:
+                if self.drop_last and len(batch) < self.batch_size:
+                    continue
+                batches.append(batch.tolist())
+        if self.shuffle:
+            random.shuffle(batches)
+        yield from batches
 
 
 class DistributedChunkSampler(DistributedSampler):
