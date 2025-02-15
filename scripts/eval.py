@@ -43,6 +43,7 @@ def main(cfg):
     pl.seed_everything(42)
 
     device = f"cuda:{cfg.resources.gpus[0]}"
+    dataset_name = cfg.dataset.name
 
     ######################################################################
     # Create the datamodule.
@@ -74,10 +75,7 @@ def main(cfg):
         ckpt_file = checkpoint_reference
     # Load the network weights.
     ckpt = torch.load(ckpt_file, map_location=device)
-    # HACK: The text embedding model doesn't get loaded correctly
-    # Just remove it before loading since it's a pretrained model anyway
-    # Ideally, we wouldn't even log it to WandB,
-    state_dict = {k: v for k, v in ckpt["state_dict"].items() if "text_embed" not in k}
+    state_dict = {k: v for k, v in ckpt["state_dict"].items()}
     network.load_state_dict({k.partition(".")[2]: v for k, v, in state_dict.items()})
     # set model to eval mode
     network.eval()
@@ -142,7 +140,7 @@ def main(cfg):
                 preds_dict[pred_split][key][i] for key in preds_dict[pred_split].keys()
             ]
             table.add_data(*row)
-        wandb.log({f"{pred_split}/eval_results": table})
+        wandb.log({f"{pred_split}/{dataset_name}-eval_results": table})
 
     # Summary Statistics
     summary_stats = []
@@ -157,7 +155,7 @@ def main(cfg):
         pred_metric = preds_dict[metric.split("/")[0]][metric.split("/")[1]]
         summary_stats.append([metric, pred_metric.mean()])
     summary_table = wandb.Table(data=summary_stats, columns=["Metric", "Value"])
-    wandb.log({f"eval_results_summary": summary_table})
+    wandb.log({f"{dataset_name}-eval_results_summary": summary_table})
 
     wandb.finish()
 
