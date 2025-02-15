@@ -5,7 +5,7 @@
 
 ```bash
 
-conda create -n flash_attn python=3.10
+conda create -n lfd3d python=3.10
 pip install -r requirements.txt
 pip install -e ".[develop]"
 
