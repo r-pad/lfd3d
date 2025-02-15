@@ -51,6 +51,18 @@ def DiT_PointCloud_Cross_xS(use_rotary, **kwargs):
     return DiT_PointCloud_Cross(depth=5, hidden_size=hidden_size, num_heads=4, **kwargs)
 
 
+def DiT_PointCloud_Cross_S(use_rotary, **kwargs):
+    hidden_size = 192 if use_rotary else 288
+    return DiT_PointCloud_Cross(depth=7, hidden_size=hidden_size, num_heads=8, **kwargs)
+
+
+def DiT_PointCloud_Cross_B(use_rotary, **kwargs):
+    hidden_size = 240 if use_rotary else 384
+    return DiT_PointCloud_Cross(
+        depth=10, hidden_size=hidden_size, num_heads=12, **kwargs
+    )
+
+
 def DiT_PointCloud_xS(use_rotary, **kwargs):
     # hidden size divisible by 3 for rotary embedding, and divisible by num_heads for multi-head attention
     hidden_size = 132 if use_rotary else 128
@@ -86,6 +98,8 @@ DiT_models = {
     "Rel3D_DiT_pcu_cross_xS": Rel3D_DiT_pcu_cross_xS,
     # there is no Rel3D_DiT_pcu_xS
     "DiT_PointCloud_Cross_xS": DiT_PointCloud_Cross_xS,
+    "DiT_PointCloud_Cross_S": DiT_PointCloud_Cross_S,
+    "DiT_PointCloud_Cross_B": DiT_PointCloud_Cross_B,
     # TODO: add the SD model here
     "DiT_PointCloud_xS": DiT_PointCloud_xS,
 }
