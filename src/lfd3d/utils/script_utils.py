@@ -1,5 +1,6 @@
 import os
 import pathlib
+import warnings
 from typing import Dict, List, Sequence, Union, cast
 
 import torch
@@ -9,6 +10,7 @@ from lightning.pytorch import Callback
 from omegaconf import OmegaConf
 from pytorch_lightning.loggers import WandbLogger
 
+from lfd3d.datasets.genGoalGen import GenGoalGenDataModule
 from lfd3d.datasets.hoi4d import HOI4DDataModule
 from lfd3d.datasets.multi_dataset import MultiDatasetDataModule
 from lfd3d.datasets.rt1 import RT1DataModule
@@ -63,6 +65,8 @@ def create_datamodule(cfg):
         datamodule_fn = SynthBlockDataModule
     elif cfg.dataset.name == "multi":
         datamodule_fn = MultiDatasetDataModule
+    elif cfg.dataset.name == "genGoalGen":
+        datamodule_fn = GenGoalGenDataModule
     else:
         raise ValueError(f"Invalid dataset name: {cfg.dataset.name}")
 
@@ -187,40 +191,29 @@ def load_checkpoint_config_from_wandb(
     inconsistent_keys = []
     for ovrd in task_overrides:
         key = ovrd.split("=")[0]
-        # hack to skip data_dir overrides
-        if "data_dir" in key or "cache_dir" in key:
-            continue
-        # only check for consistency with dataset/model keys
-        if key.split(".")[0] not in ["dataset", "model"]:
-            continue
         if OmegaConf.select(current_cfg, key) != OmegaConf.select(run_cfg, key):
             inconsistent_keys.append(key)
 
-    # for now, just raise an error if there are any inconsistencies
     if inconsistent_keys:
-        raise ValueError(
-            f"Task overrides are inconsistent with original run config: {inconsistent_keys}"
+        warnings.warn(
+            f"Task overrides are inconsistent with original run config: {inconsistent_keys}",
+            UserWarning,
         )
 
-    # hack to keep data_dir override
+    # Keep some overrides
     current_data_dir = current_cfg.dataset.data_dir
     current_cache_dir = current_cfg.dataset.cache_dir
+    current_dataset_name = current_cfg.dataset.name
 
     # update run config with dataset and model configs from original run config
-    OmegaConf.update(
-        current_cfg,
-        "dataset",
-        OmegaConf.select(run_cfg, "dataset"),
-        merge=True,
-        force_add=True,
-    )
-    OmegaConf.update(
-        current_cfg,
-        "model",
-        OmegaConf.select(run_cfg, "model"),
-        merge=True,
-        force_add=True,
-    )
+    for key in ["dataset", "model", "name"]:
+        OmegaConf.update(
+            current_cfg,
+            key,
+            OmegaConf.select(run_cfg, key),
+            merge=True,
+            force_add=True,
+        )
 
     # small edge case - if 'eval', ignore 'train_size'/'val_size'
     if current_cfg.mode == "eval":
@@ -228,4 +221,5 @@ def load_checkpoint_config_from_wandb(
         current_cfg.dataset.val_size = None
     current_cfg.dataset.data_dir = current_data_dir
     current_cfg.dataset.cache_dir = current_cache_dir
+    current_cfg.dataset.name = current_dataset_name
     return current_cfg
