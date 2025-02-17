@@ -1,0 +1,10 @@
+name: genGoalGen
+data_dir: ""
+type: cross_displacement # (flow, point) Type of dataset
+source: real # (real, dedo, etc.) Source of the dataset
+
+train_size: null # (int, null) Length of the train dataset
+val_size: null # (int, null) Length of the validation dataset
+
+downsample_type: fps
+world_frame: True
