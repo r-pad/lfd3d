@@ -13,7 +13,7 @@ world_frame: True
 
 # Source of GT tracks - ["spatrack_tracks", "gflow_tracks", "mano_handpose"]
 # `spatrack_tracks` - Generated using SpatialTacker
-gt_source: "gflow_tracks"
+gt_source: "mano_handpose"
 
 # multi_cloth:
 #   hole: single

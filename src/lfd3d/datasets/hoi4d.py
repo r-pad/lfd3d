@@ -14,7 +14,7 @@ import torch.utils.data as data
 import torchdatasets as td
 from tqdm import tqdm
 
-from lfd3d.utils.data_utils import collate_pcd_fn
+from lfd3d.utils.data_utils import MANOInterface, collate_pcd_fn
 
 
 class HOI4DDataset(td.Dataset):
@@ -44,6 +44,8 @@ class HOI4DDataset(td.Dataset):
             "push",
             "putdown",
         ]
+
+        self.mano_interface = MANOInterface()
 
         split_files = self.load_split(split)
 
@@ -256,11 +258,12 @@ class HOI4DDataset(td.Dataset):
                 # Some events are missing because they've been filtered out during General Flow preprocessing.
                 try:
                     idx, data = self.event_metadata_dict[
-                        (vid_name[vid_name.find("Z") : -20], event_start_idx)
+                        (vid_name[vid_name.find("ZY2021") : -20], event_start_idx)
                     ]
                 except KeyError:
                     print(
-                        "Missing", (vid_name[vid_name.find("Z") : -20], event_start_idx)
+                        "Missing",
+                        (vid_name[vid_name.find("ZY2021") : -20], event_start_idx),
                     )
                     continue
                 traj_data = self.dtraj_list[idx]
@@ -285,7 +288,27 @@ class HOI4DDataset(td.Dataset):
                 end_tracks = end_tracks[cd_mask]
 
             elif self.gt_source == "mano_handpose":
-                raise NotImplementedError
+                hand_tracks = []
+                try:
+                    for hand_idx in [event_start_idx, event_end_idx]:
+                        vid_path = vid_name[vid_name.find("ZY2021") : -20]
+                        with open(
+                            f"{self.root}/../handpose/refinehandpose_right/{vid_path}/{hand_idx}.pickle",
+                            "rb",
+                        ) as f:
+                            hand_info = pickle.load(f, encoding="latin1")
+
+                        theta = hand_info["poseCoeff"]
+                        beta = hand_info["beta"]
+                        hand_verts, _ = self.mano_interface.get_hand_params(theta, beta)
+
+                        trans = hand_info["trans"]
+                        tracks = (hand_verts.squeeze(0).numpy() / 1000.0) + trans
+                        hand_tracks.append(tracks)
+                except FileNotFoundError:
+                    print(f"Could not find handpose for {vid_name}")
+                    continue
+                start_tracks, end_tracks = hand_tracks
             else:
                 raise NotImplementedError
 
