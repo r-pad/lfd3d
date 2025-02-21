@@ -25,7 +25,8 @@ class HOI4DDataset(td.Dataset):
         self.dataset_dir = self.root
 
         self.cache_dir = dataset_cfg.cache_dir
-        self.use_gflow_tracks = dataset_cfg.use_gflow_tracks
+        self.gt_source = dataset_cfg.gt_source
+        assert self.gt_source in ["spatrack_tracks", "gflow_tracks", "mano_handpose"]
         # Scale factor for resizing images
         self.scale_factor = 0.25
 
@@ -46,7 +47,7 @@ class HOI4DDataset(td.Dataset):
 
         split_files = self.load_split(split)
 
-        if self.use_gflow_tracks:
+        if self.gt_source == "gflow_tracks":
             # Use tracks generated from General Flow's label_gen_event.py in sriramsk1999/general-flow
             with open(
                 f"{self.root}/../hoi4d_general_flow_event_traj/metadata.json", "r"
@@ -247,20 +248,11 @@ class HOI4DDataset(td.Dataset):
 
             K, cam2world = self.load_camera_params(dir_name)
             _, event_start_idx, event_end_idx = self.load_event(dir_name, event_idx)
-
-            _, depths = self.load_rgbd(dir_name, event_start_idx, event_end_idx)
-            start_tracks, end_tracks, start2end = self.process_and_register_tracks(
-                dir_name,
-                event_idx,
-                event_start_idx,
-                event_end_idx,
-                depths,
-                K,
-                cam2world,
+            start2end = self.get_start2end_transform(
+                cam2world, event_start_idx, event_end_idx
             )
 
-            # If we're using general-flow tracks, we only need start2end
-            if self.use_gflow_tracks:
+            if self.gt_source == "gflow_tracks":
                 # Some events are missing because they've been filtered out during General Flow preprocessing.
                 try:
                     idx, data = self.event_metadata_dict[
@@ -271,18 +263,35 @@ class HOI4DDataset(td.Dataset):
                         "Missing", (vid_name[vid_name.find("Z") : -20], event_start_idx)
                     )
                     continue
-                filtered_tracks.append((None, None, start2end))
-                filtered_data_files.append(data_files[index])
-            else:
+                traj_data = self.dtraj_list[idx]
+                start_tracks, end_tracks = traj_data[:, 0, :], traj_data[:, -1, :]
+                caption = f"{data['action']} {data['object']}"
+            elif self.gt_source == "spatrack_tracks":
+                _, depths = self.load_rgbd(dir_name, event_start_idx, event_end_idx)
+                start_tracks, end_tracks = self.process_and_register_tracks(
+                    dir_name,
+                    event_idx,
+                    event_start_idx,
+                    event_end_idx,
+                    depths,
+                    K,
+                    start2end,
+                )
+
                 cross_displacement = end_tracks - start_tracks
                 cd_mask = np.linalg.norm(cross_displacement, axis=1) > norm_threshold
 
                 start_tracks = start_tracks[cd_mask]
                 end_tracks = end_tracks[cd_mask]
 
-                if start_tracks.shape[0] > num_points_threshold:
-                    filtered_data_files.append(data_files[index])
-                    filtered_tracks.append((start_tracks, end_tracks, start2end))
+            elif self.gt_source == "mano_handpose":
+                raise NotImplementedError
+            else:
+                raise NotImplementedError
+
+            if start_tracks.shape[0] > num_points_threshold:
+                filtered_data_files.append(data_files[index])
+                filtered_tracks.append((start_tracks, end_tracks))
 
         # Cache dataset
         if self.cache_dir and not os.path.exists(cache_name):
@@ -305,8 +314,14 @@ class HOI4DDataset(td.Dataset):
         K_[1, 2] *= self.scale_factor  # cy
         return K_
 
+    def get_start2end_transform(self, cam2world, event_start_idx, event_end_idx):
+        start2world = cam2world[event_start_idx]
+        end2world = cam2world[event_end_idx]
+        start2end = start2world @ np.linalg.inv(end2world)
+        return start2end
+
     def process_and_register_tracks(
-        self, dir_name, event_idx, event_start_idx, event_end_idx, depths, K, cam2world
+        self, dir_name, event_idx, event_start_idx, event_end_idx, depths, K, start2end
     ):
         """
         Load the tracks corresponding to the start and end of the event.
@@ -373,13 +388,10 @@ class HOI4DDataset(td.Dataset):
 
         # Register the tracks at the end of the chunk with respect
         # to the coordinate frame at the beginning of the chunk
-        start2world = cam2world[event_start_idx]
-        end2world = cam2world[event_end_idx]
         end_tracks = np.hstack((end_tracks, np.ones((end_tracks.shape[0], 1))))
-        start2end = start2world @ np.linalg.inv(end2world)
         end_tracks = (start2end @ end_tracks.T).T[:, :3].astype(np.float32)
 
-        return start_tracks, end_tracks, start2end
+        return start_tracks, end_tracks
 
     def get_scene_pcd(self, rgb_embed, depth, K):
         height, width = depth.shape
@@ -472,9 +484,12 @@ class HOI4DDataset(td.Dataset):
         K, cam2world = self.load_camera_params(dir_name)
         K_ = self.get_scaled_intrinsics(K)
         event, event_start_idx, event_end_idx = self.load_event(dir_name, event_idx)
+        start2end = self.get_start2end_transform(
+            cam2world, event_start_idx, event_end_idx
+        )
 
         rgbs, depths = self.load_rgbd(dir_name, event_start_idx, event_end_idx)
-        start_tracks, end_tracks, start2end = self.filtered_tracks[index]
+        start_tracks, end_tracks = self.filtered_tracks[index]
 
         caption = self.compose_caption(dir_name, event)
         rgb_embed, text_embed = self.load_rgb_text_feat(
@@ -483,15 +498,6 @@ class HOI4DDataset(td.Dataset):
         start_scene_pcd, start_scene_feat_pcd = self.get_scene_pcd(
             rgb_embed, depths[0], K_
         )
-
-        # Use General-Flow tracks instead
-        if self.use_gflow_tracks:
-            idx, data = self.event_metadata_dict[
-                (vid_name[vid_name.find("Z") : -20], event_start_idx)
-            ]
-            traj_data = self.dtraj_list[idx]
-            start_tracks, end_tracks = traj_data[:, 0, :], traj_data[:, -1, :]
-            caption = f"{data['action']} {data['object']}"
 
         # Center on action_pcd
         action_pcd_mean = start_tracks.mean(axis=0)
