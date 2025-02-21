@@ -33,12 +33,14 @@ Alternatively, use Docker (see below).
 
 ### HOI4D
 
-- Tracks: Generated using `hoi4d_inference.py` from [sriramsk1999/SpaTracker](https://github.com/sriramsk1999/spatracker)
+- GT Points (any one of the following):
+  - Tracks from SpatialTracker: Generated using `hoi4d_inference.py` from [sriramsk1999/SpaTracker](https://github.com/sriramsk1999/spatracker)
+  - Tracks from General Flow: Generate event-wise tracks from `label_gen_event.py` in [sriramsk1999/general-flow](https://github.com/sriramsk1999/general-flow/). When training with these tracks, the projections of the tracks won't align perfectly, due to the errors in the object pose annotations in the dataset
+  - Tracks from MANO hand pose: Load hand pose tracks provided by HOI4D dataset. When training with these tracks, the projections of the tracks won't align perfectly, due to the errors in the hand pose annotations in the dataset
 - RGB/text features: Generated using `src/lfd3d/datasets/hoi4d_processing/rgb_text_feature_gen.py`.
 
 Test split generated using [sriramsk1999/general-flow](https://github.com/sriramsk1999/general-flow/)
 
-Additionally, if `use_gflow_tracks=True`, generate event-wise tracks from `label_gen_event.py` in [sriramsk1999/general-flow](https://github.com/sriramsk1999/general-flow/). When training with these tracks, the projections of the tracks won't align perfectly, likely due to the errors in the object pose annotation when generating these tracks.
 
 ### RT-1
 

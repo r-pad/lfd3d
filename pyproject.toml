@@ -27,6 +27,8 @@ dependencies = [
   "tensorflow-datasets",
   "torchdatasets @ git+https://github.com/szymonmaszke/torchdatasets.git",
   "segment-anything @ git+https://github.com/facebookresearch/segment-anything.git",
+  "chumpy @ git+https://github.com/hassony2/chumpy.git",
+  "manopth @ git+https://github.com/hassony2/manopth.git",
   "sentencepiece",
   "spconv-cu118", # CUDA 11.8
 ]

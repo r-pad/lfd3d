@@ -1,5 +1,45 @@
+import os
+
+import numpy as np
 import torch
+from hydra.core.hydra_config import HydraConfig
+from manopth.manolayer import ManoLayer
 from pytorch3d.structures import Pointclouds
+
+MANO_ROOT = "mano/models"
+
+
+class MANOInterface:
+    def __init__(self):
+        self.add_back_legacy_types_numpy()
+        if HydraConfig.initialized():
+            original_cwd = HydraConfig.get().runtime.cwd
+        else:
+            original_cwd = os.getcwd()
+        self.manolayer = ManoLayer(
+            mano_root=f"{original_cwd}/{MANO_ROOT}",
+            use_pca=False,
+            ncomps=45,
+            flat_hand_mean=True,
+            side="right",
+        )
+
+    def add_back_legacy_types_numpy(self):
+        """
+        A hacky way to add back deprecated imports into numpy.
+        """
+        np.bool = np.bool_
+        np.int = np.int_
+        np.float = np.float_
+        np.complex = np.complex_
+        np.object = np.object_
+        np.str = np.str_
+
+    def get_hand_params(self, theta, beta):
+        theta = torch.from_numpy(theta).unsqueeze(0)
+        beta = torch.from_numpy(beta).unsqueeze(0)
+        hand_verts, hand_joints = self.manolayer(theta, beta)
+        return hand_verts, hand_joints
 
 
 def collate_pcd_fn(batch):
