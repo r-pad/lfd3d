@@ -41,6 +41,9 @@ Alternatively, use Docker (see below).
 
 Test split generated using [sriramsk1999/general-flow](https://github.com/sriramsk1999/general-flow/)
 
+### DROID
+
+- GT Gripper Trajectory: Rendered using Mujoco in `src/lfd3d/datasets/droid/render_robotiq.py`.
 
 ### RT-1
 

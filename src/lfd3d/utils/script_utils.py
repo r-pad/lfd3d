@@ -10,11 +10,11 @@ from lightning.pytorch import Callback
 from omegaconf import OmegaConf
 from pytorch_lightning.loggers import WandbLogger
 
-from lfd3d.datasets.genGoalGen import GenGoalGenDataModule
-from lfd3d.datasets.hoi4d import HOI4DDataModule
+from lfd3d.datasets.genGoalGen_dataset import GenGoalGenDataModule
+from lfd3d.datasets.hoi4d_dataset import HOI4DDataModule
 from lfd3d.datasets.multi_dataset import MultiDatasetDataModule
-from lfd3d.datasets.rt1 import RT1DataModule
-from lfd3d.datasets.synth_block import SynthBlockDataModule
+from lfd3d.datasets.rt1_dataset import RT1DataModule
+from lfd3d.datasets.synth_block_dataset import SynthBlockDataModule
 from lfd3d.models.diptv3 import DiPTv3, DiPTv3Adapter
 from lfd3d.models.tax3d import (
     CrossDisplacementModule,
