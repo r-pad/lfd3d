@@ -14,12 +14,11 @@ from scipy.spatial.transform import Rotation
 from tqdm import tqdm
 
 """
-NOTE: MJCF needs to be modified to add free joint and a camera
+NOTE: MJCF needs to be modified to add free joint
 TODO: Dynamically add to MJCF to avoid this.
 Location: ~/.cache/robot_descriptions/mujoco_menagerie/robotiq_2f85/2f85.xml
 
    <worldbody>
-   <camera name="droid_camera" pos="0 0 0" quat="1 0 0 0" fovy="45"/>    !!!TO BE ADDDED!!!
    <body name="base_mount" pos="0 0 0.007" childclass="2f85">
      <freejoint name="root_joint"/> !!!TO BE ADDED!!!
 """
@@ -156,8 +155,6 @@ assert (
     root_joint_adr != -1
 ), "Modify MJCF following the instructions at the top of the script."
 start_qpos = model.jnt_qposadr[root_joint_adr]
-cam_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_CAMERA, "droid_camera")
-renderer = mujoco.Renderer(model, width=width, height=height)
 
 root = "/data/sriram/DROID/droid"
 builder = tfds.builder_from_directory(builder_dir=f"{root}")
@@ -175,6 +172,9 @@ cam_image_key = "exterior_image_1_left"
 for idx, item in tqdm(enumerate(dataset), total=len(dataset)):
     fpath = item["episode_metadata"]["file_path"].numpy().decode("utf-8")
     if "failure" in fpath:
+        continue
+
+    if os.path.exists(f"{output_dir}/{idx}.npz"):
         continue
 
     steps = [i for i in item["steps"]]
@@ -203,15 +203,6 @@ for idx, item in tqdm(enumerate(dataset), total=len(dataset)):
     cam_to_world = get_cam_to_world(extrinsics_left)
     # Get the world to camera transformation
     world_to_cam = np.linalg.inv(cam_to_world)
-
-    # Set camera pose
-    model.cam_pos[cam_id] = cam_to_world[:3, 3]
-    R_flip = np.diag([1, -1, -1])
-    R_cam = Rotation.from_matrix(cam_to_world[:3, :3] @ R_flip)
-    cam_quat = R_cam.as_quat()  # [x, y, z, w]
-    cam_quat = cam_quat[[3, 0, 1, 2]]  # Reorder to [w, x, y, z] for MuJoCo
-    model.cam_quat[cam_id] = cam_quat
-    model.cam_fovy[cam_id] = fovy
 
     num_images = images.shape[0]
     gripper_action = np.clip(
