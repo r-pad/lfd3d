@@ -32,7 +32,7 @@ def get_dinov2_image_embedding(image_path, dinov2=None):
             transforms.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
         ]
     )
-    inputs = preprocess(image).unsqueeze(0)
+    inputs = preprocess(image).unsqueeze(0).to("cuda")
 
     # Forward pass to get features
     with torch.no_grad():
@@ -55,7 +55,7 @@ def get_dinov2_image_embedding(image_path, dinov2=None):
         align_corners=False,
     )
 
-    return resized_features.squeeze().permute(1, 2, 0).numpy()
+    return resized_features.squeeze().permute(1, 2, 0).cpu().numpy()
 
 
 def get_siglip_text_embedding(caption, siglip=None, siglip_processor=None):
@@ -189,7 +189,7 @@ if __name__ == "__main__":
     siglip = AutoModel.from_pretrained("google/siglip-so400m-patch14-384").to("cuda")
     siglip_processor = AutoProcessor.from_pretrained("google/siglip-so400m-patch14-384")
 
-    dinov2 = torch.hub.load("facebookresearch/dinov2", "dinov2_vitl14_reg")
+    dinov2 = torch.hub.load("facebookresearch/dinov2", "dinov2_vitl14_reg").to("cuda")
     dino_feat_dim = 1024
     pca_n_components = 256  # number of components for PCA
     downscale_by = 1 / 4  # downsample factor for feature image before saving
