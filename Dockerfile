@@ -29,14 +29,20 @@ RUN pyenv install 3.10.0 && pyenv global 3.10.0
 RUN mkdir $CODING_ROOT/code
 WORKDIR $CODING_ROOT/code
 
-# Only copy in the source code that is necessary for the dependencies to install
+# Base requirements layer - these will be cached
+COPY ./requirements.txt $CODING_ROOT/code/requirements.txt
+RUN pip install -r requirements.txt
+
+# Flash-attn layer - this will be cached unless requirements.txt changes
+RUN pip install flash-attn==2.7.2.post1 --no-build-isolation
+
+# Now copy your application code (which changes frequently)
 COPY ./src $CODING_ROOT/code/src
 COPY ./setup.py $CODING_ROOT/code/setup.py
 COPY ./pyproject.toml $CODING_ROOT/code/pyproject.toml
-COPY ./requirements.txt $CODING_ROOT/code/requirements.txt
-RUN pip install -r requirements.txt
+
+# Install your app in dev mode - only this needs to rebuild when code changes
 RUN pip install -e .[develop]
-RUN pip install flash-attn==2.7.2.post1 --no-build-isolation
 
 # Changes to the configs and scripts will not require a rebuild
 COPY ./configs $CODING_ROOT/code/configs
