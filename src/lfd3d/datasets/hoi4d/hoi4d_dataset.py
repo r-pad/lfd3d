@@ -1,7 +1,6 @@
 import json
 import os
 import pickle
-from glob import glob
 from pathlib import Path
 
 import cv2
@@ -31,9 +30,10 @@ class HOI4DDataset(td.Dataset):
         self.scale_factor = 0.25
 
         self.intrinsic_dict = self.load_intrinsics()
-        self.data_files = sorted(
-            glob(f"{self.dataset_dir}/**/image.mp4", recursive=True)
-        )
+        current_dir = os.path.dirname(__file__)
+        with open(f"{current_dir}/hoi4d_videos.json", "r") as f:
+            self.data_files = json.load(f)
+            self.data_files = [f"{self.dataset_dir}/{i}" for i in self.data_files]
         # Events where there is meaningful object motion
         self.valid_event_types = [
             "Pickup",

@@ -56,6 +56,9 @@ class SynthBlockDataset(data.Dataset):
         return rgbs, depths
 
     def __getitem__(self, index):
+        raise NotImplementedError(
+            "switch to gripper-only prediction + dino features. not yet implemented for this dataset."
+        )
         pcd_name = self.data_files[index]
         dir_name = os.path.dirname(pcd_name)
 

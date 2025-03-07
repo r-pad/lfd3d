@@ -8,7 +8,7 @@ import torch.utils.data as data
 import torchdatasets as td
 from torch.utils.data.distributed import DistributedSampler
 
-from lfd3d.datasets.hoi4d_dataset import HOI4DDataset
+from lfd3d.datasets.hoi4d.hoi4d_dataset import HOI4DDataset
 from lfd3d.datasets.rt1_dataset import RT1Dataset
 from lfd3d.utils.data_utils import collate_pcd_fn
 

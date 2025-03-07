@@ -34,7 +34,9 @@ COPY ./src $CODING_ROOT/code/src
 COPY ./setup.py $CODING_ROOT/code/setup.py
 COPY ./pyproject.toml $CODING_ROOT/code/pyproject.toml
 COPY ./requirements.txt $CODING_ROOT/code/requirements.txt
-RUN pip install -r requirements.txt && pip install -e .[develop] && pip install flash-attn --no-build-isolation
+RUN pip install -r requirements.txt
+RUN pip install -e .[develop]
+RUN pip install flash-attn==2.7.2.post1 --no-build-isolation
 
 # Changes to the configs and scripts will not require a rebuild
 COPY ./configs $CODING_ROOT/code/configs
