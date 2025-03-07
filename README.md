@@ -27,6 +27,9 @@ pre-commit install
 
 ```
 
+
+Download the [MANO models](https://mano.is.tue.mpg.de/) and place them in `mano/`.
+
 Alternatively, use Docker (see below).
 
 ## Feature Generation
@@ -97,34 +100,25 @@ If the model was trained on the cluster, `dataset.cache_dir` needs to be overrid
 
 ## Docker
 
-Make sure to set the `$DOCKERHUB_USERNAME` shell variable. To build the docker image, run:
+Build the docker image:
 
 ```bash
 docker build -t $DOCKERHUB_USERNAME/lfd3d .
 ```
 
-To run the training script locally, run:
+To run the training script:
 
 ```bash
-WANDB_API_KEY=<API_KEY>
-# Optional: mount current directory to run / test new code.
-# Mount data directory to access data.
 docker run \
-    -v $(pwd)/data:/opt/rpad/data \
+    -v </path/to/dataset>:/opt/rpad/data \
     -v $(pwd)/logs:/opt/rpad/logs \
     --gpus all \
     -e WANDB_API_KEY=$WANDB_API_KEY \
     -e WANDB_DOCKER_IMAGE=lfd3d \
     $DOCKERHUB_USERNAME/lfd3d python scripts/train.py \
         model=df_cross \
-        dataset=hoi4d \
-        dataset.data_dir=/root/data
-```
-
-To push this:
-
-```bash
-docker push $DOCKER_USERNAME/lfd3d:latest
+        dataset=<dataset-name> \
+        dataset.data_dir=/opt/rpad/data
 ```
 
 ## Acknowledgements
