@@ -10,6 +10,7 @@ from lightning.pytorch import Callback
 from omegaconf import OmegaConf
 from pytorch_lightning.loggers import WandbLogger
 
+from lfd3d.datasets.droid.droid_dataset import DroidDataModule
 from lfd3d.datasets.genGoalGen_dataset import GenGoalGenDataModule
 from lfd3d.datasets.hoi4d.hoi4d_dataset import HOI4DDataModule
 from lfd3d.datasets.multi_dataset import MultiDatasetDataModule
@@ -59,6 +60,8 @@ def create_datamodule(cfg):
     # check dataset name
     elif cfg.dataset.name == "hoi4d":
         datamodule_fn = HOI4DDataModule
+    elif cfg.dataset.name == "droid":
+        datamodule_fn = DroidDataModule
     elif cfg.dataset.name == "rt1":
         datamodule_fn = RT1DataModule
     elif cfg.dataset.name == "synth_block":

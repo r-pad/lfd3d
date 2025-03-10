@@ -48,6 +48,7 @@ Test split generated using [sriramsk1999/general-flow](https://github.com/sriram
 ### DROID
 
 - GT Gripper Trajectory: Rendered using Mujoco in `src/lfd3d/datasets/droid/render_robotiq.py`.
+- Subgoal generation: Using Gemini in `src/lfd3d/datasets/droid/chunk_droid_with_gemini.py`.
 
 ### RT-1
 
