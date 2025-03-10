@@ -234,6 +234,9 @@ class RT1Dataset(td.Dataset):
         return rgb_embed, text_embed
 
     def __getitem__(self, idx):
+        raise NotImplementedError(
+            "switch to gripper-only prediction + dino features. not yet implemented for this dataset."
+        )
         index, chunk_idx = self.rt1_index[idx]
 
         caption = self.captions[index]["chunked"][chunk_idx]

@@ -27,6 +27,9 @@ pre-commit install
 
 ```
 
+
+Download the [MANO models](https://mano.is.tue.mpg.de/) and place them in `mano/`.
+
 Alternatively, use Docker (see below).
 
 ## Feature Generation
@@ -37,10 +40,14 @@ Alternatively, use Docker (see below).
   - Tracks from SpatialTracker: Generated using `hoi4d_inference.py` from [sriramsk1999/SpaTracker](https://github.com/sriramsk1999/spatracker)
   - Tracks from General Flow: Generate event-wise tracks from `label_gen_event.py` in [sriramsk1999/general-flow](https://github.com/sriramsk1999/general-flow/). When training with these tracks, the projections of the tracks won't align perfectly, due to the errors in the object pose annotations in the dataset
   - Tracks from MANO hand pose: Load hand pose tracks provided by HOI4D dataset. When training with these tracks, the projections of the tracks won't align perfectly, due to the errors in the hand pose annotations in the dataset
-- RGB/text features: Generated using `src/lfd3d/datasets/hoi4d_processing/rgb_text_feature_gen.py`.
+- RGB/text features: Generated with:
+`python rgb_text_feature_gen.py --dataset hoi4d --input_dir </path/to/hoi4d/data>`
 
 Test split generated using [sriramsk1999/general-flow](https://github.com/sriramsk1999/general-flow/)
 
+### DROID
+
+- GT Gripper Trajectory: Rendered using Mujoco in `src/lfd3d/datasets/droid/render_robotiq.py`.
 
 ### RT-1
 
@@ -54,6 +61,8 @@ After generating tracks and depth:
 3. Chunking and filtering: Generated using `src/lfd3d/datasets/rt1_processing/save_event_rgb.py`.
 
 Test split taken from [3D-VLA](https://github.com/UMass-Foundation-Model/3D-VLA)
+
+**NOTE:** This section needs to be updated, rgb features should come from dinov2, set up gripper centric preds
 
 ## Training
 
@@ -91,34 +100,25 @@ If the model was trained on the cluster, `dataset.cache_dir` needs to be overrid
 
 ## Docker
 
-Make sure to set the `$DOCKERHUB_USERNAME` shell variable. To build the docker image, run:
+Build the docker image:
 
 ```bash
 docker build -t $DOCKERHUB_USERNAME/lfd3d .
 ```
 
-To run the training script locally, run:
+To run the training script:
 
 ```bash
-WANDB_API_KEY=<API_KEY>
-# Optional: mount current directory to run / test new code.
-# Mount data directory to access data.
 docker run \
-    -v $(pwd)/data:/opt/rpad/data \
+    -v </path/to/dataset>:/opt/rpad/data \
     -v $(pwd)/logs:/opt/rpad/logs \
     --gpus all \
     -e WANDB_API_KEY=$WANDB_API_KEY \
     -e WANDB_DOCKER_IMAGE=lfd3d \
     $DOCKERHUB_USERNAME/lfd3d python scripts/train.py \
         model=df_cross \
-        dataset=hoi4d \
-        dataset.data_dir=/root/data
-```
-
-To push this:
-
-```bash
-docker push $DOCKER_USERNAME/lfd3d:latest
+        dataset=<dataset-name> \
+        dataset.data_dir=/opt/rpad/data
 ```
 
 ## Acknowledgements

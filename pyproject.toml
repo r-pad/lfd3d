@@ -30,6 +30,8 @@ dependencies = [
   "chumpy @ git+https://github.com/hassony2/chumpy.git",
   "manopth @ git+https://github.com/hassony2/manopth.git",
   "sentencepiece",
+  "robot_descriptions",
+  "trimesh",
   "spconv-cu118", # CUDA 11.8
 ]
 

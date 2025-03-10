@@ -1,10 +1,8 @@
 import json
 import os
 import pickle
-from glob import glob
 from pathlib import Path
 
-import cv2
 import numpy as np
 import open3d as o3d
 import pytorch_lightning as pl
@@ -12,6 +10,8 @@ import torch
 import torch.nn.functional as F
 import torch.utils.data as data
 import torchdatasets as td
+from PIL import Image
+from torchvision import transforms
 from tqdm import tqdm
 
 from lfd3d.utils.data_utils import MANOInterface, collate_pcd_fn
@@ -27,13 +27,12 @@ class HOI4DDataset(td.Dataset):
         self.cache_dir = dataset_cfg.cache_dir
         self.gt_source = dataset_cfg.gt_source
         assert self.gt_source in ["spatrack_tracks", "gflow_tracks", "mano_handpose"]
-        # Scale factor for resizing images
-        self.scale_factor = 0.25
 
         self.intrinsic_dict = self.load_intrinsics()
-        self.data_files = sorted(
-            glob(f"{self.dataset_dir}/**/image.mp4", recursive=True)
-        )
+        current_dir = os.path.dirname(__file__)
+        with open(f"{current_dir}/hoi4d_videos.json", "r") as f:
+            self.data_files = json.load(f)
+            self.data_files = [f"{self.dataset_dir}/{i}" for i in self.data_files]
         # Events where there is meaningful object motion
         self.valid_event_types = [
             "Pickup",
@@ -74,6 +73,33 @@ class HOI4DDataset(td.Dataset):
         self.dataset_cfg = dataset_cfg
         # Voxel size for downsampling
         self.voxel_size = 0.06
+
+        # Target shape of images (same as DINOv2)
+        self.orig_shape = (1080, 1920)
+        self.target_shape = 224
+        self.rgb_preprocess = transforms.Compose(
+            [
+                transforms.Resize(
+                    self.target_shape,
+                    interpolation=transforms.InterpolationMode.BICUBIC,
+                ),
+                transforms.CenterCrop(self.target_shape),
+                transforms.ToTensor(),
+                transforms.Normalize(
+                    mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)
+                ),
+            ]
+        )
+        self.depth_preprocess = transforms.Compose(
+            [
+                transforms.Resize(
+                    self.target_shape,
+                    interpolation=transforms.InterpolationMode.NEAREST,
+                ),
+                transforms.ToTensor(),
+                transforms.CenterCrop(self.target_shape),
+            ]
+        )
 
     def __len__(self):
         assert len(self.data_files) == len(self.filtered_tracks)
@@ -175,44 +201,28 @@ class HOI4DDataset(td.Dataset):
 
     def load_rgbd(self, dir_name, event_start_idx, event_end_idx):
         # Return rgb/depth at beginning and end of event
-        rgb_init = cv2.cvtColor(
-            cv2.imread(f"{dir_name}/align_rgb/{str(event_start_idx).zfill(5)}.jpg"),
-            cv2.COLOR_BGR2RGB,
-        )
-        rgb_init = cv2.resize(
-            rgb_init, (0, 0), fx=self.scale_factor, fy=self.scale_factor
-        )
-        rgb_end = cv2.cvtColor(
-            cv2.imread(f"{dir_name}/align_rgb/{str(event_end_idx).zfill(5)}.jpg"),
-            cv2.COLOR_BGR2RGB,
-        )
-        rgb_end = cv2.resize(
-            rgb_end, (0, 0), fx=self.scale_factor, fy=self.scale_factor
-        )
+        rgb_init = Image.open(
+            f"{dir_name}/align_rgb/{str(event_start_idx).zfill(5)}.jpg"
+        ).convert("RGB")
+        rgb_init = self.rgb_preprocess(rgb_init).numpy().transpose(1, 2, 0)
+        rgb_end = Image.open(
+            f"{dir_name}/align_rgb/{str(event_end_idx).zfill(5)}.jpg"
+        ).convert("RGB")
+        rgb_end = self.rgb_preprocess(rgb_end).numpy().transpose(1, 2, 0)
         rgbs = np.array([rgb_init, rgb_end])
 
-        depth_init = cv2.imread(
-            f"{dir_name}/align_depth/{str(event_start_idx).zfill(5)}.png", -1
+        depth_init = np.asarray(
+            Image.open(f"{dir_name}/align_depth/{str(event_start_idx).zfill(5)}.png")
         )
-        depth_init = depth_init / 1000.0  # Convert to metres
-        depth_init = cv2.resize(
-            depth_init,
-            (0, 0),
-            fx=self.scale_factor,
-            fy=self.scale_factor,
-            interpolation=cv2.INTER_NEAREST,
+        depth_init = Image.fromarray(depth_init / 1000.0)  # Convert to metres
+        depth_init = self.depth_preprocess(depth_init).numpy().squeeze()
+
+        depth_end = np.asarray(
+            Image.open(f"{dir_name}/align_depth/{str(event_end_idx).zfill(5)}.png")
         )
-        depth_end = cv2.imread(
-            f"{dir_name}/align_depth/{str(event_end_idx).zfill(5)}.png", -1
-        )
-        depth_end = depth_end / 1000.0  # Convert to metres
-        depth_end = cv2.resize(
-            depth_end,
-            (0, 0),
-            fx=self.scale_factor,
-            fy=self.scale_factor,
-            interpolation=cv2.INTER_NEAREST,
-        )
+        depth_end = Image.fromarray(depth_end / 1000.0)  # Convert to metres
+        depth_end = self.depth_preprocess(depth_end).numpy().squeeze()
+
         depths = np.array([depth_init, depth_end])
         return rgbs, depths
 
@@ -330,11 +340,13 @@ class HOI4DDataset(td.Dataset):
         return filtered_data_files, filtered_tracks
 
     def get_scaled_intrinsics(self, K):
+        # Getting scale factor from torchvision.transforms.Resize behaviour
         K_ = K.copy()
-        K_[0, 0] *= self.scale_factor  # fx
-        K_[1, 1] *= self.scale_factor  # fy
-        K_[0, 2] *= self.scale_factor  # cx
-        K_[1, 2] *= self.scale_factor  # cy
+        scale_factor = self.target_shape / min(self.orig_shape)
+        K_[0, 0] *= scale_factor  # fx
+        K_[1, 1] *= scale_factor  # fy
+        K_[0, 2] *= scale_factor  # cx
+        K_[1, 2] *= scale_factor  # cy
         return K_
 
     def get_start2end_transform(self, cam2world, event_start_idx, event_end_idx):
@@ -478,15 +490,10 @@ class HOI4DDataset(td.Dataset):
         Load RGB/text features generated with SIGLIP using ConceptFusion.
         """
         features = np.load(f"{dir_name}/rgb_text_features/{event_idx}_compressed.npz")
-        rgb_embed, text_embed = features["rgb_embed"], features["text_embed"].squeeze()
+        rgb_embed, text_embed = features["rgb_embed"], features["text_embed"]
 
-        upscale_by = 2
-        _, pca_feat_dim = rgb_embed.shape
-        rgb_embed = (
-            rgb_embed.transpose(1, 0)
-            .reshape(1, pca_feat_dim, height // upscale_by, width // upscale_by)
-            .astype(np.float32)
-        )
+        upscale_by = 4
+        rgb_embed = rgb_embed.transpose(2, 0, 1)[None].astype(np.float32)
         rgb_embed = (
             F.interpolate(
                 torch.from_numpy(rgb_embed),
