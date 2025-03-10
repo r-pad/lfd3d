@@ -79,7 +79,7 @@ if len(sys.argv) == 2:
         split_num * (dataset_size // 10) : (split_num + 1) * (dataset_size // 10)
     ]
 
-output_dir = "gemini_viz"
+output_dir = "/data/sriram/DROID/droid_gemini_events"
 os.makedirs(output_dir, exist_ok=True)
 
 for idx, item in tqdm(enumerate(dataset), total=len(dataset)):
