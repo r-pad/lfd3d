@@ -1,12 +1,23 @@
+"""
+Extracts and processes image and text features using DINOv2 and SigLIP models.
+
+Usage:
+Run the script with command-line arguments specifying the dataset and input directory.
+
+Example:
+python rgb_text_feature_gen.py --dataset hoi4d --input_dir /path/to/hoi4d
+"""
 import argparse
 import json
 import os
 import random
+from glob import glob
 
 import joblib
 import numpy as np
 import torch
 import torch.nn.functional as F
+from moviepy.editor import VideoFileClip
 from PIL import Image
 from sklearn.decomposition import PCA
 from torchvision import transforms
@@ -126,6 +137,52 @@ def get_hoi4d_items(hoi4d_root_dir):
     return hoi4d_items
 
 
+def get_droid_items(droid_root_dir):
+    droid_videos = glob(f"{droid_root_dir}/droid_gemini_events/*")
+    base_save_dir = f"{droid_root_dir}/droid_rgb_text_features"
+
+    droid_items = []
+    for vid in tqdm(droid_videos):
+        dir_name = os.path.basename(vid)
+        with open(f"{vid}/subgoal.json") as f:
+            subgoals = json.load(f)
+
+        timestamps = [i["timestamp"] for i in subgoals]
+        # We need the first frame and we don't need the frame
+        # at which the final subgoal is completed
+        # Input to the model is when the goal *starts* and the json
+        # describes when the goal *ends*.
+        timestamps = ["00:00"] + timestamps[:-1]
+
+        # Skip video loading if images area already saved
+        if not os.path.exists(f"{vid}/{len(subgoals)-1}.png"):
+            video = VideoFileClip(f"{vid}/video.mp4")
+        else:
+            video = None
+
+        for i, subgoal in enumerate(subgoals):
+            save_name = f"{base_save_dir}/{dir_name}/{i}_compressed.npz"
+            img_path = f"{vid}/{i}.png"
+            caption = subgoal["subgoal"]
+            timestamp = timestamps[i]
+
+            # Save image for DINOv2 embeddings
+            if not os.path.exists(img_path):
+                image = video.get_frame(timestamp)
+                Image.fromarray(image).save(img_path)
+
+            item = {
+                "dir_name": dir_name,
+                "save_name": save_name,
+                "caption": caption,
+                "img_path": img_path,
+            }
+            droid_items.append(item)
+        if video:
+            video.close()
+    return droid_items
+
+
 def compress_features(pca_model, features, pca_n_components, downscale_by):
     """
     Compress features with PCA.
@@ -177,10 +234,10 @@ if __name__ == "__main__":
         "--dataset",
         type=str,
         required=True,
-        choices=["hoi4d"],
+        choices=["hoi4d", "droid"],
         help="Dataset to process",
     )
-    parser.add_argument("--input_dir", type=str, help="Root dir for HOI4D.")
+    parser.add_argument("--input_dir", type=str, help="input dir")
     args = parser.parse_args()
 
     # Load models
@@ -202,13 +259,29 @@ if __name__ == "__main__":
                 dataset_items, pca_model_path, dino_feat_dim, pca_n_components
             )
         pca_model = joblib.load(pca_model_path)
+    elif args.dataset == "droid":
+        pca_model_path = "droid/pca_model.pkl"
+        dataset_items = get_droid_items(args.input_dir)
+        if not os.path.exists(pca_model_path):
+            save_pca_model(
+                dataset_items, pca_model_path, dino_feat_dim, pca_n_components
+            )
+        pca_model = joblib.load(pca_model_path)
     else:
         raise NotImplementedError
 
     pbar = tqdm(dataset_items)
     for item in pbar:
         pbar.set_description(item["dir_name"])
-        os.makedirs(f"{item['dir_name']}/rgb_text_features", exist_ok=True)
+        if args.dataset == "hoi4d":
+            os.makedirs(f"{item['dir_name']}/rgb_text_features", exist_ok=True)
+        elif args.dataset == "droid":
+            os.makedirs(os.path.dirname(item["save_name"]), exist_ok=True)
+        else:
+            raise NotImplementedError()
+
+        if os.path.exists(item["save_name"]):
+            continue
 
         # Extract features
         img_embedding = get_dinov2_image_embedding(item["img_path"], dinov2)
