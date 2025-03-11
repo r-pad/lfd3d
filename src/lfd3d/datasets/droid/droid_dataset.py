@@ -28,7 +28,9 @@ class DroidDataset(td.Dataset):
         self.droid_raw_dir = f"{root}/droid_raw"  # depth and metadata
         self.track_dir = f"{root}/droid_gripper_pcd"  # Gripper pcd rendered from Mujoco
         self.event_dir = f"{root}/droid_gemini_events"  # Subgoals and videos
-        self.feat_dir = f"{root}/droid_rgb_feat"  # DINOv2 RGB/text features
+        self.feat_dir = (
+            f"{root}/droid_rgb_text_features"  # DINOv2 RGB/SIGLIP text features
+        )
 
         self.current_dir = os.path.dirname(__file__)
         with open(f"{self.current_dir}/idx_to_fname_mapping.json") as f:
@@ -170,7 +172,12 @@ class DroidDataset(td.Dataset):
         disp_name = disp_name[0]
 
         disparity = np.load(disp_name)["arr_0"].astype(np.float32)
-        depths = (self.K[0, 0] * self.baseline) / disparity
+        depths = np.divide(
+            self.K[0, 0] * self.baseline,
+            disparity,
+            out=np.zeros_like(disparity),
+            where=disparity != 0,
+        )
 
         depth_init = Image.fromarray(depths[init_frame_idx])
         depth_init = np.asarray(self.depth_preprocess(depth_init))
