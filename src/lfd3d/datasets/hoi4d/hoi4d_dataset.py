@@ -491,9 +491,9 @@ class HOI4DDataset(td.Dataset):
         caption = f"{event_name} {obj_name}"
         return caption
 
-    def load_rgb_text_feat(self, dir_name, event_idx, height, width):
+    def load_rgb_text_feat(self, dir_name, event_idx):
         """
-        Load RGB/text features generated with SIGLIP using ConceptFusion.
+        Load RGB/text features generated with DINOv2 and SIGLIP
         """
         features = np.load(f"{dir_name}/rgb_text_features/{event_idx}_compressed.npz")
         rgb_embed, text_embed = features["rgb_embed"], features["text_embed"]
@@ -528,9 +528,7 @@ class HOI4DDataset(td.Dataset):
         start_tracks, end_tracks = self.filtered_tracks[index]
 
         caption = self.compose_caption(dir_name, event)
-        rgb_embed, text_embed = self.load_rgb_text_feat(
-            dir_name, event_idx, rgbs[0].shape[0], rgbs[0].shape[1]
-        )
+        rgb_embed, text_embed = self.load_rgb_text_feat(dir_name, event_idx)
         start_scene_pcd, start_scene_feat_pcd = self.get_scene_pcd(
             rgb_embed, depths[0], K_
         )

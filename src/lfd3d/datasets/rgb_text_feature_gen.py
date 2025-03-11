@@ -149,14 +149,23 @@ def get_droid_items(droid_root_dir):
     for vid in pbar:
         pbar.set_description(vid)
         dir_name = os.path.basename(vid)
-        with open(f"{vid}/subgoal.json") as f:
-            subgoals = json.load(f)
+        try:
+            with open(f"{vid}/subgoal.json") as f:
+                subgoals = json.load(f)
+        except:
+            print("Could not find subgoal file for: ", vid)
+            continue
 
         if subgoals == []:
             print("No subgoals for: ", vid)
             continue
 
-        video_array = imageio.get_reader(f"{vid}/video.mp4")
+        try:
+            video_array = imageio.get_reader(f"{vid}/video.mp4")
+        except:
+            print("Could not load video for: ", vid)
+            continue
+
         frames = np.array([frame for frame in video_array])
         num_frames = frames.shape[0]
 

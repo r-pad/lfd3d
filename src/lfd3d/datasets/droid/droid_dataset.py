@@ -30,6 +30,10 @@ class DroidDataset(td.Dataset):
         self.event_dir = f"{root}/droid_gemini_events"  # Subgoals and videos
         self.feat_dir = f"{root}/droid_rgb_feat"  # DINOv2 RGB/text features
 
+        self.current_dir = os.path.dirname(__file__)
+        with open(f"{self.current_dir}/idx_to_fname_mapping.json") as f:
+            self.idx_to_fname_mapping = json.load(f)
+
         # "Average" intrinsics for Zed (720 x 1080)
         K = np.array(
             [
@@ -41,6 +45,7 @@ class DroidDataset(td.Dataset):
         K = K / 4  # downsampled images
         K[2, 2] = 1
         self.K = K
+        self.baseline = 0.120  # Baseline for ZED 2 is 120mm
 
         # Voxel size for downsampling
         self.voxel_size = 0.06
@@ -82,8 +87,7 @@ class DroidDataset(td.Dataset):
         """
         Load the filenames corresponding to each split - [train, val, test]
         """
-        current_dir = os.path.dirname(__file__)
-        with open(f"{current_dir}/droid_{split}.txt", "r") as f:
+        with open(f"{self.current_dir}/debug.txt", "r") as f:
             split_idxs = f.readlines()
         split_idxs = [int(i) for i in split_idxs]
         return split_idxs
@@ -142,13 +146,13 @@ class DroidDataset(td.Dataset):
         K_[1, 2] -= crop_offset_y  # Adjust cy for crop
         return K_
 
-    def load_rgbd(self, dir_name, subgoal_idx):
+    def load_rgbd(self, droid_idx, subgoal_idx):
         # Some pattern matching and string manipulation to get the image patch and its frame idx
-        init_image_path = glob(f"{self.event_dir}/{dir_name}/{subgoal_idx}*png")[0]
+        init_image_path = glob(f"{self.event_dir}/{droid_idx}/{subgoal_idx}*png")[0]
         init_frame_idx = int(
             os.path.basename(init_image_path).split("_")[1].split(".")[0]
         )
-        end_image_path = glob(f"{self.event_dir}/{dir_name}/{subgoal_idx+1}*png")[0]
+        end_image_path = glob(f"{self.event_dir}/{droid_idx}/{subgoal_idx+1}*png")[0]
         end_frame_idx = int(
             os.path.basename(end_image_path).split("_")[1].split(".")[0]
         )
@@ -160,21 +164,52 @@ class DroidDataset(td.Dataset):
         rgb_end = np.asarray(self.rgb_preprocess(rgb_end))
         rgbs = np.array([rgb_init, rgb_end])
 
-        breakpoint()
-        depth_init = np.asarray(
-            Image.open(f"{dir_name}/align_depth/{str(event_start_idx).zfill(5)}.png")
-        )
-        depth_init = Image.fromarray(depth_init / 1000.0)  # Convert to metres
+        fname = self.idx_to_fname_mapping[int(droid_idx)]
+        disp_name = glob(f"{self.droid_raw_dir}/1.0.1/{fname}/*disp.npz")
+        assert len(disp_name) == 1
+        disp_name = disp_name[0]
+
+        disparity = np.load(disp_name)["arr_0"].astype(np.float32)
+        depths = (self.K[0, 0] * self.baseline) / disparity
+
+        depth_init = Image.fromarray(depths[init_frame_idx])
         depth_init = np.asarray(self.depth_preprocess(depth_init))
 
-        depth_end = np.asarray(
-            Image.open(f"{dir_name}/align_depth/{str(event_end_idx).zfill(5)}.png")
-        )
-        depth_end = Image.fromarray(depth_end / 1000.0)  # Convert to metres
+        depth_end = Image.fromarray(depths[end_frame_idx])
         depth_end = np.asarray(self.depth_preprocess(depth_end))
 
         depths = np.array([depth_init, depth_end])
         return rgbs, depths, init_frame_idx, end_frame_idx
+
+    def load_gripper_pcd(self, droid_idx, event_start_idx, event_end_idx):
+        gripper_pcds = np.load(f"{self.track_dir}/{droid_idx}.npz")["arr_0"].astype(
+            np.float32
+        )
+        start_tracks = gripper_pcds[event_start_idx]
+        end_tracks = gripper_pcds[event_end_idx]
+        return start_tracks, end_tracks
+
+    def load_rgb_text_feat(self, droid_idx, event_idx):
+        """
+        Load RGB/text features generated with DINOv2 and SIGLIP
+        """
+        features = np.load(f"{self.feat_dir}/{droid_idx}/{event_idx}_compressed.npz")
+        rgb_embed, text_embed = features["rgb_embed"], features["text_embed"]
+
+        upscale_by = 4
+        rgb_embed = rgb_embed.transpose(2, 0, 1)[None].astype(np.float32)
+        rgb_embed = (
+            F.interpolate(
+                torch.from_numpy(rgb_embed),
+                scale_factor=upscale_by,
+                mode="bilinear",
+                align_corners=False,
+            )
+            .numpy()
+            .squeeze()
+            .transpose(1, 2, 0)
+        )
+        return rgb_embed, text_embed
 
     def get_scene_pcd(self, rgb_embed, depth, K):
         height, width = depth.shape
@@ -221,28 +256,6 @@ class DroidDataset(td.Dataset):
         scene_feat_pcd = feat_flat[downsampled_indices]
         return scene_pcd, scene_feat_pcd
 
-    def load_rgb_text_feat(self, dir_name, event_idx, height, width):
-        """
-        Load RGB/text features generated with SIGLIP using ConceptFusion.
-        """
-        features = np.load(f"{dir_name}/rgb_text_features/{event_idx}_compressed.npz")
-        rgb_embed, text_embed = features["rgb_embed"], features["text_embed"]
-
-        upscale_by = 4
-        rgb_embed = rgb_embed.transpose(2, 0, 1)[None].astype(np.float32)
-        rgb_embed = (
-            F.interpolate(
-                torch.from_numpy(rgb_embed),
-                scale_factor=upscale_by,
-                mode="bilinear",
-                align_corners=False,
-            )
-            .numpy()
-            .squeeze()
-            .transpose(1, 2, 0)
-        )
-        return rgb_embed, text_embed
-
     def __getitem__(self, idx):
         index, subgoal_idx = self.droid_index[idx]
 
@@ -250,7 +263,6 @@ class DroidDataset(td.Dataset):
         caption = subgoal["subgoal"]
         start2end = torch.eye(4)  # Static camera in DROID
 
-        raise NotImplementedError("Work in progress")
         rgbs, depths, event_start_idx, event_end_idx = self.load_rgbd(
             index, subgoal_idx
         )
@@ -259,9 +271,7 @@ class DroidDataset(td.Dataset):
             index, event_start_idx, event_end_idx
         )
 
-        rgb_embed, text_embed = self.load_rgb_text_feat(
-            index, subgoal_idx, rgbs[0].shape[0], rgbs[0].shape[1]
-        )
+        rgb_embed, text_embed = self.load_rgb_text_feat(index, subgoal_idx)
         start_scene_pcd, start_scene_feat_pcd = self.get_scene_pcd(
             rgb_embed, depths[0], self.K
         )
