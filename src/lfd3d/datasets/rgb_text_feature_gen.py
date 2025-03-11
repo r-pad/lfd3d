@@ -13,11 +13,11 @@ import os
 import random
 from glob import glob
 
+import imageio
 import joblib
 import numpy as np
 import torch
 import torch.nn.functional as F
-from moviepy.editor import VideoFileClip
 from PIL import Image
 from sklearn.decomposition import PCA
 from torchvision import transforms
@@ -138,38 +138,60 @@ def get_hoi4d_items(hoi4d_root_dir):
 
 
 def get_droid_items(droid_root_dir):
+    VIDEO_DURATION = (
+        20  # input to gemini is video of duration 20s, regardless of number of frames
+    )
     droid_videos = glob(f"{droid_root_dir}/droid_gemini_events/*")
     base_save_dir = f"{droid_root_dir}/droid_rgb_text_features"
 
     droid_items = []
-    for vid in tqdm(droid_videos):
+    pbar = tqdm(droid_videos)
+    for vid in pbar:
+        pbar.set_description(vid)
         dir_name = os.path.basename(vid)
         with open(f"{vid}/subgoal.json") as f:
             subgoals = json.load(f)
 
+        if subgoals == []:
+            print("No subgoals for: ", vid)
+            continue
+
+        video_array = imageio.get_reader(f"{vid}/video.mp4")
+        frames = np.array([frame for frame in video_array])
+        num_frames = frames.shape[0]
+
         timestamps = [i["timestamp"] for i in subgoals]
-        # We need the first frame and we don't need the frame
-        # at which the final subgoal is completed
+        timestamps_sec = [
+            int(t[3:]) for t in timestamps
+        ]  # Convert MM:SS to int (discard minutes)
+        timestamps_idx = [
+            ((num_frames * t) // VIDEO_DURATION) - 1 for t in timestamps_sec
+        ]
+
+        if timestamps_idx[-1] > num_frames:
+            print("Hallucinated timestamps for:", vid)
+            continue
+
+        last_timestamp = timestamps_idx[-1]
+        # We need the first frame, but we don't need features for the last
+        # frame where the final subgoal is completed.
         # Input to the model is when the goal *starts* and the json
         # describes when the goal *ends*.
-        timestamps = ["00:00"] + timestamps[:-1]
+        timestamps = [0] + timestamps_idx[:-1]
 
-        # Skip video loading if images area already saved
-        if not os.path.exists(f"{vid}/{len(subgoals)-1}.png"):
-            video = VideoFileClip(f"{vid}/video.mp4")
-        else:
-            video = None
+        # save image for last frame separately, we only need the image, not features
+        image = frames[last_timestamp]
+        img_path = f"{vid}/{len(subgoals)}_{last_timestamp}.png"
+        Image.fromarray(image).save(img_path)
 
         for i, subgoal in enumerate(subgoals):
             save_name = f"{base_save_dir}/{dir_name}/{i}_compressed.npz"
-            img_path = f"{vid}/{i}.png"
+            img_path = f"{vid}/{i}_{timestamps[i]}.png"
             caption = subgoal["subgoal"]
-            timestamp = timestamps[i]
 
             # Save image for DINOv2 embeddings
-            if not os.path.exists(img_path):
-                image = video.get_frame(timestamp)
-                Image.fromarray(image).save(img_path)
+            image = frames[timestamps[i]]
+            Image.fromarray(image).save(img_path)
 
             item = {
                 "dir_name": dir_name,
@@ -178,8 +200,6 @@ def get_droid_items(droid_root_dir):
                 "img_path": img_path,
             }
             droid_items.append(item)
-        if video:
-            video.close()
     return droid_items
 
 

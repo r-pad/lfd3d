@@ -1,5 +1,6 @@
 import json
 import os
+from glob import glob
 from pathlib import Path
 
 import numpy as np
@@ -9,6 +10,7 @@ import torch
 import torch.nn.functional as F
 import torch.utils.data as data
 import torchdatasets as td
+from PIL import Image
 from torchvision import transforms
 
 from lfd3d.utils.data_utils import collate_pcd_fn
@@ -140,6 +142,40 @@ class DroidDataset(td.Dataset):
         K_[1, 2] -= crop_offset_y  # Adjust cy for crop
         return K_
 
+    def load_rgbd(self, dir_name, subgoal_idx):
+        # Some pattern matching and string manipulation to get the image patch and its frame idx
+        init_image_path = glob(f"{self.event_dir}/{dir_name}/{subgoal_idx}*png")[0]
+        init_frame_idx = int(
+            os.path.basename(init_image_path).split("_")[1].split(".")[0]
+        )
+        end_image_path = glob(f"{self.event_dir}/{dir_name}/{subgoal_idx+1}*png")[0]
+        end_frame_idx = int(
+            os.path.basename(end_image_path).split("_")[1].split(".")[0]
+        )
+
+        # Return rgb/depth at beginning and end of event
+        rgb_init = Image.open(init_image_path).convert("RGB")
+        rgb_init = np.asarray(self.rgb_preprocess(rgb_init))
+        rgb_end = Image.open(end_image_path).convert("RGB")
+        rgb_end = np.asarray(self.rgb_preprocess(rgb_end))
+        rgbs = np.array([rgb_init, rgb_end])
+
+        breakpoint()
+        depth_init = np.asarray(
+            Image.open(f"{dir_name}/align_depth/{str(event_start_idx).zfill(5)}.png")
+        )
+        depth_init = Image.fromarray(depth_init / 1000.0)  # Convert to metres
+        depth_init = np.asarray(self.depth_preprocess(depth_init))
+
+        depth_end = np.asarray(
+            Image.open(f"{dir_name}/align_depth/{str(event_end_idx).zfill(5)}.png")
+        )
+        depth_end = Image.fromarray(depth_end / 1000.0)  # Convert to metres
+        depth_end = np.asarray(self.depth_preprocess(depth_end))
+
+        depths = np.array([depth_init, depth_end])
+        return rgbs, depths, init_frame_idx, end_frame_idx
+
     def get_scene_pcd(self, rgb_embed, depth, K):
         height, width = depth.shape
         # Create pixel coordinate grid
@@ -211,21 +247,16 @@ class DroidDataset(td.Dataset):
         index, subgoal_idx = self.droid_index[idx]
 
         subgoal = self.captions[(index, subgoal_idx)]
-        caption, end_timestamp = subgoal["subgoal"], subgoal["timestamp"]
+        caption = subgoal["subgoal"]
         start2end = torch.eye(4)  # Static camera in DROID
-
-        if subgoal_idx == 0:  # first subgoal
-            start_timestamp = "00:00"
-        else:
-            start_timestamp = self.captions[(index, subgoal_idx - 1)]["timestamp"]
 
         raise NotImplementedError("Work in progress")
         rgbs, depths, event_start_idx, event_end_idx = self.load_rgbd(
-            index, start_timestamp, end_timestamp
+            index, subgoal_idx
         )
 
         start_tracks, end_tracks = self.load_gripper_pcd(
-            index, event_start_idx, event_end_idx, depths
+            index, event_start_idx, event_end_idx
         )
 
         rgb_embed, text_embed = self.load_rgb_text_feat(

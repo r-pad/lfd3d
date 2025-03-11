@@ -49,8 +49,12 @@ Test split generated using [sriramsk1999/general-flow](https://github.com/sriram
 
 - GT Gripper Trajectory: Rendered using Mujoco in `src/lfd3d/datasets/droid/render_robotiq.py`.
 - Subgoal generation: Using Gemini in `src/lfd3d/datasets/droid/chunk_droid_with_gemini.py`.
+- RGB/text features: Generated with:
+`python rgb_text_feature_gen.py --dataset droid --input_dir </path/to/droid/data>`
 
 ### RT-1
+
+**NOTE:** This section needs to be updated, rgb features should come from dinov2, set up gripper centric preds
 
 - Tracks: Generated using `rt1_inference.py` from [sriramsk1999/CoTracker](https://github.com/sriramsk1999/co-tracker)
 - Depth: Generated using `rt1_inference.py` from [sriramsk1999/RollingDepth](https://github.com/sriramsk1999/RollingDepth)
@@ -62,8 +66,6 @@ After generating tracks and depth:
 3. Chunking and filtering: Generated using `src/lfd3d/datasets/rt1_processing/save_event_rgb.py`.
 
 Test split taken from [3D-VLA](https://github.com/UMass-Foundation-Model/3D-VLA)
-
-**NOTE:** This section needs to be updated, rgb features should come from dinov2, set up gripper centric preds
 
 ## Training
 
