@@ -1,8 +1,19 @@
+"""
+Extracts and processes image and text features using DINOv2 and SigLIP models.
+
+Usage:
+Run the script with command-line arguments specifying the dataset and input directory.
+
+Example:
+python rgb_text_feature_gen.py --dataset hoi4d --input_dir /path/to/hoi4d
+"""
 import argparse
 import json
 import os
 import random
+from glob import glob
 
+import imageio
 import joblib
 import numpy as np
 import torch
@@ -126,6 +137,81 @@ def get_hoi4d_items(hoi4d_root_dir):
     return hoi4d_items
 
 
+def get_droid_items(droid_root_dir):
+    VIDEO_DURATION = (
+        20  # input to gemini is video of duration 20s, regardless of number of frames
+    )
+    droid_videos = glob(f"{droid_root_dir}/droid_gemini_events/*")
+    base_save_dir = f"{droid_root_dir}/droid_rgb_text_features"
+
+    droid_items = []
+    pbar = tqdm(droid_videos)
+    for vid in pbar:
+        pbar.set_description(vid)
+        dir_name = os.path.basename(vid)
+        try:
+            with open(f"{vid}/subgoal.json") as f:
+                subgoals = json.load(f)
+        except:
+            print("Could not find subgoal file for: ", vid)
+            continue
+
+        if subgoals == []:
+            print("No subgoals for: ", vid)
+            continue
+
+        try:
+            video_array = imageio.get_reader(f"{vid}/video.mp4")
+        except:
+            print("Could not load video for: ", vid)
+            continue
+
+        frames = np.array([frame for frame in video_array])
+        num_frames = frames.shape[0]
+
+        timestamps = [i["timestamp"] for i in subgoals]
+        timestamps_sec = [
+            int(t[3:]) for t in timestamps
+        ]  # Convert MM:SS to int (discard minutes)
+        timestamps_idx = [
+            ((num_frames * t) // VIDEO_DURATION) - 1 for t in timestamps_sec
+        ]
+
+        if timestamps_idx[-1] > num_frames:
+            print("Hallucinated timestamps for:", vid)
+            continue
+
+        last_timestamp = timestamps_idx[-1]
+        # We need the first frame, but we don't need features for the last
+        # frame where the final subgoal is completed.
+        # Input to the model is when the goal *starts* and the json
+        # describes when the goal *ends*.
+        timestamps = [0] + timestamps_idx[:-1]
+
+        # save image for last frame separately, we only need the image, not features
+        image = frames[last_timestamp]
+        img_path = f"{vid}/{len(subgoals)}_{last_timestamp}.png"
+        Image.fromarray(image).save(img_path)
+
+        for i, subgoal in enumerate(subgoals):
+            save_name = f"{base_save_dir}/{dir_name}/{i}_compressed.npz"
+            img_path = f"{vid}/{i}_{timestamps[i]}.png"
+            caption = subgoal["subgoal"]
+
+            # Save image for DINOv2 embeddings
+            image = frames[timestamps[i]]
+            Image.fromarray(image).save(img_path)
+
+            item = {
+                "dir_name": dir_name,
+                "save_name": save_name,
+                "caption": caption,
+                "img_path": img_path,
+            }
+            droid_items.append(item)
+    return droid_items
+
+
 def compress_features(pca_model, features, pca_n_components, downscale_by):
     """
     Compress features with PCA.
@@ -177,10 +263,10 @@ if __name__ == "__main__":
         "--dataset",
         type=str,
         required=True,
-        choices=["hoi4d"],
+        choices=["hoi4d", "droid"],
         help="Dataset to process",
     )
-    parser.add_argument("--input_dir", type=str, help="Root dir for HOI4D.")
+    parser.add_argument("--input_dir", type=str, help="input dir")
     args = parser.parse_args()
 
     # Load models
@@ -202,13 +288,29 @@ if __name__ == "__main__":
                 dataset_items, pca_model_path, dino_feat_dim, pca_n_components
             )
         pca_model = joblib.load(pca_model_path)
+    elif args.dataset == "droid":
+        pca_model_path = "droid/pca_model.pkl"
+        dataset_items = get_droid_items(args.input_dir)
+        if not os.path.exists(pca_model_path):
+            save_pca_model(
+                dataset_items, pca_model_path, dino_feat_dim, pca_n_components
+            )
+        pca_model = joblib.load(pca_model_path)
     else:
         raise NotImplementedError
 
     pbar = tqdm(dataset_items)
     for item in pbar:
         pbar.set_description(item["dir_name"])
-        os.makedirs(f"{item['dir_name']}/rgb_text_features", exist_ok=True)
+        if args.dataset == "hoi4d":
+            os.makedirs(f"{item['dir_name']}/rgb_text_features", exist_ok=True)
+        elif args.dataset == "droid":
+            os.makedirs(os.path.dirname(item["save_name"]), exist_ok=True)
+        else:
+            raise NotImplementedError()
+
+        if os.path.exists(item["save_name"]):
+            continue
 
         # Extract features
         img_embedding = get_dinov2_image_embedding(item["img_path"], dinov2)

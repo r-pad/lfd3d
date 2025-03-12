@@ -144,7 +144,6 @@ K = np.array(
 K = K / 4  # downsampled images
 K[2, 2] = 1
 height, width = 180, 320
-fovy = np.degrees(2 * np.arctan((height / 2) / K[1, 1]))
 RED, GREEN, BLUE = (255, 0, 0), (0, 255, 0), (0, 0, 255)
 
 sample_n_points = 500
@@ -159,13 +158,12 @@ start_qpos = model.jnt_qposadr[root_joint_adr]
 root = "/data/sriram/DROID/droid"
 builder = tfds.builder_from_directory(builder_dir=f"{root}")
 dataset = builder.as_dataset(split="train")
-metadata_dir = "/data/sriram/DROID/droid_metadata"
+metadata_dir = "/data/sriram/DROID/droid_raw"
 output_dir = "/data/sriram/DROID/droid_gripper_pcd"
 viz_dir = "droid_gripper_pcd_viz"
 
-cam_extrinsics_key = (
-    "ext1_cam_extrinsics"  # Can use either 1 or 2, no particular reason
-)
+# Can use either 1 or 2, no particular reason
+cam_extrinsics_key = "ext1_cam_extrinsics"
 cam_image_key = "exterior_image_1_left"
 
 
@@ -242,19 +240,22 @@ for idx, item in tqdm(enumerate(dataset), total=len(dataset)):
         mesh_ = trimesh.Trimesh(
             vertices=np.asarray(mesh.vertices), faces=np.asarray(mesh.triangles)
         )
+        # In world frame
         points_, faces_ = trimesh.sample.sample_surface(mesh_, sample_n_points, seed=42)
 
-        gripper_pcds.append(points_)
+        homogenous_append = np.ones((sample_n_points, 1))
+        gripper_urdf_3d_pos = np.concatenate([points_, homogenous_append], axis=-1)[
+            :, :, None
+        ]
+        urdf_cam3dcoords = (world_to_cam @ gripper_urdf_3d_pos)[:, :3].squeeze(2)
+
+        # Save gripper pcd in camera frame
+        gripper_pcds.append(urdf_cam3dcoords)
 
         # Save some visualizations
         if idx % 100 == 0:
             os.makedirs(f"{viz_dir}/{idx}", exist_ok=True)
             # Project gripper pcd to image
-            homogenous_append = np.ones((sample_n_points, 1))
-            gripper_urdf_3d_pos = np.concatenate([points_, homogenous_append], axis=-1)[
-                :, :, None
-            ]
-            urdf_cam3dcoords = (world_to_cam @ gripper_urdf_3d_pos)[:, :3].squeeze(2)
             urdf_proj_hom = (K @ urdf_cam3dcoords.T).T
             urdf_proj = (urdf_proj_hom / urdf_proj_hom[:, 2:])[:, :2]
             urdf_proj = np.clip(urdf_proj, [0, 0], [width - 1, height - 1]).astype(int)

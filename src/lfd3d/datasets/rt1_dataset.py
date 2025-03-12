@@ -22,7 +22,6 @@ class RT1Dataset(td.Dataset):
 
         self.cache_dir = dataset_cfg.cache_dir
 
-        # glob dir and then expand if 2 events
         self.depth_dir = f"{root}/rt1_depth"  # Depth estimated with RollingDepth is expected to be here.
         self.track_dir = f"{root}/rt1_tracks"  # Tracks estimated with Co-Tracker are expected to be here.
         self.rgb_dir = (
@@ -35,7 +34,7 @@ class RT1Dataset(td.Dataset):
         # No camera intrinsics available, an arbitrary choice based on RT-1 resolution (256, 320)
         self.K = np.array([[257.0, 0, 160], [0, 257.0, 128], [0, 0, 1]])
         # Voxel size for downsampling
-        self.voxel_size = 0.06
+        self.voxel_size = 0.03
 
         self.rt1_index = self.load_split(split)
         self.rt1_index = self.expand_all_events(self.rt1_index)
@@ -174,7 +173,7 @@ class RT1Dataset(td.Dataset):
         feat_flat = rgb_embed.reshape(-1, rgb_embed.shape[-1])
 
         # Remove points with invalid depth
-        valid_depth = np.logical_and(z_flat > 0, z_flat < 5)
+        valid_depth = np.logical_and(z_flat > 0, z_flat < 2)
         x_flat = x_flat[valid_depth]
         y_flat = y_flat[valid_depth]
         z_flat = z_flat[valid_depth]

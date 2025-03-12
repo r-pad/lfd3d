@@ -79,7 +79,7 @@ if len(sys.argv) == 2:
         split_num * (dataset_size // 10) : (split_num + 1) * (dataset_size // 10)
     ]
 
-output_dir = "gemini_viz"
+output_dir = "/data/sriram/DROID/droid_gemini_events"
 os.makedirs(output_dir, exist_ok=True)
 
 for idx, item in tqdm(enumerate(dataset), total=len(dataset)):
@@ -147,13 +147,27 @@ for idx, item in tqdm(enumerate(dataset), total=len(dataset)):
     IMPORTANT: Provide ONLY valid JSON as your response, no explanation text.
     """
 
-    response = client.models.generate_content(
-        model=model_name,
-        contents=[video_prompt, text_prompt],
-        config=generate_content_config,
-    )
-    parsed_json = json.loads(response.text.strip("`json\n"))
-    print(goal_text, parsed_json)
+    max_retries = 5
+    retry_delay = 10  # seconds
 
-    with open(f"{output_dir}/{idx}/subgoal.json", "w") as f:
-        json.dump(parsed_json, f)
+    for attempt in range(max_retries):
+        try:
+            response = client.models.generate_content(
+                model=model_name,
+                contents=[video_prompt, text_prompt],
+                config=generate_content_config,
+            )
+            parsed_json = json.loads(response.text.strip("`json\n"))
+            print(goal_text, parsed_json)
+
+            with open(f"{output_dir}/{idx}/subgoal.json", "w") as f:
+                json.dump(parsed_json, f)
+            break  # Exit the loop if successful
+        except genai.errors.ServerError as e:
+            if attempt < max_retries:  # Don't wait after the last attempt
+                print(
+                    f"Attempt {attempt + 1} failed. Retrying in {retry_delay} seconds..."
+                )
+                time.sleep(retry_delay)
+            else:
+                print(f"Max retries reached. Could not process {idx}. Final error: {e}")

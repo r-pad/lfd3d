@@ -72,7 +72,7 @@ class HOI4DDataset(td.Dataset):
 
         self.dataset_cfg = dataset_cfg
         # Voxel size for downsampling
-        self.voxel_size = 0.06
+        self.voxel_size = 0.03
 
         # Target shape of images (same as DINOv2)
         self.orig_shape = (1080, 1920)
@@ -84,10 +84,6 @@ class HOI4DDataset(td.Dataset):
                     interpolation=transforms.InterpolationMode.BICUBIC,
                 ),
                 transforms.CenterCrop(self.target_shape),
-                transforms.ToTensor(),
-                transforms.Normalize(
-                    mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)
-                ),
             ]
         )
         self.depth_preprocess = transforms.Compose(
@@ -96,7 +92,6 @@ class HOI4DDataset(td.Dataset):
                     self.target_shape,
                     interpolation=transforms.InterpolationMode.NEAREST,
                 ),
-                transforms.ToTensor(),
                 transforms.CenterCrop(self.target_shape),
             ]
         )
@@ -204,24 +199,24 @@ class HOI4DDataset(td.Dataset):
         rgb_init = Image.open(
             f"{dir_name}/align_rgb/{str(event_start_idx).zfill(5)}.jpg"
         ).convert("RGB")
-        rgb_init = self.rgb_preprocess(rgb_init).numpy().transpose(1, 2, 0)
+        rgb_init = np.asarray(self.rgb_preprocess(rgb_init))
         rgb_end = Image.open(
             f"{dir_name}/align_rgb/{str(event_end_idx).zfill(5)}.jpg"
         ).convert("RGB")
-        rgb_end = self.rgb_preprocess(rgb_end).numpy().transpose(1, 2, 0)
+        rgb_end = np.asarray(self.rgb_preprocess(rgb_end))
         rgbs = np.array([rgb_init, rgb_end])
 
         depth_init = np.asarray(
             Image.open(f"{dir_name}/align_depth/{str(event_start_idx).zfill(5)}.png")
         )
         depth_init = Image.fromarray(depth_init / 1000.0)  # Convert to metres
-        depth_init = self.depth_preprocess(depth_init).numpy().squeeze()
+        depth_init = np.asarray(self.depth_preprocess(depth_init))
 
         depth_end = np.asarray(
             Image.open(f"{dir_name}/align_depth/{str(event_end_idx).zfill(5)}.png")
         )
         depth_end = Image.fromarray(depth_end / 1000.0)  # Convert to metres
-        depth_end = self.depth_preprocess(depth_end).numpy().squeeze()
+        depth_end = np.asarray(self.depth_preprocess(depth_end))
 
         depths = np.array([depth_init, depth_end])
         return rgbs, depths
@@ -342,11 +337,22 @@ class HOI4DDataset(td.Dataset):
     def get_scaled_intrinsics(self, K):
         # Getting scale factor from torchvision.transforms.Resize behaviour
         K_ = K.copy()
+
         scale_factor = self.target_shape / min(self.orig_shape)
+
+        # Apply the scale factor to the intrinsics
         K_[0, 0] *= scale_factor  # fx
         K_[1, 1] *= scale_factor  # fy
         K_[0, 2] *= scale_factor  # cx
         K_[1, 2] *= scale_factor  # cy
+
+        # Adjust the principal point (cx, cy) for the center crop
+        crop_offset_x = (self.orig_shape[1] * scale_factor - self.target_shape) / 2
+        crop_offset_y = (self.orig_shape[0] * scale_factor - self.target_shape) / 2
+
+        # Adjust the principal point (cx, cy) for the center crop
+        K_[0, 2] -= crop_offset_x  # Adjust cx for crop
+        K_[1, 2] -= crop_offset_y  # Adjust cy for crop
         return K_
 
     def get_start2end_transform(self, cam2world, event_start_idx, event_end_idx):
@@ -442,7 +448,7 @@ class HOI4DDataset(td.Dataset):
         feat_flat = rgb_embed.reshape(-1, rgb_embed.shape[-1])
 
         # Remove points with invalid depth
-        valid_depth = np.logical_and(z_flat > 0, z_flat < 5)
+        valid_depth = np.logical_and(z_flat > 0, z_flat < 2)
         x_flat = x_flat[valid_depth]
         y_flat = y_flat[valid_depth]
         z_flat = z_flat[valid_depth]
@@ -485,9 +491,9 @@ class HOI4DDataset(td.Dataset):
         caption = f"{event_name} {obj_name}"
         return caption
 
-    def load_rgb_text_feat(self, dir_name, event_idx, height, width):
+    def load_rgb_text_feat(self, dir_name, event_idx):
         """
-        Load RGB/text features generated with SIGLIP using ConceptFusion.
+        Load RGB/text features generated with DINOv2 and SIGLIP
         """
         features = np.load(f"{dir_name}/rgb_text_features/{event_idx}_compressed.npz")
         rgb_embed, text_embed = features["rgb_embed"], features["text_embed"]
@@ -522,9 +528,7 @@ class HOI4DDataset(td.Dataset):
         start_tracks, end_tracks = self.filtered_tracks[index]
 
         caption = self.compose_caption(dir_name, event)
-        rgb_embed, text_embed = self.load_rgb_text_feat(
-            dir_name, event_idx, rgbs[0].shape[0], rgbs[0].shape[1]
-        )
+        rgb_embed, text_embed = self.load_rgb_text_feat(dir_name, event_idx)
         start_scene_pcd, start_scene_feat_pcd = self.get_scene_pcd(
             rgb_embed, depths[0], K_
         )
