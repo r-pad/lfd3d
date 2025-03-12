@@ -72,7 +72,7 @@ class HOI4DDataset(td.Dataset):
 
         self.dataset_cfg = dataset_cfg
         # Voxel size for downsampling
-        self.voxel_size = 0.06
+        self.voxel_size = 0.03
 
         # Target shape of images (same as DINOv2)
         self.orig_shape = (1080, 1920)
@@ -448,7 +448,7 @@ class HOI4DDataset(td.Dataset):
         feat_flat = rgb_embed.reshape(-1, rgb_embed.shape[-1])
 
         # Remove points with invalid depth
-        valid_depth = np.logical_and(z_flat > 0, z_flat < 5)
+        valid_depth = np.logical_and(z_flat > 0, z_flat < 2)
         x_flat = x_flat[valid_depth]
         y_flat = y_flat[valid_depth]
         z_flat = z_flat[valid_depth]

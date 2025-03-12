@@ -26,7 +26,9 @@ class DroidDataset(td.Dataset):
         self.dataset_cfg = dataset_cfg
 
         self.droid_raw_dir = f"{root}/droid_raw"  # depth and metadata
-        self.track_dir = f"{root}/droid_gripper_pcd"  # Gripper pcd rendered from Mujoco
+        self.track_dir = (
+            f"{root}/droid_gripper_pcd_debug"  # Gripper pcd rendered from Mujoco
+        )
         self.event_dir = f"{root}/droid_gemini_events"  # Subgoals and videos
         self.feat_dir = (
             f"{root}/droid_rgb_text_features"  # DINOv2 RGB/SIGLIP text features
@@ -36,27 +38,12 @@ class DroidDataset(td.Dataset):
         with open(f"{self.current_dir}/idx_to_fname_mapping.json") as f:
             self.idx_to_fname_mapping = json.load(f)
 
-        # "Average" intrinsics for Zed (720 x 1080)
-        K = np.array(
-            [
-                [522.42260742, 0.0, 653.9631958],
-                [0.0, 522.42260742, 358.79196167],
-                [0.0, 0.0, 1.0],
-            ]
-        )
-        K = K / 4  # downsampled images
-        K[2, 2] = 1
-        self.K = K
-        self.baseline = 0.120  # Baseline for ZED 2 is 120mm
-
         # Voxel size for downsampling
-        self.voxel_size = 0.06
+        self.voxel_size = 0.03
         self.captions = {}
 
         self.droid_index = self.load_split(split)
         self.droid_index = self.expand_all_events(self.droid_index)
-
-        self.size = len(self.droid_index)
 
         self.orig_shape = (180, 320)
         # Target shape of images (same as DINOv2)
@@ -79,6 +66,19 @@ class DroidDataset(td.Dataset):
                 transforms.CenterCrop(self.target_shape),
             ]
         )
+
+        # "Average" intrinsics for Zed (720 x 1080)
+        K = np.array(
+            [
+                [522.42260742, 0.0, 653.9631958],
+                [0.0, 522.42260742, 358.79196167],
+                [0.0, 0.0, 1.0],
+            ]
+        )
+        K = K / 4  # downsampled images
+        K[2, 2] = 1
+        self.K = self.get_scaled_intrinsics(K)
+        self.baseline = 0.120  # Baseline for ZED 2 is 120mm
 
         self.size = len(self.droid_index)
 
@@ -232,7 +232,7 @@ class DroidDataset(td.Dataset):
         feat_flat = rgb_embed.reshape(-1, rgb_embed.shape[-1])
 
         # Remove points with invalid depth
-        valid_depth = np.logical_and(z_flat > 0, z_flat < 5)
+        valid_depth = np.logical_and(z_flat > 0, z_flat < 2)
         x_flat = x_flat[valid_depth]
         y_flat = y_flat[valid_depth]
         z_flat = z_flat[valid_depth]
