@@ -103,8 +103,6 @@ for idx, item in tqdm(enumerate(dataset), total=len(dataset)):
 
     os.makedirs(f"{output_dir}/{idx}", exist_ok=True)
     save_video(images, video_path)
-    # Upload video segment
-    video_prompt = upload_video(video_path)
 
     # Add standard prompt text
     text_prompt = f"""
@@ -147,11 +145,14 @@ for idx, item in tqdm(enumerate(dataset), total=len(dataset)):
     IMPORTANT: Provide ONLY valid JSON as your response, no explanation text.
     """
 
-    max_retries = 5
+    max_retries = 50
     retry_delay = 10  # seconds
 
     for attempt in range(max_retries):
         try:
+            # Upload video segment
+            video_prompt = upload_video(video_path)
+
             response = client.models.generate_content(
                 model=model_name,
                 contents=[video_prompt, text_prompt],
