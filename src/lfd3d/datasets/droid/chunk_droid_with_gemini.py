@@ -24,6 +24,7 @@ def save_video(frames, output_path):
     # Gemini seems to struggle with longer videos, so adaptively set fps so that its always 20 sec video
     # We'll lose temporal resolution, but atleast our goals should be accurate
     fps = frames.shape[0] // 20
+    height, width = frames[0].shape[:2]
     writer = imageio.get_writer(
         output_path,
         format="mp4",
@@ -31,6 +32,8 @@ def save_video(frames, output_path):
         codec="h264",
         quality=7,
         pixelformat="yuv420p",
+        macro_block_size=1,
+        output_params=["-vf", f"scale={width}:{height}"],
     )
 
     for frame in frames:
