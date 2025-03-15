@@ -24,6 +24,7 @@ def save_video(frames, output_path):
     # Gemini seems to struggle with longer videos, so adaptively set fps so that its always 20 sec video
     # We'll lose temporal resolution, but atleast our goals should be accurate
     fps = frames.shape[0] // 20
+    height, width = frames[0].shape[:2]
     writer = imageio.get_writer(
         output_path,
         format="mp4",
@@ -31,6 +32,8 @@ def save_video(frames, output_path):
         codec="h264",
         quality=7,
         pixelformat="yuv420p",
+        macro_block_size=1,
+        output_params=["-vf", f"scale={width}:{height}"],
     )
 
     for frame in frames:
@@ -103,8 +106,6 @@ for idx, item in tqdm(enumerate(dataset), total=len(dataset)):
 
     os.makedirs(f"{output_dir}/{idx}", exist_ok=True)
     save_video(images, video_path)
-    # Upload video segment
-    video_prompt = upload_video(video_path)
 
     # Add standard prompt text
     text_prompt = f"""
@@ -147,11 +148,14 @@ for idx, item in tqdm(enumerate(dataset), total=len(dataset)):
     IMPORTANT: Provide ONLY valid JSON as your response, no explanation text.
     """
 
-    max_retries = 5
+    max_retries = 50
     retry_delay = 10  # seconds
 
     for attempt in range(max_retries):
         try:
+            # Upload video segment
+            video_prompt = upload_video(video_path)
+
             response = client.models.generate_content(
                 model=model_name,
                 contents=[video_prompt, text_prompt],
