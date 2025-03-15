@@ -26,9 +26,7 @@ class DroidDataset(td.Dataset):
         self.dataset_cfg = dataset_cfg
 
         self.droid_raw_dir = f"{root}/droid_raw"  # depth and metadata
-        self.track_dir = (
-            f"{root}/droid_gripper_pcd_debug"  # Gripper pcd rendered from Mujoco
-        )
+        self.track_dir = f"{root}/droid_gripper_pcd"  # Gripper pcd rendered from Mujoco
         self.event_dir = f"{root}/droid_gemini_events"  # Subgoals and videos
         self.feat_dir = (
             f"{root}/droid_rgb_text_features"  # DINOv2 RGB/SIGLIP text features
@@ -67,23 +65,34 @@ class DroidDataset(td.Dataset):
             ]
         )
 
-        # "Average" intrinsics for Zed (720 x 1080)
-        K = np.array(
-            [
-                [522.42260742, 0.0, 653.9631958],
-                [0.0, 522.42260742, 358.79196167],
-                [0.0, 0.0, 1.0],
-            ]
-        )
-        K = K / 4  # downsampled images
-        K[2, 2] = 1
-        self.K = self.get_scaled_intrinsics(K)
-        self.baseline = 0.120  # Baseline for ZED 2 is 120mm
+        with open(f"{self.current_dir}/zed_intrinsics.json") as f:
+            self.camera_intrinsics = json.load(f)
 
         self.size = len(self.droid_index)
 
     def __len__(self):
         return self.size
+
+    def load_camera_params(self, index):
+        fname = self.idx_to_fname_mapping[index]
+        metadata_file = glob(f"{self.droid_raw_dir}/1.0.1/{fname}/metadata*json")[0]
+        with open(metadata_file) as f:
+            metadata = json.load(f)
+
+        # We work with camera 1 data across the dataset.
+        cam_serial = metadata["ext1_cam_serial"]
+        cam_params = self.camera_intrinsics[cam_serial]
+        K = np.array(
+            [
+                [cam_params["fx"], 0.0, cam_params["cx"]],
+                [0.0, cam_params["fy"], cam_params["cy"]],
+                [0.0, 0.0, 1.0],
+            ]
+        )
+        K = K / 4  # downsampled images
+        K[2, 2] = 1
+        baseline = cam_params["baseline"] / 1000
+        return K, baseline
 
     def load_split(self, split):
         """
@@ -148,7 +157,7 @@ class DroidDataset(td.Dataset):
         K_[1, 2] -= crop_offset_y  # Adjust cy for crop
         return K_
 
-    def load_rgbd(self, droid_idx, subgoal_idx):
+    def load_rgbd(self, droid_idx, subgoal_idx, K, baseline):
         # Some pattern matching and string manipulation to get the image patch and its frame idx
         init_image_path = glob(f"{self.event_dir}/{droid_idx}/{subgoal_idx}*png")[0]
         init_frame_idx = int(
@@ -173,7 +182,7 @@ class DroidDataset(td.Dataset):
 
         disparity = np.load(disp_name)["arr_0"].astype(np.float32)
         depths = np.divide(
-            self.K[0, 0] * self.baseline,
+            K[0, 0] * baseline,
             disparity,
             out=np.zeros_like(disparity),
             where=disparity != 0,
@@ -266,12 +275,16 @@ class DroidDataset(td.Dataset):
     def __getitem__(self, idx):
         index, subgoal_idx = self.droid_index[idx]
 
+        K, baseline = self.load_camera_params(index)
+        K_ = self.get_scaled_intrinsics(K)
+
         subgoal = self.captions[(index, subgoal_idx)]
         caption = subgoal["subgoal"]
         start2end = torch.eye(4)  # Static camera in DROID
+        fname = self.idx_to_fname_mapping[int(index)]
 
         rgbs, depths, event_start_idx, event_end_idx = self.load_rgbd(
-            index, subgoal_idx
+            index, subgoal_idx, K_, baseline
         )
 
         start_tracks, end_tracks = self.load_gripper_pcd(
@@ -280,7 +293,7 @@ class DroidDataset(td.Dataset):
 
         rgb_embed, text_embed = self.load_rgb_text_feat(index, subgoal_idx)
         start_scene_pcd, start_scene_feat_pcd = self.get_scene_pcd(
-            rgb_embed, depths[0], self.K
+            rgb_embed, depths[0], K_
         )
 
         # Center on action_pcd
@@ -302,11 +315,11 @@ class DroidDataset(td.Dataset):
             "caption": caption,
             "text_embed": text_embed,
             "cross_displacement": end_tracks - start_tracks,
-            "intrinsics": self.K,
+            "intrinsics": K_,
             "rgbs": rgbs,
             "depths": depths,
             "start2end": start2end,
-            "vid_name": index,  # no name in RT-1, just return idx in dataset
+            "vid_name": fname,
             "pcd_mean": action_pcd_mean,
             "pcd_std": scene_pcd_std,
         }
