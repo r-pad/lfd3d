@@ -52,6 +52,12 @@ Test split generated using [sriramsk1999/general-flow](https://github.com/sriram
 - RGB/text features: Generated with:
 `python rgb_text_feature_gen.py --dataset droid --input_dir </path/to/droid/data>`
 
+### RPAD-Foxglove
+
+- Download and process recordings from Foxglove using [https://github.com/r-pad/lfd3d-system/](`lfd3d-system`).
+- Generata GT for human demonstrations with modified version of [https://github.com/jacintosuner/wilor/](`wilor`). (TODO: add script for processing foxglove data)
+- Generata GT for robot demonstrations with `TBD`.
+
 ### RT-1
 
 **NOTE:** This section needs to be updated, rgb features should come from dinov2, set up gripper centric preds

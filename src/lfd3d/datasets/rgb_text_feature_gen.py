@@ -25,7 +25,52 @@ from tqdm import tqdm
 from transformers import AutoModel, AutoProcessor
 
 
-def get_dinov2_image_embedding(image_path, dinov2=None):
+def get_dinov2_image_embedding(image, dinov2=None, device="cuda"):
+    if dinov2 is None:
+        dinov2 = torch.hub.load("facebookresearch/dinov2", "dinov2_vitl14_reg").to(
+            device
+        )
+    patch_size = 14
+    target_shape = 224
+
+    assert type(image) == Image.Image
+    preprocess = transforms.Compose(
+        [
+            transforms.Resize(
+                target_shape, interpolation=transforms.InterpolationMode.BICUBIC
+            ),
+            transforms.CenterCrop(target_shape),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
+        ]
+    )
+    inputs = preprocess(image).unsqueeze(0).to(device)
+
+    # Forward pass to get features
+    with torch.no_grad():
+        outputs = dinov2.forward_features(inputs)
+
+    # Extract the last hidden state as features
+    patch_features = outputs["x_norm_patchtokens"].squeeze(0)
+    num_patches = patch_features.shape[0]
+    h = w = int(num_patches**0.5)
+    patch_features_2d = patch_features.reshape(h, w, -1)
+
+    # Permute to [C, H, W] for interpolation
+    patch_features_2d = patch_features_2d.permute(2, 0, 1)
+
+    # Upsample to match original image patch dimensions
+    resized_features = F.interpolate(
+        patch_features_2d.unsqueeze(0),
+        size=(target_shape, target_shape),
+        mode="bilinear",
+        align_corners=False,
+    )
+
+    return resized_features.squeeze().permute(1, 2, 0).cpu().numpy()
+
+
+def get_dinov2_image_embedding_from_file(image_path, dinov2=None):
     if dinov2 is None:
         dinov2 = torch.hub.load("facebookresearch/dinov2", "dinov2_vitl14_reg").cuda()
     patch_size = 14
@@ -69,10 +114,12 @@ def get_dinov2_image_embedding(image_path, dinov2=None):
     return resized_features.squeeze().permute(1, 2, 0).cpu().numpy()
 
 
-def get_siglip_text_embedding(caption, siglip=None, siglip_processor=None):
+def get_siglip_text_embedding(
+    caption, siglip=None, siglip_processor=None, device="cuda"
+):
     if siglip is None or siglip_processor is None:
         siglip = AutoModel.from_pretrained("google/siglip-so400m-patch14-384").to(
-            "cuda"
+            device
         )
         siglip_processor = AutoProcessor.from_pretrained(
             "google/siglip-so400m-patch14-384"
@@ -80,7 +127,7 @@ def get_siglip_text_embedding(caption, siglip=None, siglip_processor=None):
 
     # Process text input
     inputs = siglip_processor(text=[caption], return_tensors="pt", padding=True)
-    inputs = {k: v.to("cuda") for k, v in inputs.items()}
+    inputs = {k: v.to(device) for k, v in inputs.items()}
 
     # Generate embeddings
     with torch.no_grad():
@@ -243,7 +290,7 @@ def save_pca_model(dataset_items, pca_model_path, dino_feat_dim, pca_n_component
     data_sample = random.sample(dataset_items, 10)
     pca_fit_features = []
     for item in data_sample:
-        img_embedding = get_dinov2_image_embedding(item["img_path"], dinov2)
+        img_embedding = get_dinov2_image_embedding_from_file(item["img_path"], dinov2)
         pca_fit_features.append(img_embedding)
 
     pca_model = PCA(n_components=pca_n_components)
@@ -313,7 +360,7 @@ if __name__ == "__main__":
             continue
 
         # Extract features
-        img_embedding = get_dinov2_image_embedding(item["img_path"], dinov2)
+        img_embedding = get_dinov2_image_embedding_from_file(item["img_path"], dinov2)
         img_embedding_compressed = compress_features(
             pca_model, img_embedding, pca_n_components, downscale_by
         ).astype(np.float32)
