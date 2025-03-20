@@ -2,32 +2,17 @@ import math
 import random
 from pathlib import Path
 
-import pytorch_lightning as pl
 import torch
 import torch.utils.data as data
 import torchdatasets as td
 from torch.utils.data.distributed import DistributedSampler
 
+from lfd3d.datasets.base_data import BaseDataModule
 from lfd3d.datasets.hoi4d.hoi4d_dataset import HOI4DDataset
 from lfd3d.datasets.rt1_dataset import RT1Dataset
-from lfd3d.utils.data_utils import collate_pcd_fn
 
 
-class MultiDatasetDataModule(pl.LightningDataModule):
-    def __init__(self, batch_size, val_batch_size, num_workers, dataset_cfg):
-        super().__init__()
-        self.batch_size = batch_size
-        self.val_batch_size = val_batch_size
-        self.num_workers = num_workers
-        self.stage = None
-        self.dataset_cfg = dataset_cfg
-
-        # Subset of train to use for eval
-        self.TRAIN_SUBSET_SIZE = 500
-
-    def prepare_data(self) -> None:
-        pass
-
+class MultiDatasetDataModule(BaseDataModule):
     def setup(self, stage: str = "fit"):
         self.stage = stage
 
@@ -113,35 +98,9 @@ class MultiDatasetDataModule(pl.LightningDataModule):
             shuffle=False,
         )
 
-    def train_dataloader(self):
-        return data.DataLoader(
-            self.train_dataset,
-            num_workers=self.num_workers,
-            collate_fn=collate_pcd_fn,
-            batch_sampler=self.train_batch_sampler,
-        )
-
     def train_subset_dataloader(self):
         """A subset of train used for eval."""
         raise NotImplementedError("Eval on each dataset separately for now.")
-
-    def val_dataloader(self):
-        val_dataloader = data.DataLoader(
-            self.val_dataset,
-            num_workers=self.num_workers,
-            collate_fn=collate_pcd_fn,
-            batch_sampler=self.val_batch_sampler,
-        )
-        return val_dataloader
-
-    def test_dataloader(self):
-        test_dataloader = data.DataLoader(
-            self.test_dataset,
-            num_workers=self.num_workers,
-            collate_fn=collate_pcd_fn,
-            batch_sampler=self.test_batch_sampler,
-        )
-        return test_dataloader
 
 
 class ChunkDatasetBatchSampler(torch.utils.data.BatchSampler):

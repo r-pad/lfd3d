@@ -1,23 +1,20 @@
-import os
 from datetime import datetime
 from pathlib import Path
 
 import numpy as np
 import open3d as o3d
-import pytorch_lightning as pl
 import torch
-import torch.utils.data as data
 import torchdatasets as td
 import zarr
 from PIL import Image
 from sklearn.decomposition import PCA
 from torchvision import transforms
 
+from lfd3d.datasets.base_data import BaseDataModule
 from lfd3d.datasets.rgb_text_feature_gen import (
     get_dinov2_image_embedding,
     get_siglip_text_embedding,
 )
-from lfd3d.utils.data_utils import collate_pcd_fn
 
 FOXGLOVE_DELTA = 0.5  # For some weird reason, there's a delta of 0.5 secs for annotated events in foxglove
 
@@ -293,25 +290,7 @@ class RpadFoxgloveDataset(td.Dataset):
         return item
 
 
-class RpadFoxgloveDataModule(pl.LightningDataModule):
-    def __init__(self, batch_size, val_batch_size, num_workers, dataset_cfg):
-        super().__init__()
-        self.batch_size = batch_size
-        self.val_batch_size = val_batch_size
-        self.num_workers = num_workers
-        self.stage = None
-        self.dataset_cfg = dataset_cfg
-
-        # setting root directory based on dataset type
-        data_dir = os.path.expanduser(dataset_cfg.data_dir)
-        self.root = data_dir
-
-        # Subset of train to use for eval
-        self.TRAIN_SUBSET_SIZE = 500
-
-    def prepare_data(self) -> None:
-        pass
-
+class RpadFoxgloveDataModule(BaseDataModule):
     def setup(self, stage: str = "fit"):
         self.stage = stage
 
@@ -325,46 +304,3 @@ class RpadFoxgloveDataModule(pl.LightningDataModule):
                 td.cachers.Pickle(Path(self.train_dataset.cache_dir) / "val")
             )
         self.test_dataset = RpadFoxgloveDataset(self.root, self.dataset_cfg, "test")
-
-    def train_dataloader(self):
-        return data.DataLoader(
-            self.train_dataset,
-            batch_size=self.batch_size,
-            shuffle=True if self.stage == "fit" else False,
-            num_workers=self.num_workers,
-            collate_fn=collate_pcd_fn,
-        )
-
-    def train_subset_dataloader(self):
-        """A subset of train used for eval."""
-        indices = torch.randint(
-            0, len(self.train_dataset), (self.TRAIN_SUBSET_SIZE,)
-        ).tolist()
-        return data.DataLoader(
-            data.Subset(self.train_dataset, indices),
-            batch_size=self.batch_size,
-            shuffle=False,
-            num_workers=self.num_workers,
-            collate_fn=collate_pcd_fn,
-            pin_memory=True,
-        )
-
-    def val_dataloader(self):
-        val_dataloader = data.DataLoader(
-            self.val_dataset,
-            batch_size=self.val_batch_size,
-            shuffle=False,
-            num_workers=self.num_workers,
-            collate_fn=collate_pcd_fn,
-        )
-        return val_dataloader
-
-    def test_dataloader(self):
-        test_dataloader = data.DataLoader(
-            self.test_dataset,
-            batch_size=self.val_batch_size,
-            shuffle=False,
-            num_workers=self.num_workers,
-            collate_fn=collate_pcd_fn,
-        )
-        return test_dataloader
