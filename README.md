@@ -51,12 +51,13 @@ Test split generated using [sriramsk1999/general-flow](https://github.com/sriram
 - Subgoal generation: Using Gemini in `src/lfd3d/datasets/droid/chunk_droid_with_gemini.py`.
 - RGB/text features: Generated with:
 `python rgb_text_feature_gen.py --dataset droid --input_dir </path/to/droid/data>`
+- Disparity: Using [sriramsk1999/FoundationStereo](https://github.com/sriramsk1999/FoundationStereo/)
 
 ### RPAD-Foxglove
 
 - Download and process recordings from Foxglove using [https://github.com/r-pad/lfd3d-system/](`lfd3d-system`).
-- Generata GT for human demonstrations with modified version of [https://github.com/jacintosuner/wilor/](`wilor`). (TODO: add script for processing foxglove data)
-- Generata GT for robot demonstrations with `TBD`.
+- Generata GT for human demonstrations with modified version of [https://github.com/sriramsk1999/wilor/](`wilor`).
+- Generata GT for robot demonstrations with `src/lfd3d/datasets/rpad_foxglove/render_aloha.py`.
 
 ### RT-1
 
