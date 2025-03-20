@@ -38,11 +38,12 @@ class MultiDatasetDataModule(pl.LightningDataModule):
             dataset_class = name_to_dataset_mapping[key]
 
             train_data = dataset_class(cfg.data_dir, cfg, "train")
+            val_data = dataset_class(cfg.data_dir, cfg, "val")
             if train_data.cache_dir:
                 train_data.cache(td.cachers.Pickle(Path(train_data.cache_dir)))
+                val_data.cache(td.cachers.Pickle(Path(train_data.cache_dir) / "val"))
             self.train_datasets.append(train_data)
-
-            self.val_datasets.append(dataset_class(cfg.data_dir, cfg, "val"))
+            self.val_datasets.append(val_data)
             self.test_datasets.append(dataset_class(cfg.data_dir, cfg, "test"))
 
         self.train_dataset = data.ConcatDataset(self.train_datasets)

@@ -19,6 +19,8 @@ from lfd3d.datasets.rgb_text_feature_gen import (
 )
 from lfd3d.utils.data_utils import collate_pcd_fn
 
+FOXGLOVE_DELTA = 0.5  # For some weird reason, there's a delta of 0.5 secs for annotated events in foxglove
+
 
 class RpadFoxgloveDataset(td.Dataset):
     def __init__(self, root, dataset_cfg, split):
@@ -32,7 +34,7 @@ class RpadFoxgloveDataset(td.Dataset):
         # Voxel size for downsampling
         self.voxel_size = 0.03
 
-        self.orig_shape = (1080, 1920)
+        self.orig_shape = (1536, 2048)
         # Target shape of images (same as DINOv2)
         self.target_shape = 224
         self.rgb_preprocess = transforms.Compose(
@@ -124,15 +126,17 @@ class RpadFoxgloveDataset(td.Dataset):
     def load_rgbd(self, demo_name, subgoal_idx, K):
         demo = self.dataset[demo_name]
 
-        event_start_ts = datetime.fromisoformat(
-            demo["events"]["start"][subgoal_idx]
-        ).timestamp()
-        event_end_ts = datetime.fromisoformat(
-            demo["events"]["end"][subgoal_idx]
-        ).timestamp()
+        event_start_ts = (
+            datetime.fromisoformat(demo["events"]["start"][subgoal_idx]).timestamp()
+            - FOXGLOVE_DELTA
+        )
+        event_end_ts = (
+            datetime.fromisoformat(demo["events"]["end"][subgoal_idx]).timestamp()
+            - FOXGLOVE_DELTA
+        )
 
-        rgb_ts = demo["_rgb_image_raw"]["ts"]
-        depth_ts = demo["_depth_image_raw"]["ts"]
+        rgb_ts = demo["_rgb_image_rect"]["ts"]
+        depth_ts = demo["_depth_registered_image_rect"]["ts"]
 
         event_start_idx_rgb = np.searchsorted(rgb_ts, event_start_ts)
         event_end_idx_rgb = np.searchsorted(rgb_ts, event_end_ts)
@@ -141,21 +145,24 @@ class RpadFoxgloveDataset(td.Dataset):
         event_end_idx_depth = np.searchsorted(depth_ts, event_end_ts)
 
         # Return rgb/depth at beginning and end of event
-        rgb_init = Image.fromarray(demo["_rgb_image_raw"]["img"][event_start_idx_rgb])
+        rgb_init = Image.fromarray(demo["_rgb_image_rect"]["img"][event_start_idx_rgb])
         rgb_init = np.asarray(self.rgb_preprocess(rgb_init))
-        rgb_end = Image.fromarray(demo["_rgb_image_raw"]["img"][event_end_idx_rgb])
+        rgb_end = Image.fromarray(demo["_rgb_image_rect"]["img"][event_end_idx_rgb])
         rgb_end = np.asarray(self.rgb_preprocess(rgb_end))
         rgbs = np.array([rgb_init, rgb_end])
 
         depth_init = (
-            (demo["_depth_image_raw"]["img"][event_start_idx_depth] / 1000.0)
+            (
+                demo["_depth_registered_image_rect"]["img"][event_start_idx_depth]
+                / 1000.0
+            )
             .squeeze()
             .astype(np.float32)
         )
         depth_init = Image.fromarray(depth_init)
         depth_init = np.asarray(self.depth_preprocess(depth_init))
         depth_end = (
-            (demo["_depth_image_raw"]["img"][event_end_idx_depth] / 1000.0)
+            (demo["_depth_registered_image_rect"]["img"][event_end_idx_depth] / 1000.0)
             .squeeze()
             .astype(np.float32)
         )
@@ -309,11 +316,14 @@ class RpadFoxgloveDataModule(pl.LightningDataModule):
         self.stage = stage
 
         self.train_dataset = RpadFoxgloveDataset(self.root, self.dataset_cfg, "train")
+        self.val_dataset = RpadFoxgloveDataset(self.root, self.dataset_cfg, "val")
         if self.train_dataset.cache_dir:
             self.train_dataset.cache(
                 td.cachers.Pickle(Path(self.train_dataset.cache_dir))
             )
-        self.val_dataset = RpadFoxgloveDataset(self.root, self.dataset_cfg, "val")
+            self.val_dataset.cache(
+                td.cachers.Pickle(Path(self.train_dataset.cache_dir) / "val")
+            )
         self.test_dataset = RpadFoxgloveDataset(self.root, self.dataset_cfg, "test")
 
     def train_dataloader(self):

@@ -312,6 +312,9 @@ class RT1DataModule(pl.LightningDataModule):
             self.train_dataset.cache(
                 td.cachers.Pickle(Path(self.train_dataset.cache_dir))
             )
+            self.val_dataset.cache(
+                td.cachers.Pickle(Path(self.train_dataset.cache_dir) / "val")
+            )
         self.val_dataset = RT1Dataset(self.root, self.dataset_cfg, "val")
         self.test_dataset = RT1Dataset(self.root, self.dataset_cfg, "test")
 

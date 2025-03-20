@@ -590,6 +590,9 @@ class HOI4DDataModule(pl.LightningDataModule):
             self.train_dataset.cache(
                 td.cachers.Pickle(Path(self.train_dataset.cache_dir))
             )
+            self.val_dataset.cache(
+                td.cachers.Pickle(Path(self.train_dataset.cache_dir) / "val")
+            )
         self.val_dataset = HOI4DDataset(self.root, self.dataset_cfg, "val")
         self.test_dataset = HOI4DDataset(self.root, self.dataset_cfg, "test")
 
