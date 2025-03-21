@@ -68,9 +68,9 @@ Test split generated using [sriramsk1999/general-flow](https://github.com/sriram
 
 After generating tracks and depth:
 
-1. Preprocess captions with `src/lfd3d/datasets/rt1_processing/process_captions.py`.
-2. RGB/text features: Generated using `src/lfd3d/datasets/rt1_processing/rgb_text_feature_gen.py`.
-3. Chunking and filtering: Generated using `src/lfd3d/datasets/rt1_processing/save_event_rgb.py`.
+1. Preprocess captions with `src/lfd3d/datasets/rt1/process_captions.py`.
+2. RGB/text features: Generated using `src/lfd3d/datasets/rt1/rgb_text_feature_gen.py`.
+3. Chunking and filtering: Generated using `src/lfd3d/datasets/rt1/save_event_rgb.py`.
 
 Test split taken from [3D-VLA](https://github.com/UMass-Foundation-Model/3D-VLA)
 
