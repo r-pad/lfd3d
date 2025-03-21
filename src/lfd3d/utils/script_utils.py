@@ -10,12 +10,15 @@ from lightning.pytorch import Callback
 from omegaconf import OmegaConf
 from pytorch_lightning.loggers import WandbLogger
 
-from lfd3d.datasets.droid.droid_dataset import DroidDataModule
-from lfd3d.datasets.genGoalGen_dataset import GenGoalGenDataModule
-from lfd3d.datasets.hoi4d.hoi4d_dataset import HOI4DDataModule
-from lfd3d.datasets.multi_dataset import MultiDatasetDataModule
-from lfd3d.datasets.rt1_dataset import RT1DataModule
-from lfd3d.datasets.synth_block_dataset import SynthBlockDataModule
+from lfd3d.datasets import (
+    DroidDataModule,
+    GenGoalGenDataModule,
+    HOI4DDataModule,
+    MultiDatasetDataModule,
+    RpadFoxgloveDataModule,
+    RT1DataModule,
+    SynthBlockDataModule,
+)
 from lfd3d.models.diptv3 import DiPTv3, DiPTv3Adapter
 from lfd3d.models.tax3d import (
     CrossDisplacementModule,
@@ -57,20 +60,18 @@ def create_datamodule(cfg):
             f"Model type: '{cfg.model.type}' and dataset type: '{cfg.dataset.type}' are incompatible."
         )
 
-    # check dataset name
-    elif cfg.dataset.name == "hoi4d":
-        datamodule_fn = HOI4DDataModule
-    elif cfg.dataset.name == "droid":
-        datamodule_fn = DroidDataModule
-    elif cfg.dataset.name == "rt1":
-        datamodule_fn = RT1DataModule
-    elif cfg.dataset.name == "synth_block":
-        datamodule_fn = SynthBlockDataModule
-    elif cfg.dataset.name == "multi":
-        datamodule_fn = MultiDatasetDataModule
-    elif cfg.dataset.name == "genGoalGen":
-        datamodule_fn = GenGoalGenDataModule
-    else:
+    dataset_map = {
+        "hoi4d": HOI4DDataModule,
+        "droid": DroidDataModule,
+        "rt1": RT1DataModule,
+        "synth_block": SynthBlockDataModule,
+        "multi": MultiDatasetDataModule,
+        "genGoalGen": GenGoalGenDataModule,
+        "rpadFoxglove": RpadFoxgloveDataModule,
+    }
+
+    datamodule_fn = dataset_map.get(cfg.dataset.name)
+    if datamodule_fn is None:
         raise ValueError(f"Invalid dataset name: {cfg.dataset.name}")
 
     # job-specific datamodule pre-processing

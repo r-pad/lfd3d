@@ -3,11 +3,9 @@ from glob import glob
 
 import cv2
 import numpy as np
-import pytorch_lightning as pl
-import torch
 import torch.utils.data as data
 
-from lfd3d.utils.data_utils import collate_pcd_fn
+from lfd3d.datasets.base_data import BaseDataModule
 
 
 class SynthBlockDataset(data.Dataset):
@@ -108,70 +106,10 @@ class SynthBlockDataset(data.Dataset):
         return item
 
 
-class SynthBlockDataModule(pl.LightningDataModule):
-    def __init__(self, batch_size, val_batch_size, num_workers, dataset_cfg):
-        super().__init__()
-        self.batch_size = batch_size
-        self.val_batch_size = val_batch_size
-        self.num_workers = num_workers
-        self.stage = None
-        self.dataset_cfg = dataset_cfg
-
-        # setting root directory based on dataset type
-        data_dir = os.path.expanduser(dataset_cfg.data_dir)
-        self.root = data_dir
-
-        # Subset of train to use for eval
-        self.TRAIN_SUBSET_SIZE = 500
-
-    def prepare_data(self) -> None:
-        pass
-
+class SynthBlockDataModule(BaseDataModule):
     def setup(self, stage: str = "fit"):
         self.stage = stage
 
         self.train_dataset = SynthBlockDataset(self.root, self.dataset_cfg, "train")
         self.val_dataset = SynthBlockDataset(self.root, self.dataset_cfg, "val")
         self.test_dataset = SynthBlockDataset(self.root, self.dataset_cfg, "test")
-
-    def train_dataloader(self):
-        return data.DataLoader(
-            self.train_dataset,
-            batch_size=self.batch_size,
-            shuffle=True if self.stage == "fit" else False,
-            num_workers=self.num_workers,
-            collate_fn=collate_pcd_fn,
-        )
-
-    def train_subset_dataloader(self):
-        """A subset of train used for eval."""
-        indices = torch.randint(
-            0, len(self.train_dataset), (self.TRAIN_SUBSET_SIZE,)
-        ).tolist()
-        return data.DataLoader(
-            data.Subset(self.train_dataset, indices),
-            batch_size=self.batch_size,
-            shuffle=False,
-            num_workers=self.num_workers,
-            collate_fn=collate_pcd_fn,
-        )
-
-    def val_dataloader(self):
-        val_dataloader = data.DataLoader(
-            self.val_dataset,
-            batch_size=self.val_batch_size,
-            shuffle=False,
-            num_workers=self.num_workers,
-            collate_fn=collate_pcd_fn,
-        )
-        return val_dataloader
-
-    def test_dataloader(self):
-        test_dataloader = data.DataLoader(
-            self.test_dataset,
-            batch_size=self.val_batch_size,
-            shuffle=False,
-            num_workers=self.num_workers,
-            collate_fn=collate_pcd_fn,
-        )
-        return test_dataloader

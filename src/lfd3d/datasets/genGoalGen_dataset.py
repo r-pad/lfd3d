@@ -1,15 +1,13 @@
 import json
-import os
 
 import cv2
 import numpy as np
 import open3d as o3d
-import pytorch_lightning as pl
 import torch
 import torch.nn.functional as F
 import torch.utils.data as data
 
-from lfd3d.utils.data_utils import collate_pcd_fn
+from lfd3d.datasets.base_data import BaseDataModule
 
 
 class GenGoalGenDataset(data.Dataset):
@@ -236,32 +234,7 @@ class GenGoalGenDataset(data.Dataset):
         return item
 
 
-class GenGoalGenDataModule(pl.LightningDataModule):
-    def __init__(self, batch_size, val_batch_size, num_workers, dataset_cfg):
-        super().__init__()
-        self.batch_size = batch_size
-        self.val_batch_size = val_batch_size
-        self.num_workers = num_workers
-        self.stage = None
-        self.dataset_cfg = dataset_cfg
-
-        # setting root directory based on dataset type
-        data_dir = os.path.expanduser(dataset_cfg.data_dir)
-        self.root = data_dir
-
-    def prepare_data(self) -> None:
-        pass
-
+class GenGoalGenDataModule(BaseDataModule):
     def setup(self, stage: str = "fit"):
         self.stage = stage
         self.test_dataset = GenGoalGenDataset(self.root, self.dataset_cfg, "test")
-
-    def test_dataloader(self):
-        test_dataloader = data.DataLoader(
-            self.test_dataset,
-            batch_size=self.val_batch_size,
-            shuffle=False,
-            num_workers=self.num_workers,
-            collate_fn=collate_pcd_fn,
-        )
-        return test_dataloader

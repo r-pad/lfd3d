@@ -51,6 +51,13 @@ Test split generated using [sriramsk1999/general-flow](https://github.com/sriram
 - Subgoal generation: Using Gemini in `src/lfd3d/datasets/droid/chunk_droid_with_gemini.py`.
 - RGB/text features: Generated with:
 `python rgb_text_feature_gen.py --dataset droid --input_dir </path/to/droid/data>`
+- Disparity: Using [sriramsk1999/FoundationStereo](https://github.com/sriramsk1999/FoundationStereo/)
+
+### RPAD-Foxglove
+
+- Download and process recordings from Foxglove using [https://github.com/r-pad/lfd3d-system/](`lfd3d-system`).
+- Generata GT for human demonstrations with modified version of [https://github.com/sriramsk1999/wilor/](`wilor`).
+- Generata GT for robot demonstrations with `src/lfd3d/datasets/rpad_foxglove/render_aloha.py`.
 
 ### RT-1
 
@@ -61,9 +68,9 @@ Test split generated using [sriramsk1999/general-flow](https://github.com/sriram
 
 After generating tracks and depth:
 
-1. Preprocess captions with `src/lfd3d/datasets/rt1_processing/process_captions.py`.
-2. RGB/text features: Generated using `src/lfd3d/datasets/rt1_processing/rgb_text_feature_gen.py`.
-3. Chunking and filtering: Generated using `src/lfd3d/datasets/rt1_processing/save_event_rgb.py`.
+1. Preprocess captions with `src/lfd3d/datasets/rt1/process_captions.py`.
+2. RGB/text features: Generated using `src/lfd3d/datasets/rt1/rgb_text_feature_gen.py`.
+3. Chunking and filtering: Generated using `src/lfd3d/datasets/rt1/save_event_rgb.py`.
 
 Test split taken from [3D-VLA](https://github.com/UMass-Foundation-Model/3D-VLA)
 

@@ -1,6 +1,7 @@
 import os
 
 import numpy as np
+import open3d as o3d
 import torch
 from hydra.core.hydra_config import HydraConfig
 from manopth.manolayer import ManoLayer
@@ -133,3 +134,61 @@ def collate_pcd_fn(batch):
     }
 
     return collated_batch
+
+
+def combine_meshes(meshes):
+    """
+    Combine multiple Open3D meshes into a single mesh with proper vertex and triangle indexing.
+
+    Args:
+        meshes: List of Open3D triangle meshes
+
+    Returns:
+        combined_mesh: A single Open3D triangle mesh
+    """
+    # Initialize vertices and triangles lists
+    vertices = []
+    triangles = []
+    vertex_offset = 0
+
+    # Combine meshes
+    for mesh in meshes:
+        # Convert mesh vertices and triangles to numpy arrays
+        mesh_vertices = np.asarray(mesh.vertices)
+        mesh_triangles = np.asarray(mesh.triangles)
+
+        # Add vertices to the combined list
+        vertices.append(mesh_vertices)
+
+        # Adjust triangle indices and add to the combined list
+        adjusted_triangles = mesh_triangles + vertex_offset
+        triangles.append(adjusted_triangles)
+
+        # Update vertex offset for the next mesh
+        vertex_offset += len(mesh_vertices)
+
+    # Concatenate all vertices and triangles
+    all_vertices = np.vstack(vertices)
+    all_triangles = np.vstack(triangles)
+
+    # Create the combined mesh
+    combined_mesh = o3d.geometry.TriangleMesh()
+    combined_mesh.vertices = o3d.utility.Vector3dVector(all_vertices)
+    combined_mesh.triangles = o3d.utility.Vector3iVector(all_triangles)
+
+    combined_mesh.compute_vertex_normals()
+
+    combined_mesh.remove_duplicated_vertices()
+    combined_mesh.remove_duplicated_triangles()
+    combined_mesh.remove_degenerate_triangles()
+
+    return combined_mesh
+
+
+def video_to_numpy(video_path):
+    cap = cv2.VideoCapture(video_path)
+    frames = [frame for ret, frame in iter(lambda: cap.read(), (False, None))]
+    cap.release()
+    vid = np.array(frames)
+    vid = np.array([cv2.cvtColor(i, cv2.COLOR_BGR2RGB) for i in vid])
+    return vid
