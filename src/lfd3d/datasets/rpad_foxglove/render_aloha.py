@@ -1,3 +1,7 @@
+import argparse
+import os
+
+import cv2
 import matplotlib.pyplot as plt
 import mujoco
 import numpy as np
@@ -5,93 +9,59 @@ import open3d as o3d
 import trimesh
 import zarr
 from robot_descriptions.loaders.mujoco import load_robot_description
+from scipy.spatial.transform import Rotation
 from tqdm import tqdm
 
-
-def get_camera_matrices(model, data, cam_id, width, height):
-    mujoco.mj_forward(model, data)
-    # Get camera position and orientation
-    cam_pos = data.cam_xpos[cam_id]
-    cam_mat = data.cam_xmat[cam_id].reshape(3, 3)
-
-    # MuJoCo gives us camera-to-world transform
-    cam_to_world = np.eye(4)
-    cam_to_world[:3, :3] = cam_mat
-    cam_to_world[:3, 3] = cam_pos
-
-    # Invert to get world-to-camera transform
-    world_to_cam = np.linalg.inv(cam_to_world)
-
-    # Fix the horizontal flip issue
-    # This accounts for MuJoCo's different coordinate conventions
-    flip_x = np.eye(4)
-    flip_x[0, 0] = -1  # Flip X axis
-
-    # Apply the correction
-    world_to_cam = world_to_cam @ flip_x
-
-    # Compute intrinsics from field of view
-    fovy = model.cam_fovy[cam_id]
-    f = height / (2 * np.tan(np.deg2rad(fovy) / 2))
-
-    # Camera intrinsics matrix
-    K = np.array([[f, 0, width / 2], [0, f, height / 2], [0, 0, 1]])
-
-    return K, world_to_cam
+from lfd3d.utils.data_utils import combine_meshes
 
 
-def combine_meshes(meshes):
+def align_timestamps(rgb_ts, joint_positions_ts):
     """
-    Combine multiple Open3D meshes into a single mesh with proper vertex and triangle indexing.
+    Aligns timestamps between two arrays by finding closest matches.
 
     Args:
-        meshes: List of Open3D triangle meshes
+        rgb_ts: Array of RGB timestamps
+        joint_positions_ts: Array of joint position timestamps
 
     Returns:
-        combined_mesh: A single Open3D triangle mesh
+        Tuple of (aligned_rgb_indices, aligned_joint_indices, time_differences)
     """
-    # Initialize vertices and triangles lists
-    vertices = []
-    triangles = []
-    vertex_offset = 0
+    aligned_pairs = []
+    rgb_indices = []
+    joint_indices = []
+    time_diffs = []
 
-    # Combine meshes
-    for mesh in meshes:
-        # Convert mesh vertices and triangles to numpy arrays
-        mesh_vertices = np.asarray(mesh.vertices)
-        mesh_triangles = np.asarray(mesh.triangles)
+    # For each RGB timestamp, find the closest joint position timestamp
+    for i, rgb_t in enumerate(rgb_ts):
+        # Calculate absolute differences
+        diffs = np.abs(joint_positions_ts - rgb_t)
+        # Find index of minimum difference
+        closest_idx = np.argmin(diffs)
+        # Get the minimum time difference
+        min_diff = diffs[closest_idx]
 
-        # Add vertices to the combined list
-        vertices.append(mesh_vertices)
+        rgb_indices.append(i)
+        joint_indices.append(closest_idx)
+        time_diffs.append(min_diff)
 
-        # Adjust triangle indices and add to the combined list
-        adjusted_triangles = mesh_triangles + vertex_offset
-        triangles.append(adjusted_triangles)
+    return np.array(rgb_indices), np.array(joint_indices), np.array(time_diffs)
 
-        # Update vertex offset for the next mesh
-        vertex_offset += len(mesh_vertices)
 
-    # Concatenate all vertices and triangles
-    all_vertices = np.vstack(vertices)
-    all_triangles = np.vstack(triangles)
-
-    # Create the combined mesh
-    combined_mesh = o3d.geometry.TriangleMesh()
-    combined_mesh.vertices = o3d.utility.Vector3dVector(all_vertices)
-    combined_mesh.triangles = o3d.utility.Vector3iVector(all_triangles)
-
-    combined_mesh.compute_vertex_normals()
-
-    combined_mesh.remove_duplicated_vertices()
-    combined_mesh.remove_duplicated_triangles()
-    combined_mesh.remove_degenerate_triangles()
-
-    return combined_mesh
+def setup_camera(model, cam_id, cam_to_world, width, height, K):
+    world_to_cam = np.linalg.inv(cam_to_world)
+    model.cam_pos[cam_id] = cam_to_world[:3, 3]
+    R_flip = np.diag([1, -1, -1])
+    R_cam = Rotation.from_matrix(cam_to_world[:3, :3] @ R_flip)
+    cam_quat = R_cam.as_quat()  # [x, y, z, w]
+    cam_quat = cam_quat[[3, 0, 1, 2]]  # Reorder to [w, x, y, z] for MuJoCo
+    model.cam_quat[cam_id] = cam_quat
+    fovy = np.degrees(2 * np.arctan((height / 2) / K[1, 1]))
+    model.cam_fovy[cam_id] = fovy
 
 
 def get_right_gripper_mesh(mj_model, mj_data):
     """
-    Extract the visual meshes of the right gripper from an MJCF model.
+    Extract the visual meshes of the right gripper from the Aloha MJCF model.
 
     Args:
         mj_model: MuJoCo model object.
@@ -133,12 +103,6 @@ def get_right_gripper_mesh(mj_model, mj_data):
         ):
             geom_name = mujoco.mj_id2name(mj_model, mujoco.mjtObj.mjOBJ_GEOM, geom_id)
 
-            # # Get the mesh ID associated with this geom
-            # mesh_id = mj_model.geom_dataid[geom_id]
-            # # Get the mesh name using mj_id2name with mjOBJ_MESH
-            # mesh_name = mujoco.mj_id2name(mj_model, mujoco.mjtObj.mjOBJ_MESH, mesh_id)
-            # print(f"Geom {geom_id} uses mesh '{mesh_name}'")
-
             # Get the geom's world position and orientation from the simulation state
             geom_pos = mj_data.geom_xpos[geom_id]  # 3D position in world coordinates
             geom_mat = mj_data.geom_xmat[geom_id].reshape(3, 3)  # 3x3 rotation matrix
@@ -173,67 +137,150 @@ def get_right_gripper_mesh(mj_model, mj_data):
     return meshes
 
 
-# Path and data loading
-root = "/data/sriram/rpad_foxglove/pick_mug_all.zarr"
-dataset = zarr.group(root)
-model = load_robot_description("aloha_mj_description")
-data = mujoco.MjData(model)
+def process_demo(
+    demo,
+    model,
+    data,
+    renderer,
+    width,
+    height,
+    K,
+    world_to_cam,
+    sample_n_points,
+    visualize,
+):
+    joint_positions = demo["_follower_right_joint_states"]["pos"][:]
+    joint_positions_ts = demo["_follower_right_joint_states"]["ts"][:]
+    rgb_imgs = demo["_rgb_image_rect"]["img"][:]
+    rgb_ts = demo["_rgb_image_rect"]["ts"][:]
 
-# Hijack existing camera
-cam_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_CAMERA, "teleoperator_pov")
-height, width = 480, 640
-K, world_to_cam = get_camera_matrices(model, data, cam_id, width, height)
-sample_n_points = 500
-RED, GREEN, BLUE = (255, 0, 0), (0, 255, 0), (0, 0, 255)
+    rgb_idx, joint_idx, _ = align_timestamps(rgb_ts, joint_positions_ts)
+    rgb_imgs = rgb_imgs[rgb_idx]
+    rgb_imgs = np.array([cv2.resize(i, (0, 0), fx=0.25, fy=0.25) for i in rgb_imgs])
+    joint_positions = joint_positions[joint_idx]
 
-visualize = False
-renderer = mujoco.Renderer(model, width=width, height=height)
-# viewer = MujocoViewer(model, data)
-
-for demo_name in tqdm(dataset):
-    demo = dataset[demo_name]
-
-    if "_puppet_right_joint_states" not in demo:
-        print("Human demo. Skipping.")
-        continue
-
-    # Extract joint positions from the demo
-    joint_positions = demo["_puppet_right_joint_states"]["pos"][:]
-    num_timesteps, num_joints = joint_positions.shape
     POINTS = []
-    for t in range(num_timesteps):
+    for t in tqdm(range(joint_positions.shape[0])):
         data.qpos[8 : 8 + 6] = joint_positions[t, :6]
         data.qpos[8 + 6 : 8 + 8] = joint_positions[t, [7, 7]]
         mujoco.mj_forward(model, data)
-        # viewer.render()
 
         meshes = get_right_gripper_mesh(model, data)
         mesh = combine_meshes(meshes)
         mesh_ = trimesh.Trimesh(
             vertices=np.asarray(mesh.vertices), faces=np.asarray(mesh.triangles)
         )
-        points_, faces_ = trimesh.sample.sample_surface(mesh_, sample_n_points, seed=42)
+        points_, _ = trimesh.sample.sample_surface(mesh_, sample_n_points, seed=42)
 
-        # Project gripper urdf to image
-        homogenous_append = np.ones((sample_n_points, 1))
-        gripper_urdf_3d_pos = np.concatenate([points_, homogenous_append], axis=-1)[
-            :, :, None
-        ]
+        gripper_urdf_3d_pos = np.concatenate(
+            [points_, np.ones((sample_n_points, 1))], axis=-1
+        )[:, :, None]
         urdf_cam3dcoords = (world_to_cam @ gripper_urdf_3d_pos)[:, :3].squeeze(2)
 
         POINTS.append(urdf_cam3dcoords)
 
         if visualize:
-            os.makedirs("mujoco_renders", exist_ok=True)
+            os.makedirs(f"mujoco_renders/{demo.name}", exist_ok=True)
             renderer.update_scene(data, camera="teleoperator_pov")
-            image = renderer.render()
+            rend = renderer.render()
 
             urdf_proj_hom = (K @ urdf_cam3dcoords.T).T
             urdf_proj = (urdf_proj_hom / urdf_proj_hom[:, 2:])[:, :2]
             urdf_proj = np.clip(urdf_proj, [0, 0], [width - 1, height - 1]).astype(int)
-            image[urdf_proj[:, 1], urdf_proj[:, 0]] = GREEN
+            rend[urdf_proj[:, 1], urdf_proj[:, 0]] = [0, 255, 0]  # Green
 
-            plt.imsave(f"mujoco_renders/{str(t).zfill(5)}.png", image)
+            rgb = rgb_imgs[t]
+            rgb[urdf_proj[:, 1], urdf_proj[:, 0]] = [0, 255, 0]  # Green
+            plt.imsave(f"mujoco_renders/{demo.name}/{str(t).zfill(5)}.png", rgb)
 
     POINTS = np.array(POINTS)
-    demo.create_dataset("gripper_pos", data=POINTS)
+    # demo.create_dataset("gripper_pos", data=POINTS)
+
+
+def main(args):
+    dataset = zarr.group(args.root)
+    model = load_robot_description("aloha_mj_description")
+    data = mujoco.MjData(model)
+    cam_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_CAMERA, "teleoperator_pov")
+
+    rgb_cam_info = dataset[list(dataset.keys())[0]]["_rgb_camera_info"]
+    width = rgb_cam_info["width"][0] // 4
+    height = rgb_cam_info["height"][1] // 4
+    K = rgb_cam_info["k"][0]
+    K[0, 0] /= 4
+    K[0, 2] /= 4
+    K[1, 1] /= 4
+    K[1, 2] /= 4
+
+    cam_to_world = np.array(
+        [
+            [
+                5.649022459983825684e-01,
+                4.926099777221679688e-01,
+                -6.619784235954284668e-01,
+                4.762849807739257812e-01,
+            ],
+            [
+                8.177112340927124023e-01,
+                -4.417135715484619141e-01,
+                3.690967559814453125e-01,
+                -2.074269354343414307e-01,
+            ],
+            [
+                -1.105844378471374512e-01,
+                -7.498131394386291504e-01,
+                -6.523388624191284180e-01,
+                6.584196686744689941e-01,
+            ],
+            [
+                0.000000000000000000e00,
+                0.000000000000000000e00,
+                0.000000000000000000e00,
+                1.000000000000000000e00,
+            ],
+        ]
+    )
+
+    setup_camera(model, cam_id, cam_to_world, width, height, K)
+    renderer = mujoco.Renderer(model, width=width, height=height)
+
+    for demo_name in tqdm(dataset):
+        demo = dataset[demo_name]
+        if "_follower_right_joint_states" not in demo:
+            print("Human demo. Skipping.")
+            continue
+
+        process_demo(
+            demo,
+            model,
+            data,
+            renderer,
+            width,
+            height,
+            K,
+            np.linalg.inv(cam_to_world),
+            args.sample_n_points,
+            args.visualize,
+        )
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Process Aloha robot data.")
+    parser.add_argument(
+        "--root", type=str, required=True, help="Root directory of the zarr dataset"
+    )
+    parser.add_argument(
+        "--sample_n_points",
+        type=int,
+        default=500,
+        help="Number of points to sample from the gripper mesh",
+    )
+    parser.add_argument(
+        "--visualize",
+        action="store_true",
+        help="Flag to enable visualization",
+        default=False,
+    )
+    args = parser.parse_args()
+
+    main(args)
