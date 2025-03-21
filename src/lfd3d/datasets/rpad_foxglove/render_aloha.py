@@ -194,7 +194,7 @@ def process_demo(
             plt.imsave(f"mujoco_renders/{demo.name}/{str(t).zfill(5)}.png", rgb)
 
     POINTS = np.array(POINTS)
-    # demo.create_dataset("gripper_pos", data=POINTS)
+    demo.create_dataset("gripper_pos", data=POINTS)
 
 
 def main(args):

@@ -16,8 +16,6 @@ from lfd3d.datasets.rgb_text_feature_gen import (
     get_siglip_text_embedding,
 )
 
-FOXGLOVE_DELTA = 0.5  # For some weird reason, there's a delta of 0.5 secs for annotated events in foxglove
-
 
 class RpadFoxgloveDataset(td.Dataset):
     def __init__(self, root, dataset_cfg, split):
@@ -31,7 +29,6 @@ class RpadFoxgloveDataset(td.Dataset):
         # Voxel size for downsampling
         self.voxel_size = 0.03
 
-        self.orig_shape = (1536, 2048)
         # Target shape of images (same as DINOv2)
         self.target_shape = 224
         self.rgb_preprocess = transforms.Compose(
@@ -97,13 +94,15 @@ class RpadFoxgloveDataset(td.Dataset):
     def load_camera_params(self, demo_name):
         demo = self.dataset[demo_name]
         K = demo["_rgb_camera_info"]["k"][0]
-        return K
+        height = demo["_rgb_camera_info"]["height"][0]
+        width = demo["_rgb_camera_info"]["width"][0]
+        return K, (height, width)
 
-    def get_scaled_intrinsics(self, K):
+    def get_scaled_intrinsics(self, K, orig_shape):
         # Getting scale factor from torchvision.transforms.Resize behaviour
         K_ = K.copy()
 
-        scale_factor = self.target_shape / min(self.orig_shape)
+        scale_factor = self.target_shape / min(orig_shape)
 
         # Apply the scale factor to the intrinsics
         K_[0, 0] *= scale_factor  # fx
@@ -112,8 +111,8 @@ class RpadFoxgloveDataset(td.Dataset):
         K_[1, 2] *= scale_factor  # cy
 
         # Adjust the principal point (cx, cy) for the center crop
-        crop_offset_x = (self.orig_shape[1] * scale_factor - self.target_shape) / 2
-        crop_offset_y = (self.orig_shape[0] * scale_factor - self.target_shape) / 2
+        crop_offset_x = (orig_shape[1] * scale_factor - self.target_shape) / 2
+        crop_offset_y = (orig_shape[0] * scale_factor - self.target_shape) / 2
 
         # Adjust the principal point (cx, cy) for the center crop
         K_[0, 2] -= crop_offset_x  # Adjust cx for crop
@@ -123,17 +122,15 @@ class RpadFoxgloveDataset(td.Dataset):
     def load_rgbd(self, demo_name, subgoal_idx, K):
         demo = self.dataset[demo_name]
 
-        event_start_ts = (
-            datetime.fromisoformat(demo["events"]["start"][subgoal_idx]).timestamp()
-            - FOXGLOVE_DELTA
-        )
-        event_end_ts = (
-            datetime.fromisoformat(demo["events"]["end"][subgoal_idx]).timestamp()
-            - FOXGLOVE_DELTA
-        )
+        event_start_ts = datetime.fromisoformat(
+            demo["events"]["start"][subgoal_idx]
+        ).timestamp()
+        event_end_ts = datetime.fromisoformat(
+            demo["events"]["end"][subgoal_idx]
+        ).timestamp()
 
-        rgb_ts = demo["_rgb_image_rect"]["ts"]
-        depth_ts = demo["_depth_registered_image_rect"]["ts"]
+        rgb_ts = demo["_rgb_image_rect"]["publish_ts"]
+        depth_ts = demo["_depth_registered_image_rect"]["publish_ts"]
 
         event_start_idx_rgb = np.searchsorted(rgb_ts, event_start_ts)
         event_end_idx_rgb = np.searchsorted(rgb_ts, event_end_ts)
@@ -242,7 +239,7 @@ class RpadFoxgloveDataset(td.Dataset):
     def __getitem__(self, idx):
         demo_name, subgoal_idx = self.dataset_index[idx]
 
-        K_ = self.get_scaled_intrinsics(self.load_camera_params(demo_name))
+        K_ = self.get_scaled_intrinsics(*self.load_camera_params(demo_name))
 
         _, _, caption = self.captions[(demo_name, subgoal_idx)]
         start2end = torch.eye(4)  # Static camera
