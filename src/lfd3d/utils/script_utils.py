@@ -6,9 +6,7 @@ from typing import Dict, List, Sequence, Union, cast
 import torch
 import torch.utils._pytree as pytree
 import wandb
-from lightning.pytorch import Callback
 from omegaconf import OmegaConf
-from pytorch_lightning.loggers import WandbLogger
 
 from lfd3d.datasets import (
     DroidDataModule,
@@ -129,59 +127,6 @@ def flatten_outputs(outputs: List[TorchTree]) -> TorchTree:
     cat_flat = [torch.cat(x) for x in list(zip(*flattened_list))]
     output_dict = pytree.tree_unflatten(cat_flat, flattened_spec)
     return cast(TorchTree, output_dict)
-
-
-class LogPredictionSamplesCallback(Callback):
-    def __init__(self, logger: WandbLogger):
-        self.logger = logger
-
-    def on_validation_batch_end(
-        self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0
-    ):
-        """Called when the validation batch ends."""
-
-        # `outputs` comes from `LightningModule.validation_step`
-        # which corresponds to our model predictions in this case
-
-        # Let's log 20 sample image predictions from the first batch
-        if batch_idx == 0:
-            n = 20
-            x, y = batch
-            images = [img for img in x[:n]]
-            outs = outputs["preds"][:n].argmax(dim=1)
-            captions = [
-                f"Ground Truth: {y_i} - Prediction: {y_pred}"
-                for y_i, y_pred in zip(y[:n], outs)
-            ]
-
-            # Option 1: log images with `WandbLogger.log_image`
-            self.logger.log_image(key="sample_images", images=images, caption=captions)
-
-            # Option 2: log images and predictions as a W&B Table
-            columns = ["image", "ground truth", "prediction"]
-            data = [
-                [wandb.Image(x_i), y_i, y_pred]
-                for x_i, y_i, y_pred in list(zip(x[:n], y[:n], outs))
-            ]
-            self.logger.log_table(key="sample_table", columns=columns, data=data)
-
-
-class CustomModelPlotsCallback(Callback):
-    def __init__(self, logger: WandbLogger):
-        self.logger = logger
-
-    def on_validation_epoch_end(self, trainer, pl_module):
-        """Called when the validation epoch ends."""
-        # assert trainer.logger is not None and isinstance(
-        #     trainer.logger, WandbLogger
-        # ), "This callback only works with WandbLogger."
-        plots = pl_module.make_plots()
-        trainer.logger.experiment.log(
-            {
-                "mode_distribution": plots["mode_distribution"],
-            },
-            step=trainer.global_step,
-        )
 
 
 def load_checkpoint_config_from_wandb(

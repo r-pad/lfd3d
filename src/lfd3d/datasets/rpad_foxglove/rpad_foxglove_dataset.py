@@ -1,3 +1,5 @@
+import json
+import os
 from datetime import datetime
 from pathlib import Path
 
@@ -9,14 +11,13 @@ import zarr
 from PIL import Image
 from sklearn.decomposition import PCA
 from torchvision import transforms
+from transformers import AutoModel, AutoProcessor
 
 from lfd3d.datasets.base_data import BaseDataModule
 from lfd3d.datasets.rgb_text_feature_gen import (
     get_dinov2_image_embedding,
     get_siglip_text_embedding,
 )
-
-FOXGLOVE_DELTA = 0.5  # For some weird reason, there's a delta of 0.5 secs for annotated events in foxglove
 
 
 class RpadFoxgloveDataset(td.Dataset):
@@ -28,10 +29,14 @@ class RpadFoxgloveDataset(td.Dataset):
         self.cache_dir = dataset_cfg.cache_dir
         self.dataset_cfg = dataset_cfg
 
+        self.data_sources = dataset_cfg.data_sources
+        self.current_dir = os.path.dirname(__file__)
+        with open(f"{self.current_dir}/{split}.json") as f:
+            self.split_names = json.load(f)
+
         # Voxel size for downsampling
         self.voxel_size = 0.03
 
-        self.orig_shape = (1536, 2048)
         # Target shape of images (same as DINOv2)
         self.target_shape = 224
         self.rgb_preprocess = transforms.Compose(
@@ -58,8 +63,37 @@ class RpadFoxgloveDataset(td.Dataset):
         self.dataset_index = self.expand_all_events()
         self.size = len(self.dataset_index)
 
+        self.siglip = AutoModel.from_pretrained("google/siglip-so400m-patch14-384").to(
+            "cpu"
+        )
+        self.siglip_processor = AutoProcessor.from_pretrained(
+            "google/siglip-so400m-patch14-384"
+        )
+        self.dinov2 = torch.hub.load("facebookresearch/dinov2", "dinov2_vitl14_reg").to(
+            "cpu"
+        )
+
     def __len__(self):
         return self.size
+
+    def is_in_data_source(self, demo):
+        """
+        Filters out demos which aren't specified as a data source.
+        i.e. if we specify "aloha" as a data source, filter out all human demos
+        """
+        # Currently identifying demo type by checking number of vertices
+        # For human data, we have 778 vertices from the MANO mesh
+        # For robot data, we're sampling 500 points from the mesh.
+        # HACK: This is pretty hacky, should probably find a better way to do this.
+        n_points = demo["gripper_pos"].shape[1]
+        if n_points == 778:
+            demo_type = "human"
+        elif n_points == 500:
+            demo_type = "aloha"
+        else:
+            raise NotImplementedError
+
+        return demo_type in self.data_sources
 
     def expand_all_events(self):
         """This function *expands* each event to have an associated event_idx.
@@ -71,19 +105,25 @@ class RpadFoxgloveDataset(td.Dataset):
                   chunk index.
         """
         expanded_index = []
+
         for demo_name in self.dataset:
+            if demo_name not in self.split_names:
+                continue
+
             demo = self.dataset[demo_name]
 
             if "gripper_pos" not in demo.keys():
                 print(f"No GT found for {demo_name}")
                 continue
 
+            if not self.is_in_data_source(demo):
+                continue
+
             events = demo["events"]
-            num_events = len(events["start"])
+            num_events = len(events["event"])
             expanded_event_idx = [(demo_name, i) for i in range(num_events)]
             expanded_event_caption = {
                 (demo_name, i): (
-                    events["start"][i],
                     events["end"][i],
                     events["event"][i].replace("_", " "),
                 )
@@ -97,13 +137,15 @@ class RpadFoxgloveDataset(td.Dataset):
     def load_camera_params(self, demo_name):
         demo = self.dataset[demo_name]
         K = demo["_rgb_camera_info"]["k"][0]
-        return K
+        height = demo["_rgb_camera_info"]["height"][0]
+        width = demo["_rgb_camera_info"]["width"][0]
+        return K, (height, width)
 
-    def get_scaled_intrinsics(self, K):
+    def get_scaled_intrinsics(self, K, orig_shape):
         # Getting scale factor from torchvision.transforms.Resize behaviour
         K_ = K.copy()
 
-        scale_factor = self.target_shape / min(self.orig_shape)
+        scale_factor = self.target_shape / min(orig_shape)
 
         # Apply the scale factor to the intrinsics
         K_[0, 0] *= scale_factor  # fx
@@ -112,28 +154,44 @@ class RpadFoxgloveDataset(td.Dataset):
         K_[1, 2] *= scale_factor  # cy
 
         # Adjust the principal point (cx, cy) for the center crop
-        crop_offset_x = (self.orig_shape[1] * scale_factor - self.target_shape) / 2
-        crop_offset_y = (self.orig_shape[0] * scale_factor - self.target_shape) / 2
+        crop_offset_x = (orig_shape[1] * scale_factor - self.target_shape) / 2
+        crop_offset_y = (orig_shape[0] * scale_factor - self.target_shape) / 2
 
         # Adjust the principal point (cx, cy) for the center crop
         K_[0, 2] -= crop_offset_x  # Adjust cx for crop
         K_[1, 2] -= crop_offset_y  # Adjust cy for crop
         return K_
 
+    def get_event_start_end_ts(self, demo_name, subgoal_idx):
+        demo = self.dataset[demo_name]
+
+        event_end_ts = datetime.fromisoformat(
+            demo["events"]["end"][subgoal_idx]
+        ).timestamp()
+
+        if subgoal_idx == 0:
+            # First frame where we have non-zero gripper_pos
+            # For estimating hand pose, we add zeros if hand is not detected.
+            event_start_idx = np.argmax(
+                np.any(np.asarray(demo["gripper_pos"]) != 0, axis=(1, 2))
+            )
+            event_start_ts = demo["_rgb_image_rect"]["ts"][event_start_idx]
+        else:
+            # Start timestamp is end timestamp of previous subgoal
+            event_start_ts = datetime.fromisoformat(
+                demo["events"]["end"][subgoal_idx - 1]
+            ).timestamp()
+        return event_start_ts, event_end_ts
+
     def load_rgbd(self, demo_name, subgoal_idx, K):
         demo = self.dataset[demo_name]
 
-        event_start_ts = (
-            datetime.fromisoformat(demo["events"]["start"][subgoal_idx]).timestamp()
-            - FOXGLOVE_DELTA
-        )
-        event_end_ts = (
-            datetime.fromisoformat(demo["events"]["end"][subgoal_idx]).timestamp()
-            - FOXGLOVE_DELTA
+        event_start_ts, event_end_ts = self.get_event_start_end_ts(
+            demo_name, subgoal_idx
         )
 
-        rgb_ts = demo["_rgb_image_rect"]["ts"]
-        depth_ts = demo["_depth_registered_image_rect"]["ts"]
+        rgb_ts = demo["_rgb_image_rect"]["publish_ts"]
+        depth_ts = demo["_depth_registered_image_rect"]["publish_ts"]
 
         event_start_idx_rgb = np.searchsorted(rgb_ts, event_start_ts)
         event_end_idx_rgb = np.searchsorted(rgb_ts, event_end_ts)
@@ -181,8 +239,15 @@ class RpadFoxgloveDataset(td.Dataset):
         """
         # Compute features on CPU to avoid CUDA multiprocessing issues
         # We're only computing the features once and caching so its okay.
-        text_embed = get_siglip_text_embedding(text, device="cpu")
-        rgb_embed = get_dinov2_image_embedding(Image.fromarray(rgb), device="cpu")
+        text_embed = get_siglip_text_embedding(
+            text,
+            siglip=self.siglip,
+            siglip_processor=self.siglip_processor,
+            device="cpu",
+        )
+        rgb_embed = get_dinov2_image_embedding(
+            Image.fromarray(rgb), dinov2=self.dinov2, device="cpu"
+        )
 
         # Compress RGB features
         pca_n_components = 256
@@ -242,9 +307,9 @@ class RpadFoxgloveDataset(td.Dataset):
     def __getitem__(self, idx):
         demo_name, subgoal_idx = self.dataset_index[idx]
 
-        K_ = self.get_scaled_intrinsics(self.load_camera_params(demo_name))
+        K_ = self.get_scaled_intrinsics(*self.load_camera_params(demo_name))
 
-        _, _, caption = self.captions[(demo_name, subgoal_idx)]
+        _, caption = self.captions[(demo_name, subgoal_idx)]
         start2end = torch.eye(4)  # Static camera
 
         rgbs, depths, event_start_idx, event_end_idx = self.load_rgbd(
