@@ -1037,7 +1037,7 @@ class DiT_PointCloud_Cross(nn.Module):
         super().__init__()
         self.learn_sigma = learn_sigma
         self.in_channels = in_channels
-        self.in_feat_channels = 256  # SIGLIP feat_dim after PCA
+        self.in_feat_channels = 256  # DINOv2 feat_dim after PCA
         # self.out_channels = in_channels * 2 if learn_sigma else in_channels
         self.out_channels = 6 if learn_sigma else 3
         self.num_heads = num_heads
@@ -1074,7 +1074,7 @@ class DiT_PointCloud_Cross(nn.Module):
         else:
             raise ValueError(f"Invalid x_encoder: {self.model_cfg.x_encoder}")
 
-        # If RGB features are provided, embed geometric/semantic features
+        # If RGB features are enabled, embed geometric/semantic features
         # at hidden_size // 2 and concatenate.
         y_hidden_size = (
             hidden_size if self.model_cfg.y_feat_encoder is None else hidden_size // 2
@@ -1208,7 +1208,7 @@ class DiT_PointCloud_Cross(nn.Module):
             t (torch.Tensor): (B,) tensor of diffusion timesteps
             y (torch.Tensor): (B, P, M) tensor of un-noised scene (e.g. anchor) points
             text_embed (torch.Tensor): (B, N, L) tensor of text embedding features. Assumes L=1152 (SIGLIP)
-            y_feat (Optional[torch.Tensor]): (B, K, M) tensor of un-noised scene (e.g. anchor) features. Assumes K=256 (SIGLIP after PCA)
+            y_feat (Optional[torch.Tensor]): (B, K, M) tensor of un-noised scene (e.g. anchor) features. Assumes K=256 (SIGLIP after DINOv2)
             x0 (Optional[torch.Tensor]): (B, P, N) tensor of un-noised x (e.g. action) features.
         """
         # noise-centering, if enabled
