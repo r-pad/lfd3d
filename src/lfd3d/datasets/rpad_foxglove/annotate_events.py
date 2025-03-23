@@ -6,6 +6,7 @@ from datetime import datetime
 
 import numpy as np
 import zarr
+from google import genai
 from google.genai import types
 from tqdm import tqdm
 
@@ -78,7 +79,7 @@ def process_with_gemini(
                 config=generate_content_config,
             )
             return json.loads(response.text.strip("`json\n"))
-        except google.genai.errors.ServerError as e:
+        except genai.errors.ServerError as e:
             if attempt < max_retries - 1:  # Don't wait after the last attempt
                 print(
                     f"Attempt {attempt + 1} failed. Retrying in {retry_delay} seconds..."
@@ -111,8 +112,8 @@ def main(args):
         video_path = f"tmp/{demo_name}.mp4"
 
         images = np.asarray(demo["_rgb_image_rect"]["img"])
-        ts = np.asarray(demo["_rgb_image_rect"]["ts"])
-        fps = save_video(images, video_path, approx_duration=20)
+        ts = np.asarray(demo["_rgb_image_rect"]["publish_ts"])
+        fps = save_video(images, video_path, approx_duration=30)
 
         prompt = generate_prompt_with_subgoals(goal_text, subgoals)
         parsed_json = process_with_gemini(
@@ -152,7 +153,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--model_name",
-        default="gemini-2.0-pro-exp-02-05",
+        default="gemini-2.0-flash",
         help="Name of the Gemini model to use",
     )
 
