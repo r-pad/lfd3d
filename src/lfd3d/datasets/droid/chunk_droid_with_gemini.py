@@ -9,12 +9,7 @@ from google import genai
 from google.genai import types
 from tqdm import tqdm
 
-from lfd3d.utils.gemini_utils import save_video, upload_video
-
-
-def setup_client(api_key):
-    """Initialize and return a Gemini client."""
-    return genai.Client(api_key=api_key)
+from lfd3d.utils.gemini_utils import save_video, setup_client, upload_video
 
 
 def load_dataset(root):
@@ -101,7 +96,7 @@ def process_with_gemini(
 
     for attempt in range(max_retries):
         try:
-            video_prompt = upload_video(video_path)
+            video_prompt = upload_video(client, video_path)
             response = client.models.generate_content(
                 model=model_name,
                 contents=[video_prompt, prompt],
@@ -149,7 +144,7 @@ def main(args):
 
         os.makedirs(f"{output_dir}/{idx}", exist_ok=True)
         video_path = f"{output_dir}/{idx}/video.mp4"
-        save_video(images, video_path)
+        save_video(images, video_path, approx_duration=20)
 
         prompt = generate_prompt(goal_text)
         parsed_json = process_with_gemini(
