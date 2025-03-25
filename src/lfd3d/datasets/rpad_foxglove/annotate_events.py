@@ -132,6 +132,8 @@ def main(args):
             events.append(goal)
             ends.append(end)
 
+        if "events" in demo and len(demo["events"]["event"]) == 0:
+            del demo["events"]
         events_group = demo.create_group("events")
         ends = np.array(ends)
         events = np.array(events)

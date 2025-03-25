@@ -58,6 +58,7 @@ Test split generated using [sriramsk1999/general-flow](https://github.com/sriram
 - Download and process recordings from Foxglove using [https://github.com/r-pad/lfd3d-system/](`lfd3d-system`).
 - Generata GT for human demonstrations with modified version of [https://github.com/sriramsk1999/wilor/](`wilor`).
 - Generata GT for robot demonstrations with `src/lfd3d/datasets/rpad_foxglove/render_aloha.py`.
+- Annotate events with `src/lfd3d/datasets/rpad_foxglove/annotate_events.py`.
 
 ### RT-1
 

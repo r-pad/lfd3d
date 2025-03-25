@@ -1,5 +1,7 @@
+import argparse
 import json
 import os
+import re
 from glob import glob
 
 import cv2
@@ -79,6 +81,35 @@ def get_gripper_mesh(mj_model, mj_data):
     return meshes
 
 
+def search_annotations_json(
+    file_path, droid_language_annotations, droid_language_annotations_keys
+):
+    query_p1 = file_path.split("/")[0]
+    query_p2 = ".*"
+    query_p3 = file_path.split("/")[2]
+    query_p4 = file_path[-13:-5]
+    try:
+        hours, minutes, seconds = query_p4.split(":")
+        query_p4 = f"-{hours}h-{minutes}m-{seconds}s"
+    except:
+        hours, minutes, seconds = query_p4.split("_")
+        query_p4 = f"-{hours}h-{minutes}m-{seconds}s"
+    query_key = query_p1 + query_p2 + query_p3 + query_p4
+
+    regex = re.compile(query_key)
+
+    match = None
+    for index, key in enumerate(droid_language_annotations_keys):
+        if regex.search(key):
+            match = key
+            droid_language_annotations_keys.pop(index)
+            break
+
+    if match is None:
+        return None
+    return droid_language_annotations[match]["language_instruction1"]
+
+
 def process_item(
     item,
     idx,
@@ -91,6 +122,9 @@ def process_item(
     metadata_dir,
     cam_extrinsics_key,
     cam_image_key,
+    droid_language_annotations,
+    droid_language_annotations_keys,
+    idx_to_fname_mapping,
 ):
     fpath = item["episode_metadata"]["file_path"].numpy().decode("utf-8")
     if "failure" in fpath:
@@ -100,11 +134,17 @@ def process_item(
         return
 
     steps = [i for i in item["steps"]]
-    images = np.array([i["observation"][cam_image_key] for i in steps])
     goal_text = steps[0]["language_instruction"].numpy().decode("utf-8")
 
-    if goal_text == "":
-        return
+    if not goal_text:
+        # Try backup search in the json
+        goal_text = search_annotations_json(
+            idx_to_fname_mapping[idx],
+            droid_language_annotations,
+            droid_language_annotations_keys,
+        )
+        if not goal_text:
+            return None
 
     subfolder_path = "/".join(fpath.split("/")[5:9])
     metadata_file = glob(f"{metadata_dir}/1.0.1/{subfolder_path}/metadata*json")
@@ -124,7 +164,6 @@ def process_item(
     cam_to_world = get_cam_to_world(extrinsics_left)
     world_to_cam = np.linalg.inv(cam_to_world)
 
-    num_images = images.shape[0]
     gripper_action = np.clip(gripper_action, 0, 0.8)
     gripper_pcds = []
 
@@ -174,6 +213,7 @@ def process_item(
         gripper_pcds.append(urdf_cam3dcoords)
 
         if idx % 100 == 0:
+            images = np.array([i["observation"][cam_image_key] for i in steps])
             os.makedirs(f"{viz_dir}/{idx}", exist_ok=True)
             urdf_proj_hom = (K @ urdf_cam3dcoords.T).T
             urdf_proj = (urdf_proj_hom / urdf_proj_hom[:, 2:])[:, :2]
@@ -200,7 +240,7 @@ def main(args):
     height, width = 180, 320
 
     root = args.root
-    builder = tfds.builder_from_directory(builder_dir=f"{root}")
+    builder = tfds.builder_from_directory(builder_dir=root)
     dataset = builder.as_dataset(split="train")
     metadata_dir = args.metadata_dir
     output_dir = args.output_dir
@@ -209,6 +249,12 @@ def main(args):
     # Can use either 1 or 2, no particular reason
     cam_extrinsics_key = "ext1_cam_extrinsics"
     cam_image_key = "exterior_image_1_left"
+
+    with open(f"{root}/../droid_language_annotations.json") as f:
+        droid_language_annotations = json.load(f)
+    droid_language_annotations_keys = list(droid_language_annotations.keys())
+    with open("idx_to_fname_mapping.json") as f:
+        idx_to_fname_mapping = json.load(f)
 
     for idx, item in tqdm(enumerate(dataset), total=len(dataset)):
         process_item(
@@ -223,4 +269,48 @@ def main(args):
             metadata_dir,
             cam_extrinsics_key,
             cam_image_key,
+            droid_language_annotations,
+            droid_language_annotations_keys,
+            idx_to_fname_mapping,
         )
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description="Process DROID dataset for gripper point clouds"
+    )
+
+    parser.add_argument(
+        "--root",
+        type=str,
+        default="/data/sriram/DROID/droid",
+        help="Root directory of the DROID dataset",
+    )
+    parser.add_argument(
+        "--metadata_dir",
+        type=str,
+        default="/data/sriram/DROID/droid_raw",
+        help="Directory containing metadata files",
+    )
+    parser.add_argument(
+        "--output_dir",
+        type=str,
+        default="/data/sriram/DROID/droid_gripper_pcd",
+        help="Output directory for processed data",
+    )
+    parser.add_argument(
+        "--viz_dir",
+        type=str,
+        default="droid_gripper_pcd_viz",
+        help="Directory for visualization outputs",
+    )
+    parser.add_argument(
+        "--sample_n_points",
+        type=int,
+        default=500,
+        help="Number of points to sample from gripper mesh",
+    )
+
+    args = parser.parse_args()
+
+    main(args)

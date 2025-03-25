@@ -193,11 +193,11 @@ class RpadFoxgloveDataset(td.Dataset):
         rgb_ts = demo["_rgb_image_rect"]["publish_ts"]
         depth_ts = demo["_depth_registered_image_rect"]["publish_ts"]
 
-        event_start_idx_rgb = np.searchsorted(rgb_ts, event_start_ts)
-        event_end_idx_rgb = np.searchsorted(rgb_ts, event_end_ts)
+        event_start_idx_rgb = np.searchsorted(rgb_ts, event_start_ts) - 1
+        event_end_idx_rgb = np.searchsorted(rgb_ts, event_end_ts) - 1
 
-        event_start_idx_depth = np.searchsorted(depth_ts, event_start_ts)
-        event_end_idx_depth = np.searchsorted(depth_ts, event_end_ts)
+        event_start_idx_depth = np.searchsorted(depth_ts, event_start_ts) - 1
+        event_end_idx_depth = np.searchsorted(depth_ts, event_end_ts) - 1
 
         # Return rgb/depth at beginning and end of event
         rgb_init = Image.fromarray(demo["_rgb_image_rect"]["img"][event_start_idx_rgb])
