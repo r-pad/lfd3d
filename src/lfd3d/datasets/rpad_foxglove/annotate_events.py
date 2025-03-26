@@ -31,7 +31,7 @@ def generate_prompt_with_subgoals(goal_text, subgoals):
 
     ## Instructions (CRITICAL):
     1. **Analyze the video and identify when the provided *Sub-Goals* are completed.**
-    3. **For each subgoal, generate the timestamp (MM:SS) at which the subgoal action is *clearly and visually completed*.**
+    3. **For each subgoal, generate the timestamp (MM:SS.s) at which the subgoal action is *clearly and visually completed*.**
 
         **Completion is defined as the moment the subgoal action reaches a visually observable and intended end state.** For example:
             * "grasp the cup":** Completion is when the robot's gripper/hand is fully closed and securely holding the cup.
@@ -48,15 +48,15 @@ def generate_prompt_with_subgoals(goal_text, subgoals):
     [
         {{
             "subgoal": "string",  // Subgoal
-            "timestamp": "MM:SS",  // Timestamp in minutes and seconds (moment of completion)
+            "timestamp": "MM:SS.s",  // Timestamp in minutes, seconds and tenths of a second (moment of completion)
         }}
     ]
 
     ## Example (for "pour tea from a teapot" with the subgoals - ["grasp the teapot", "pour tea from teapot", "put down the teapot"]):
     [
-      {{"subgoal": "grasp the teapot", "timestamp": "00:02"}},
-      {{"subgoal": "pour tea from teapot", "timestamp": "00:05"}},
-      {{"subgoal": "put down the teapot", "timestamp": "00:07"}}
+      {{"subgoal": "grasp the teapot", "timestamp": "00:02.0"}},
+      {{"subgoal": "pour tea from teapot", "timestamp": "00:05.3"}},
+      {{"subgoal": "put down the teapot", "timestamp": "00:07.8"}}
     ]
 
     IMPORTANT: Provide ONLY valid JSON as your response, no explanation text.
@@ -122,8 +122,8 @@ def main(args):
 
         ends, events = [], []
         for item in parsed_json:
-            end_sec = int(item["timestamp"][3:])
-            end_idx = end_sec * fps
+            end_sec = float(item["timestamp"][3:])
+            end_idx = int(end_sec * fps)
             end_ts = ts[end_idx]
 
             goal = item["subgoal"]
@@ -155,7 +155,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--model_name",
-        default="gemini-2.0-flash",
+        default="gemini-2.5-pro-exp-03-25",
         help="Name of the Gemini model to use",
     )
 
