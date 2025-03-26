@@ -4,6 +4,7 @@ import os
 import time
 from datetime import datetime
 
+import matplotlib.pyplot as plt
 import numpy as np
 import zarr
 from google import genai
@@ -90,11 +91,19 @@ def process_with_gemini(
                 return None
 
 
+def save_event_images(output_dir, images, ts, event_ts, goals):
+    for event in zip(event_ts, goals):
+        e_ts, goal = event
+        e_ts = datetime.fromisoformat(e_ts).timestamp()
+        idx = np.searchsorted(ts, e_ts) - 1
+        plt.imsave(f"{output_dir}/{goal}.png", images[idx])
+
+
 def main(args):
     """Main function to process the dataset and generate subgoal timestamps."""
     client = setup_client(os.environ.get("RPAD_GEMINI_API_KEY"))
     dataset = zarr.group(args.root)
-    os.makedirs("tmp", exist_ok=True)
+    os.makedirs(args.output_dir, exist_ok=True)
 
     goal_text, subgoals = TASK_SPEC[args.task_spec]
 
@@ -109,7 +118,8 @@ def main(args):
 
     for demo_name in tqdm(dataset):
         demo = dataset[demo_name]
-        video_path = f"tmp/{demo_name}.mp4"
+        os.makedirs(f"{args.output_dir}/{demo_name}", exist_ok=True)
+        video_path = f"{args.output_dir}/{demo_name}/video.mp4"
 
         images = np.asarray(demo["_rgb_image_rect"]["img"])
         ts = np.asarray(demo["_rgb_image_rect"]["publish_ts"])
@@ -140,6 +150,8 @@ def main(args):
         events_group.create_dataset("end", data=ends)
         events_group.create_dataset("event", data=events)
 
+        save_event_images(f"{args.output_dir}/{demo_name}", images, ts, ends, events)
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -158,6 +170,9 @@ if __name__ == "__main__":
         default="gemini-2.5-pro-exp-03-25",
         help="Name of the Gemini model to use",
     )
-
+    parser.add_argument(
+        "--output_dir",
+        default="event_viz",
+    )
     args = parser.parse_args()
     main(args)
