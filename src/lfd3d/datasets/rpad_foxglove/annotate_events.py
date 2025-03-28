@@ -4,8 +4,10 @@ import os
 import time
 from datetime import datetime
 
+import matplotlib.pyplot as plt
 import numpy as np
 import zarr
+from google import genai
 from google.genai import types
 from tqdm import tqdm
 
@@ -30,7 +32,7 @@ def generate_prompt_with_subgoals(goal_text, subgoals):
 
     ## Instructions (CRITICAL):
     1. **Analyze the video and identify when the provided *Sub-Goals* are completed.**
-    3. **For each subgoal, generate the timestamp (MM:SS) at which the subgoal action is *clearly and visually completed*.**
+    3. **For each subgoal, generate the timestamp (MM:SS.s) at which the subgoal action is *clearly and visually completed*.**
 
         **Completion is defined as the moment the subgoal action reaches a visually observable and intended end state.** For example:
             * "grasp the cup":** Completion is when the robot's gripper/hand is fully closed and securely holding the cup.
@@ -47,15 +49,15 @@ def generate_prompt_with_subgoals(goal_text, subgoals):
     [
         {{
             "subgoal": "string",  // Subgoal
-            "timestamp": "MM:SS",  // Timestamp in minutes and seconds (moment of completion)
+            "timestamp": "MM:SS.s",  // Timestamp in minutes, seconds and tenths of a second (moment of completion)
         }}
     ]
 
     ## Example (for "pour tea from a teapot" with the subgoals - ["grasp the teapot", "pour tea from teapot", "put down the teapot"]):
     [
-      {{"subgoal": "grasp the teapot", "timestamp": "00:02"}},
-      {{"subgoal": "pour tea from teapot", "timestamp": "00:05"}},
-      {{"subgoal": "put down the teapot", "timestamp": "00:07"}}
+      {{"subgoal": "grasp the teapot", "timestamp": "00:02.0"}},
+      {{"subgoal": "pour tea from teapot", "timestamp": "00:05.3"}},
+      {{"subgoal": "put down the teapot", "timestamp": "00:07.8"}}
     ]
 
     IMPORTANT: Provide ONLY valid JSON as your response, no explanation text.
@@ -78,7 +80,7 @@ def process_with_gemini(
                 config=generate_content_config,
             )
             return json.loads(response.text.strip("`json\n"))
-        except google.genai.errors.ServerError as e:
+        except genai.errors.ServerError as e:
             if attempt < max_retries - 1:  # Don't wait after the last attempt
                 print(
                     f"Attempt {attempt + 1} failed. Retrying in {retry_delay} seconds..."
@@ -89,11 +91,19 @@ def process_with_gemini(
                 return None
 
 
+def save_event_images(output_dir, images, ts, event_ts, goals):
+    for event in zip(event_ts, goals):
+        e_ts, goal = event
+        e_ts = datetime.fromisoformat(e_ts).timestamp()
+        idx = np.searchsorted(ts, e_ts)
+        plt.imsave(f"{output_dir}/{goal}.png", images[idx])
+
+
 def main(args):
     """Main function to process the dataset and generate subgoal timestamps."""
     client = setup_client(os.environ.get("RPAD_GEMINI_API_KEY"))
     dataset = zarr.group(args.root)
-    os.makedirs("tmp", exist_ok=True)
+    os.makedirs(args.output_dir, exist_ok=True)
 
     goal_text, subgoals = TASK_SPEC[args.task_spec]
 
@@ -108,11 +118,12 @@ def main(args):
 
     for demo_name in tqdm(dataset):
         demo = dataset[demo_name]
-        video_path = f"tmp/{demo_name}.mp4"
+        os.makedirs(f"{args.output_dir}/{demo_name}", exist_ok=True)
+        video_path = f"{args.output_dir}/{demo_name}/video.mp4"
 
         images = np.asarray(demo["_rgb_image_rect"]["img"])
-        ts = np.asarray(demo["_rgb_image_rect"]["ts"])
-        fps = save_video(images, video_path, approx_duration=20)
+        ts = np.asarray(demo["_rgb_image_rect"]["publish_ts"])
+        fps = save_video(images, video_path, approx_duration=30)
 
         prompt = generate_prompt_with_subgoals(goal_text, subgoals)
         parsed_json = process_with_gemini(
@@ -121,8 +132,8 @@ def main(args):
 
         ends, events = [], []
         for item in parsed_json:
-            end_sec = int(item["timestamp"][3:])
-            end_idx = end_sec * fps
+            end_sec = float(item["timestamp"][3:])
+            end_idx = int(end_sec * fps)
             end_ts = ts[end_idx]
 
             goal = item["subgoal"]
@@ -131,11 +142,15 @@ def main(args):
             events.append(goal)
             ends.append(end)
 
+        if "events" in demo and len(demo["events"]["event"]) == 0:
+            del demo["events"]
         events_group = demo.create_group("events")
         ends = np.array(ends)
         events = np.array(events)
         events_group.create_dataset("end", data=ends)
         events_group.create_dataset("event", data=events)
+
+        save_event_images(f"{args.output_dir}/{demo_name}", images, ts, ends, events)
 
 
 if __name__ == "__main__":
@@ -152,9 +167,12 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--model_name",
-        default="gemini-2.0-pro-exp-02-05",
+        default="gemini-2.5-pro-exp-03-25",
         help="Name of the Gemini model to use",
     )
-
+    parser.add_argument(
+        "--output_dir",
+        default="event_viz",
+    )
     args = parser.parse_args()
     main(args)

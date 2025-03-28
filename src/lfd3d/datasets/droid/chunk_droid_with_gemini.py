@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+import re
 import time
 
 import numpy as np
@@ -29,16 +30,51 @@ def get_valid_indices(dataset_size, split_num=None):
     return valid_idxs
 
 
-def filter_and_process_item(item):
+def search_annotations_json(
+    file_path, droid_language_annotations, droid_language_annotations_keys
+):
+    query_p1 = file_path.split("/")[0]
+    query_p2 = ".*"
+    query_p3 = file_path.split("/")[2]
+    query_p4 = file_path[-13:-5]
+    try:
+        hours, minutes, seconds = query_p4.split(":")
+        query_p4 = f"-{hours}h-{minutes}m-{seconds}s"
+    except:
+        hours, minutes, seconds = query_p4.split("_")
+        query_p4 = f"-{hours}h-{minutes}m-{seconds}s"
+    query_key = query_p1 + query_p2 + query_p3 + query_p4
+
+    regex = re.compile(query_key)
+
+    match = None
+    for index, key in enumerate(droid_language_annotations_keys):
+        if regex.search(key):
+            match = key
+            droid_language_annotations_keys.pop(index)
+            break
+
+    if match is None:
+        return None
+    return droid_language_annotations[match]["language_instruction1"]
+
+
+def filter_and_process_item(
+    item, file_path, droid_language_annotations, droid_language_annotations_keys
+):
     """Filter items based on metadata and return goal text and images."""
-    file_path = item["episode_metadata"]["file_path"].numpy().decode("utf-8")
     if "failure" in file_path:
         return None, None
 
     steps = [i for i in item["steps"]]
     goal_text = steps[0]["language_instruction"].numpy().decode("utf-8")
     if not goal_text:
-        return None, None
+        # Try backup search in the json
+        goal_text = search_annotations_json(
+            file_path, droid_language_annotations, droid_language_annotations_keys
+        )
+        if not goal_text:
+            return None, None
 
     images = np.array([i["observation"]["exterior_image_1_left"] for i in steps])
     return goal_text, images
@@ -65,6 +101,7 @@ def generate_prompt(goal_text):
         **Choose the timestamp that best marks this visually clear point of completion.**
     4. **Subgoal captions MUST use imperative tense (e.g., "grasp the cup").**
     5. **Aim for approximately 2-5 *key* subgoals that capture the most important steps in the video.** Focus on the major stages of the task.
+    6. **Make sure the timestamps are valid and not longer than the video.**
 
     ## Output Format:
     Return a JSON array with an entry for each identified subgoal:
@@ -111,7 +148,7 @@ def process_with_gemini(
                 time.sleep(retry_delay)
             else:
                 print(f"Max retries reached. Final error: {e}")
-                return None
+                raise
 
 
 def main(args):
@@ -131,11 +168,20 @@ def main(args):
         response_mime_type="text/plain",
     )
 
+    with open(f"{args.root}/../droid_language_annotations.json") as f:
+        droid_language_annotations = json.load(f)
+    droid_language_annotations_keys = list(droid_language_annotations.keys())
+    with open("idx_to_fname_mapping.json") as f:
+        idx_to_fname_mapping = json.load(f)
+
     for idx, item in tqdm(enumerate(dataset), total=len(dataset)):
         if idx not in valid_idxs:
             continue
 
-        goal_text, images = filter_and_process_item(item)
+        file_path = idx_to_fname_mapping[idx]
+        goal_text, images = filter_and_process_item(
+            item, file_path, droid_language_annotations, droid_language_annotations_keys
+        )
         if goal_text is None or images is None:
             continue
 
@@ -151,10 +197,8 @@ def main(args):
             client, model_name, generate_content_config, video_path, prompt
         )
 
-        if parsed_json is not None:
-            print(goal_text, parsed_json)
-            with open(f"{output_dir}/{idx}/subgoal.json", "w") as f:
-                json.dump(parsed_json, f)
+        with open(f"{output_dir}/{idx}/subgoal.json", "w") as f:
+            json.dump(parsed_json, f)
 
 
 if __name__ == "__main__":
@@ -181,7 +225,6 @@ if __name__ == "__main__":
         default="gemini-2.0-flash",
         help="Name of the Gemini model to use",
     )
-    # model_name = "gemini-2.0-pro-exp-02-05"
 
     args = parser.parse_args()
     main(args)
