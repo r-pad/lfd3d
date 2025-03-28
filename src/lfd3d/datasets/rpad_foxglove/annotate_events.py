@@ -95,7 +95,7 @@ def save_event_images(output_dir, images, ts, event_ts, goals):
     for event in zip(event_ts, goals):
         e_ts, goal = event
         e_ts = datetime.fromisoformat(e_ts).timestamp()
-        idx = np.searchsorted(ts, e_ts) - 1
+        idx = np.searchsorted(ts, e_ts)
         plt.imsave(f"{output_dir}/{goal}.png", images[idx])
 
 
