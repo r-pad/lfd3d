@@ -567,6 +567,7 @@ class HOI4DDataModule(BaseDataModule):
         self.stage = stage
 
         self.train_dataset = HOI4DDataset(self.root, self.dataset_cfg, "train")
+        self.val_dataset = HOI4DDataset(self.root, self.dataset_cfg, "val")
         if self.train_dataset.cache_dir:
             self.train_dataset.cache(
                 td.cachers.Pickle(Path(self.train_dataset.cache_dir))
@@ -574,5 +575,4 @@ class HOI4DDataModule(BaseDataModule):
             self.val_dataset.cache(
                 td.cachers.Pickle(Path(self.train_dataset.cache_dir) / "val")
             )
-        self.val_dataset = HOI4DDataset(self.root, self.dataset_cfg, "val")
         self.test_dataset = HOI4DDataset(self.root, self.dataset_cfg, "test")

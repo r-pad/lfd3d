@@ -201,7 +201,7 @@ def get_droid_items(droid_root_dir):
             continue
 
         video_clip = VideoFileClip(f"{vid}/video.mp4")
-        duration = video_clip.duration
+        duration, fps = video_clip.duration, video_clip.fps
 
         timestamps = [i["timestamp"] for i in subgoals]
         timestamps_sec = [
@@ -219,14 +219,16 @@ def get_droid_items(droid_root_dir):
         # Input to the model is when the goal *starts* and the json
         # describes when the goal *ends*.
         timestamps_sec = [0] + timestamps_sec[:-1]
+        last_frame_idx = int(last_timestamp * fps)
 
         # save image for last frame separately, we only need the image, not features
-        img_path = f"{vid}/{len(subgoals)}_{last_timestamp}.png"
+        img_path = f"{vid}/{len(subgoals)}_{last_frame_idx}.png"
         Image.fromarray(last_frame).save(img_path)
 
         for i, subgoal in enumerate(subgoals):
             save_name = f"{base_save_dir}/{dir_name}/{i}_compressed.npz"
-            img_path = f"{vid}/{i}_{timestamps_sec[i]}.png"
+            frame_idx = int(timestamps_sec[i] * fps)
+            img_path = f"{vid}/{i}_{frame_idx}.png"
             caption = subgoal["subgoal"]
 
             # Save image for DINOv2 embeddings

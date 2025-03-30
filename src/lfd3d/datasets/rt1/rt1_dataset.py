@@ -288,6 +288,7 @@ class RT1DataModule(BaseDataModule):
         self.stage = stage
 
         self.train_dataset = RT1Dataset(self.root, self.dataset_cfg, "train")
+        self.val_dataset = RT1Dataset(self.root, self.dataset_cfg, "val")
         if self.train_dataset.cache_dir:
             self.train_dataset.cache(
                 td.cachers.Pickle(Path(self.train_dataset.cache_dir))
@@ -295,5 +296,4 @@ class RT1DataModule(BaseDataModule):
             self.val_dataset.cache(
                 td.cachers.Pickle(Path(self.train_dataset.cache_dir) / "val")
             )
-        self.val_dataset = RT1Dataset(self.root, self.dataset_cfg, "val")
         self.test_dataset = RT1Dataset(self.root, self.dataset_cfg, "test")
