@@ -107,9 +107,16 @@ class SynthBlockDataset(data.Dataset):
 
 
 class SynthBlockDataModule(BaseDataModule):
+    def __init__(self, batch_size, val_batch_size, num_workers, dataset_cfg):
+        super().__init__(batch_size, val_batch_size, num_workers, dataset_cfg)
+        self.val_tags = ["block"]
+
     def setup(self, stage: str = "fit"):
         self.stage = stage
 
         self.train_dataset = SynthBlockDataset(self.root, self.dataset_cfg, "train")
-        self.val_dataset = SynthBlockDataset(self.root, self.dataset_cfg, "val")
+        for tag in self.val_tags:
+            self.val_datasets[tag] = SynthBlockDataset(
+                self.root, self.dataset_cfg, "val"
+            )
         self.test_dataset = SynthBlockDataset(self.root, self.dataset_cfg, "test")

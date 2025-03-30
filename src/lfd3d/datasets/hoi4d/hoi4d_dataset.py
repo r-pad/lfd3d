@@ -563,15 +563,25 @@ class HOI4DDataset(td.Dataset):
 
 
 class HOI4DDataModule(BaseDataModule):
+    def __init__(self, batch_size, val_batch_size, num_workers, dataset_cfg):
+        super().__init__(batch_size, val_batch_size, num_workers, dataset_cfg)
+        self.val_tags = ["human"]
+
     def setup(self, stage: str = "fit"):
         self.stage = stage
+        self.val_datasets = {}
 
         self.train_dataset = HOI4DDataset(self.root, self.dataset_cfg, "train")
-        self.val_dataset = HOI4DDataset(self.root, self.dataset_cfg, "val")
+        for tag in self.val_tags:
+            self.val_datasets[tag] = HOI4DDataset(self.root, self.dataset_cfg, "val")
         if self.train_dataset.cache_dir:
             self.train_dataset.cache(
                 td.cachers.Pickle(Path(self.train_dataset.cache_dir))
             )
+            for tag in self.val_tags:
+                self.val_datasets[tag].cache(
+                    td.cachers.Pickle(Path(self.train_dataset.cache_dir) / f"val_{tag}")
+                )
             self.val_dataset.cache(
                 td.cachers.Pickle(Path(self.train_dataset.cache_dir) / "val")
             )

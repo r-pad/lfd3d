@@ -61,18 +61,20 @@ class BaseDataModule(pl.LightningDataModule):
         )
 
     def val_dataloader(self):
-        if not hasattr(self, "val_dataset"):
+        if not hasattr(self, "val_datasets"):
             raise AttributeError(
-                "val_dataset has not been set. Make sure to call setup() first."
+                "val_datasets has not been set. Make sure to call setup() first."
             )
-        val_dataloader = data.DataLoader(
-            self.val_dataset,
-            batch_size=self.val_batch_size,
-            shuffle=False,
-            num_workers=self.num_workers,
-            collate_fn=collate_pcd_fn,
-        )
-        return val_dataloader
+        return {
+            tag: data.DataLoader(
+                dataset,
+                batch_size=self.val_batch_size,
+                shuffle=False,
+                num_workers=self.num_workers,
+                collate_fn=collate_pcd_fn,
+            )
+            for tag, dataset in self.val_datasets.items()
+        }
 
     def test_dataloader(self):
         if not hasattr(self, "test_dataset"):
