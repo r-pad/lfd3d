@@ -13,11 +13,16 @@ from lfd3d.datasets.rt1.rt1_dataset import RT1Dataset
 
 
 class MultiDatasetDataModule(BaseDataModule):
+    def __init__(self, batch_size, val_batch_size, num_workers, dataset_cfg):
+        super().__init__(batch_size, val_batch_size, num_workers, dataset_cfg)
+        self.val_tags = ["all"]
+
     def setup(self, stage: str = "fit"):
         self.stage = stage
+        self.val_datasets = {}
 
         name_to_dataset_mapping = {"rt1": RT1Dataset, "hoi4d": HOI4DDataset}
-        self.train_datasets, self.val_datasets, self.test_datasets = [], [], []
+        self.train_datasets_, self.val_datasets_, self.test_datasets_ = [], [], []
 
         for key, cfg in self.dataset_cfg.datasets.items():
             dataset_class = name_to_dataset_mapping[key]
@@ -27,13 +32,13 @@ class MultiDatasetDataModule(BaseDataModule):
             if train_data.cache_dir:
                 train_data.cache(td.cachers.Pickle(Path(train_data.cache_dir)))
                 val_data.cache(td.cachers.Pickle(Path(train_data.cache_dir) / "val"))
-            self.train_datasets.append(train_data)
-            self.val_datasets.append(val_data)
-            self.test_datasets.append(dataset_class(cfg.data_dir, cfg, "test"))
+            self.train_datasets_.append(train_data)
+            self.val_datasets_.append(val_data)
+            self.test_datasets_.append(dataset_class(cfg.data_dir, cfg, "test"))
 
-        self.train_dataset = data.ConcatDataset(self.train_datasets)
-        self.val_dataset = data.ConcatDataset(self.val_datasets)
-        self.test_dataset = data.ConcatDataset(self.test_datasets)
+        self.train_dataset = data.ConcatDataset(self.train_datasets_)
+        self.val_datasets[self.val_tags[0]] = data.ConcatDataset(self.val_datasets_)
+        self.test_dataset = data.ConcatDataset(self.test_datasets_)
 
         # For training with multiple datasets, we need a custom DistibutedSampler
         # and a custom BatchSampler. This is because the datasets items may have different
@@ -48,9 +53,9 @@ class MultiDatasetDataModule(BaseDataModule):
         # Perhaps this is a little over-engineered ....
 
         # get the indices of elements in each dataset
-        train_dataset_lengths = [0] + [len(i) for i in self.train_datasets]
-        val_dataset_lengths = [0] + [len(i) for i in self.val_datasets]
-        test_dataset_lengths = [0] + [len(i) for i in self.test_datasets]
+        train_dataset_lengths = [0] + [len(i) for i in self.train_datasets_]
+        val_dataset_lengths = [0] + [len(i) for i in self.val_datasets_]
+        test_dataset_lengths = [0] + [len(i) for i in self.test_datasets_]
         train_dataset_indices, val_dataset_indices, test_dataset_indices = [], [], []
 
         for i in range(len(train_dataset_lengths) - 1):

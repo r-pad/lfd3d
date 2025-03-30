@@ -34,6 +34,8 @@ dependencies = [
   "trimesh",
   "spconv-cu118", # CUDA 11.8
   "google-genai",
+  "moviepy == 1.0.3",
+  "transformers == 4.45.2",
 ]
 
 [build-system]

@@ -1,4 +1,5 @@
 import random
+from collections import defaultdict
 from typing import Dict, List
 
 import cv2
@@ -144,7 +145,7 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         self.model_cfg = cfg.model
         self.prediction_type = self.model_cfg.type  # flow or point
         self.mode = cfg.mode  # train or eval
-        self.val_outputs: List[Dict] = []
+        self.val_outputs: defaultdict[str, List[Dict]] = defaultdict(list)
         self.train_outputs: List[Dict] = []
         self.predict_outputs: List[Dict] = []
 
@@ -475,10 +476,11 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
             0, len(self.trainer.val_dataloaders) - 1
         )
 
-    def validation_step(self, batch, batch_idx):
+    def validation_step(self, batch, batch_idx, dataloader_idx=0):
         """
         Validation step for the module. Logs validation metrics and visualizations to wandb.
         """
+        val_tag = self.trainer.datamodule.val_tags[dataloader_idx]
         self.eval()
         with torch.no_grad():
             pred_dict = self.predict(batch)
@@ -496,28 +498,43 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
             pcd_std,
             padding_mask,
         )
-        self.val_outputs.append(pred_dict)
+        self.val_outputs[val_tag].append(pred_dict)
 
         ####################################################
         # logging visualizations
         ####################################################
         if batch_idx == self.random_val_viz_idx and self.trainer.is_global_zero:
-            self.log_viz_to_wandb(batch, pred_dict, "val")
+            self.log_viz_to_wandb(batch, pred_dict, f"val_{val_tag}")
         return pred_dict
 
     def on_validation_epoch_end(self):
-        rmse = torch.stack([x["rmse"].mean() for x in self.val_outputs]).mean()
-        chamfer_dist = torch.stack(
-            [x["chamfer_dist"].mean() for x in self.val_outputs]
+        log_dict = {}
+        for val_tag in self.trainer.datamodule.val_tags:
+            val_outputs = self.val_outputs[val_tag]
+            rmse = torch.stack([x["rmse"].mean() for x in val_outputs]).mean()
+            chamfer_dist = torch.stack(
+                [x["chamfer_dist"].mean() for x in val_outputs]
+            ).mean()
+
+            log_dict[f"val_{val_tag}/rmse"] = rmse
+            log_dict[f"val_{val_tag}/chamfer_dist"] = chamfer_dist
+
+        all_rmse = torch.cat(
+            [
+                torch.stack([x["rmse"].mean() for x in self.val_outputs[tag]])
+                for tag in self.trainer.datamodule.val_tags
+            ]
         ).mean()
-        ####################################################
-        # logging validation metrics
-        ####################################################
+        all_chamfer_dist = torch.cat(
+            [
+                torch.stack([x["chamfer_dist"].mean() for x in self.val_outputs[tag]])
+                for tag in self.trainer.datamodule.val_tags
+            ]
+        ).mean()
+        log_dict["val/rmse"] = all_rmse
+        log_dict["val/chamfer_dist"] = all_chamfer_dist
         self.log_dict(
-            {
-                f"val/rmse": rmse,
-                f"val/chamfer_dist": chamfer_dist,
-            },
+            log_dict,
             add_dataloader_idx=False,
             sync_dist=True,
         )

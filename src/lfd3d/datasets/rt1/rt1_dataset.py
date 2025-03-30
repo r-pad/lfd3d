@@ -284,16 +284,22 @@ class RT1Dataset(td.Dataset):
 
 
 class RT1DataModule(BaseDataModule):
+    def __init__(self, batch_size, val_batch_size, num_workers, dataset_cfg):
+        super().__init__(batch_size, val_batch_size, num_workers, dataset_cfg)
+        self.val_tags = ["robot"]
+
     def setup(self, stage: str = "fit"):
         self.stage = stage
 
         self.train_dataset = RT1Dataset(self.root, self.dataset_cfg, "train")
+        for tag in self.val_tags:
+            self.val_datasets[tag] = RT1Dataset(self.root, self.dataset_cfg, "val")
         if self.train_dataset.cache_dir:
             self.train_dataset.cache(
                 td.cachers.Pickle(Path(self.train_dataset.cache_dir))
             )
-            self.val_dataset.cache(
-                td.cachers.Pickle(Path(self.train_dataset.cache_dir) / "val")
-            )
-        self.val_dataset = RT1Dataset(self.root, self.dataset_cfg, "val")
+            for tag in self.val_tags:
+                self.val_datasets[tag].cache(
+                    td.cachers.Pickle(Path(self.train_dataset.cache_dir) / f"val_{tag}")
+                )
         self.test_dataset = RT1Dataset(self.root, self.dataset_cfg, "test")
