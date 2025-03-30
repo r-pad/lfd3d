@@ -34,6 +34,10 @@ class DroidDataset(td.Dataset):
         with open(f"{self.current_dir}/idx_to_fname_mapping.json") as f:
             self.idx_to_fname_mapping = json.load(f)
 
+        # TEMP: Get rid of files we don't have data for yet.
+        with open(f"{self.current_dir}/missing_fnames.json") as f:
+            self.missing_fnames = json.load(f)
+
         # Voxel size for downsampling
         self.voxel_size = 0.03
         self.captions = {}
@@ -96,9 +100,8 @@ class DroidDataset(td.Dataset):
         """
         Load the filenames corresponding to each split - [train, val, test]
         """
-        with open(f"{self.current_dir}/debug.txt", "r") as f:
-            split_idxs = f.readlines()
-        split_idxs = [int(i) for i in split_idxs]
+        with open(f"{self.current_dir}/{split}.json", "r") as f:
+            split_idxs = json.load(f)
         return split_idxs
 
     def expand_all_events(self, droid_index):
@@ -119,11 +122,15 @@ class DroidDataset(td.Dataset):
         """
         expanded_droid_index = []
         for idx in droid_index:
-            if not os.path.exists(f"{self.event_dir}/{idx}"):
-                continue
-
             with open(f"{self.event_dir}/{idx}/subgoal.json") as f:
                 subgoals = json.load(f)
+
+            fname = self.idx_to_fname_mapping[idx]
+
+            # TEMP HACK
+            if fname in self.missing_fnames:
+                print(f"Missing disparity for {idx}")
+                continue
 
             expanded_event_idx = [(idx, i) for i in range(len(subgoals))]
             expanded_event_caption = {
