@@ -281,8 +281,9 @@ class DroidDataset(td.Dataset):
         start2end = torch.eye(4)  # Static camera in DROID
         fname = self.idx_to_fname_mapping[int(index)]
 
+        # Note the use of K, not K_ for disparity -> depth conversion
         rgbs, depths, event_start_idx, event_end_idx = self.load_rgbd(
-            index, subgoal_idx, K_, baseline
+            index, subgoal_idx, K, baseline
         )
 
         start_tracks, end_tracks = self.load_gripper_pcd(
