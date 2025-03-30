@@ -35,7 +35,7 @@ class DroidDataset(td.Dataset):
             self.idx_to_fname_mapping = json.load(f)
 
         # TEMP: Get rid of files we don't have data for yet.
-        with open(f"{self.current_dir}/missing_fnames.json") as f:
+        with open(f"{self.current_dir}/missing_names.json") as f:
             self.missing_fnames = json.load(f)
 
         # Voxel size for downsampling
