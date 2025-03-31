@@ -215,7 +215,9 @@ class DroidDataset(td.Dataset):
         Load RGB/text features generated with DINOv2 and SIGLIP
         """
         features = np.load(f"{self.feat_dir}/{droid_idx}/{event_idx}_compressed.npz")
-        rgb_embed, text_embed = features["rgb_embed"], features["text_embed"]
+        rgb_embed, text_embed = features["rgb_embed"], features["text_embed"].astype(
+            np.float32
+        )
 
         upscale_by = 4
         rgb_embed = rgb_embed.transpose(2, 0, 1)[None].astype(np.float32)
