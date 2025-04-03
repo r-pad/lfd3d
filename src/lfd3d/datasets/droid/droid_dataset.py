@@ -34,10 +34,6 @@ class DroidDataset(td.Dataset):
         with open(f"{self.current_dir}/idx_to_fname_mapping.json") as f:
             self.idx_to_fname_mapping = json.load(f)
 
-        # TEMP: Get rid of files we don't have data for yet.
-        with open(f"{self.current_dir}/missing_names.json") as f:
-            self.missing_fnames = json.load(f)
-
         # Voxel size for downsampling
         self.voxel_size = 0.03
         self.captions = {}
@@ -126,12 +122,6 @@ class DroidDataset(td.Dataset):
                 subgoals = json.load(f)
 
             fname = self.idx_to_fname_mapping[idx]
-
-            # TEMP HACK
-            if fname in self.missing_fnames:
-                print(f"Missing disparity for {idx}")
-                continue
-
             expanded_event_idx = [(idx, i) for i in range(len(subgoals))]
             expanded_event_caption = {
                 (idx, i): subgoal for i, subgoal in enumerate(subgoals)
