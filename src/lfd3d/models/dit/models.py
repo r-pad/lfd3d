@@ -14,11 +14,10 @@ from typing import Optional
 
 import numpy as np
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
-from flash_attn import flash_attn_kvpacked_func, flash_attn_qkvpacked_func
 from timm.layers import use_fused_attn
 from timm.models.vision_transformer import Mlp, PatchEmbed
+from torch import nn
 from torch.jit import Final
 
 from lfd3d.models.dit.relative_encoding import (
@@ -128,7 +127,6 @@ class Attention(nn.Module):
     """
     Attention layer adapted from
     https://github.com/huggingface/pytorch-image-models/blob/main/timm/models/vision_transformer.py
-    Modified to enable flash attention.
     """
 
     fused_attn: Final[bool]
@@ -139,7 +137,6 @@ class Attention(nn.Module):
         num_heads: int = 8,
         qkv_bias: bool = False,
         qk_norm: bool = False,
-        enable_flash: bool = False,
         attn_drop: float = 0.0,
         proj_drop: float = 0.0,
         norm_layer: nn.Module = nn.LayerNorm,
@@ -157,36 +154,27 @@ class Attention(nn.Module):
         self.attn_drop = nn.Dropout(attn_drop)
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
-        self.enable_flash = enable_flash
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         B, N, C = x.shape
         qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, self.head_dim)
-        if self.enable_flash:
-            # Skipping q_norm, k_norm to avoid unpacking qkv tensor
-            x = flash_attn_qkvpacked_func(
-                qkv,
-                dropout_p=self.attn_drop.p if self.training else 0.0,
-                deterministic=True,
-            )
-        else:
-            qkv = qkv.permute(2, 0, 3, 1, 4)
-            q, k, v = qkv.unbind(0)
-            q, k = self.q_norm(q), self.k_norm(k)
+        qkv = qkv.permute(2, 0, 3, 1, 4)
+        q, k, v = qkv.unbind(0)
+        q, k = self.q_norm(q), self.k_norm(k)
 
-            if self.fused_attn:
-                x = F.scaled_dot_product_attention(
-                    q,
-                    k,
-                    v,
-                    dropout_p=self.attn_drop.p if self.training else 0.0,
-                ).transpose(1, 2)
-            else:
-                q = q * self.scale
-                attn = q @ k.transpose(-2, -1)
-                attn = attn.softmax(dim=-1)
-                attn = self.attn_drop(attn)
-                x = (attn @ v).transpose(1, 2)
+        if self.fused_attn:
+            x = F.scaled_dot_product_attention(
+                q,
+                k,
+                v,
+                dropout_p=self.attn_drop.p if self.training else 0.0,
+            ).transpose(1, 2)
+        else:
+            q = q * self.scale
+            attn = q @ k.transpose(-2, -1)
+            attn = attn.softmax(dim=-1)
+            attn = self.attn_drop(attn)
+            x = (attn @ v).transpose(1, 2)
 
         x = x.reshape(B, N, C)
         x = self.proj(x)
@@ -198,8 +186,9 @@ class CrossAttention(nn.Module):
     """
     Cross attention layer adapted from
     https://github.com/pprp/timm/blob/e9aac412de82310e6905992e802b1ee4dc52b5d1/timm/models/crossvit.py#L132
-    Modified to enable flash attention
     """
+
+    fused_attn: Final[bool]
 
     def __init__(
         self,
@@ -207,7 +196,6 @@ class CrossAttention(nn.Module):
         dim_y: int,
         num_heads: int = 4,
         qkv_bias: bool = False,
-        enable_flash: bool = False,
         attn_drop: float = 0.0,
         proj_drop: float = 0.0,
     ):
@@ -216,6 +204,7 @@ class CrossAttention(nn.Module):
         assert dim_x % num_heads == 0, "dim x must be divisible by num_heads"
         head_dim = dim_x // num_heads
         self.scale = head_dim**-0.5
+        self.fused_attn = use_fused_attn()
 
         self.wq = nn.Linear(dim_x, dim_x, bias=qkv_bias)
         self.wk = nn.Linear(dim_y, dim_x, bias=qkv_bias)
@@ -223,33 +212,43 @@ class CrossAttention(nn.Module):
         self.proj = nn.Linear(dim_x, dim_x)
         self.attn_drop = nn.Dropout(attn_drop)
         self.proj_drop = nn.Dropout(proj_drop)
-        self.enable_flash = enable_flash
 
     def forward(self, x, y):
         B, N, Cx = x.shape
         _, Ny, Cy = y.shape
-        q = self.wq(x).reshape(B, N, self.num_heads, Cx // self.num_heads)
-        k = self.wk(y).reshape(B, Ny, self.num_heads, Cx // self.num_heads)
-        v = self.wv(y).reshape(B, Ny, self.num_heads, Cx // self.num_heads)
+        q = (
+            self.wq(x)
+            .reshape(B, N, self.num_heads, Cx // self.num_heads)
+            .transpose(1, 2)
+        )
+        k = (
+            self.wk(y)
+            .reshape(B, Ny, self.num_heads, Cx // self.num_heads)
+            .transpose(1, 2)
+        )
+        v = (
+            self.wv(y)
+            .reshape(B, Ny, self.num_heads, Cx // self.num_heads)
+            .transpose(1, 2)
+        )
 
-        if self.enable_flash:
-            # Pack K, V for FlashAttention
-            kv = torch.stack([k, v], dim=2)  # Shape (B, seq_len, 2, nheads, head_dim)
-            attn_output = flash_attn_kvpacked_func(
-                q,
-                kv,
-                dropout_p=self.attn_drop.p if self.training else 0.0,
-                deterministic=True,
+        if self.fused_attn:
+            x = (
+                F.scaled_dot_product_attention(
+                    q,
+                    k,
+                    v,
+                    dropout_p=self.attn_drop.p if self.training else 0.0,
+                )
+                .transpose(1, 2)
+                .reshape(B, N, Cx)
             )
         else:
-            # Traditional attention calculation
-            q, k, v = q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)
-            attn = (q @ k.transpose(-2, -1)) * self.scale
-            attn = attn.softmax(dim=-1)
+            q = q * self.scale
+            attn = (q @ k.transpose(-2, -1)).softmax(dim=-1)
             attn = self.attn_drop(attn)
-            attn_output = (attn @ v).transpose(1, 2)
+            x = (attn @ v).transpose(1, 2).reshape(B, N, Cx)
 
-        x = attn_output.reshape(B, N, Cx)
         x = self.proj(x)
         x = self.proj_drop(x)
         return x
@@ -801,7 +800,7 @@ class LinearRegressionModel(nn.Module):
         return x
 
 
-### CREATING NEW DiT (unconditional) FOR POINT CLOUD INPUTS ###
+# CREATING NEW DiT (unconditional) FOR POINT CLOUD INPUTS ###
 class DiT_PointCloud_Unc(nn.Module):
     """
     Diffusion model with a Transformer backbone - point cloud, unconditional.
@@ -1140,9 +1139,6 @@ class DiT_PointCloud_Cross(nn.Module):
         # a representation of the current location of the action pcd
         self.use_p_prime = self.model_cfg.use_p_prime
 
-        # Enable Flash Attention
-        self.enable_flash = self.model_cfg.enable_flash
-
         # DiT blocks
         block_fn = DiTRelativeCrossBlock if self.model_cfg.rotary else DiTCrossBlock
         self.blocks = nn.ModuleList(
@@ -1151,7 +1147,6 @@ class DiT_PointCloud_Cross(nn.Module):
                     hidden_size,
                     num_heads,
                     mlp_ratio=mlp_ratio,
-                    enable_flash=self.enable_flash,
                 )
                 for _ in range(depth)
             ]

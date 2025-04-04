@@ -15,36 +15,36 @@ from tqdm import tqdm
 from lfd3d.utils.data_utils import combine_meshes
 
 
-def align_timestamps(rgb_ts, joint_positions_ts):
+def align_timestamps(rgb_ts, other_ts):
     """
     Aligns timestamps between two arrays by finding closest matches.
 
     Args:
         rgb_ts: Array of RGB timestamps
-        joint_positions_ts: Array of joint position timestamps
+        other_ts: Array of other timestamps
 
     Returns:
-        Tuple of (aligned_rgb_indices, aligned_joint_indices, time_differences)
+        Tuple of (aligned_rgb_indices, other_indices, time_differences)
     """
     aligned_pairs = []
     rgb_indices = []
-    joint_indices = []
+    other_indices = []
     time_diffs = []
 
-    # For each RGB timestamp, find the closest joint position timestamp
+    # For each RGB timestamp, find the closest other timestamp
     for i, rgb_t in enumerate(rgb_ts):
         # Calculate absolute differences
-        diffs = np.abs(joint_positions_ts - rgb_t)
+        diffs = np.abs(other_ts - rgb_t)
         # Find index of minimum difference
         closest_idx = np.argmin(diffs)
         # Get the minimum time difference
         min_diff = diffs[closest_idx]
 
         rgb_indices.append(i)
-        joint_indices.append(closest_idx)
+        other_indices.append(closest_idx)
         time_diffs.append(min_diff)
 
-    return np.array(rgb_indices), np.array(joint_indices), np.array(time_diffs)
+    return np.array(rgb_indices), np.array(other_indices), np.array(time_diffs)
 
 
 def setup_camera(model, cam_id, cam_to_world, width, height, K):
