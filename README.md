@@ -2,31 +2,13 @@
 
 ## Installation
 
+This project uses [pixi](https://pixi.sh/latest/) for dependency management.
 
-```bash
-
-conda create -n lfd3d python=3.10
-pip install -r requirements.txt
-pip install -e ".[develop]"
-
+``` bash
+pixi install
+pixi run install-deps
+pixi shell
 ```
-
-Install `flash-attn` separately:
-
-```bash
-
-pip install flash-attn --no-build-isolation
-
-```
-
-Then we install pre-commit hooks:
-
-```bash
-
-pre-commit install
-
-```
-
 
 Download the [MANO models](https://mano.is.tue.mpg.de/) and place them in `mano/`.
 
