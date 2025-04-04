@@ -3,7 +3,7 @@ name = "lfd3d"
 version = "0.1.0"
 description = "A Python Package Template"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.9"
 license = { file = "LICENSE.txt" }
 authors = [{ email = "baeisner@andrew.cmu.edu", name = "Ben Eisner" }, { email = "sskrishn@andrew.cmu.edu", name = "Sriram Krishna" }]
 dependencies = [
@@ -25,6 +25,8 @@ dependencies = [
     "trimesh",
     "tensorflow-datasets",
     "pip>=25.0.1,<26",
+    "zarr>=2.12,<3",
+    "lightning-utilities==0.11.7",
 ]
 
 [project.optional-dependencies]
@@ -38,7 +40,7 @@ notebooks = ["jupyter"]
 docs = ["mkdocs-material", "mkdocstrings[python]"]
 
 [build-system]
-requires = ["setuptools >= 62.3.2", "setuptools-scm", "wheel"]
+requires = ["setuptools", "setuptools-scm", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
@@ -54,11 +56,12 @@ platforms = ["linux-64"]
 
 # Conda dependencies
 [tool.pixi.dependencies]
-python = "3.10.*"
+python = "3.9.*"
 cuda-toolkit = "11.8.*"
 gcc = "11.*"
 gxx = "11.*"
-
+protobuf = "==3.20.3"
+setuptools = "==65.5.0"
 
 # PyPI-specific dependencies
 [tool.pixi.pypi-dependencies]
@@ -66,7 +69,7 @@ lfd3d = { path = ".", editable = true }
 torch = "==2.0.1"
 torchvision = "==0.15.2"
 timm = "==0.9.12"
-tensorflow-cpu = "==2.8.0"
+tensorflow-cpu = "==2.7.0"
 fvcore = "==0.1.5.post20221221"
 iopath = "==0.1.9"
 opencv-python = "*"
@@ -78,23 +81,21 @@ torch_geometric = "*"
 
 # Git dependencies as tasks
 [tool.pixi.tasks]
-install-rpad-pyg = "pip install git+https://github.com/r-pad/pyg_libs.git"
-install-rpad-viz = "pip install git+https://github.com/r-pad/visualize_3d.git"
-install-torchdatasets = "pip install git+https://github.com/szymonmaszke/torchdatasets.git"
-install-segment-anything = "pip install git+https://github.com/facebookresearch/segment-anything.git"
-install-chumpy = "pip install git+https://github.com/hassony2/chumpy.git"
-install-manopth = "pip install git+https://github.com/hassony2/manopth.git"
 install-pyg = """
 pip install pyg_lib torch_scatter torch_sparse torch_cluster torch_spline_conv -f https://data.pyg.org/whl/torch-2.0.0+cu118.html
 """
 install-pytorch3d = """
-pip install --no-index --no-cache-dir pytorch3d -f https://dl.fbaipublicfiles.com/pytorch3d/packaging/wheels/py310_cu118_pyt201/download.html
+pip install git+https://github.com/facebookresearch/pytorch3d.git@stable
 """
+install-rpad-libs = "pip install git+https://github.com/r-pad/pyg_libs.git git+https://github.com/r-pad/visualize_3d.git"
+install-torchdatasets = "pip install git+https://github.com/szymonmaszke/torchdatasets.git"
+install-segment-anything = "pip install git+https://github.com/facebookresearch/segment-anything.git"
+install-mano = "pip install git+https://github.com/hassony2/chumpy.git git+https://github.com/hassony2/manopth.git"
 setup-pre-commit = "pre-commit install"
 install-flash-attn = """
 pip install flash-attn==2.7.2.post1 --no-build-isolation
 """
-install-deps = { depends-on = ["install-rpad-pyg", "install-rpad-viz", "install-torchdatasets", "install-segment-anything", "install-chumpy", "install-manopth", "install-pyg", "install-pytorch3d", "setup-pre-commit", "install-flash-attn"] }
+install-deps = { depends-on = ["install-pyg", "install-pytorch3d", "install-rpad-libs", "install-torchdatasets", "install-segment-anything", "install-mano", "setup-pre-commit", "install-flash-attn"] }
 
 # Environments
 [tool.pixi.environments]
@@ -102,7 +103,7 @@ default = { features = ["develop", "notebooks", "docs"], solve-group = "default"
 
 [tool.ruff]
 # Enable Pyflakes ('F'), pycodestyle ('E'), isort ('I')
-target-version = "py310"
+target-version = "py39"
 line-length = 88  # Same as Black
 select = ["E", "F", "I", "W", "N", "UP", "B", "A", "C4", "PL"]
 ignore = []
@@ -137,7 +138,7 @@ skip-magic-trailing-comma = false
 line-ending = "auto"
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.9"
 warn_return_any = true
 warn_unused_configs = true
 mypy_path = "src"

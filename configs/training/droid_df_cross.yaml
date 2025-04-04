@@ -9,4 +9,4 @@ grad_clip_norm: 1.0
 num_training_steps: None # Set by the training loop.
 
 check_val_every_n_epochs: 25
-additional_train_logging_period: 100 # Global step period to log additional training metrics
+additional_train_logging_period: 1000 # Global step period to log additional training metrics
