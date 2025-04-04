@@ -1,8 +1,10 @@
 # Use the official Ubuntu 20.04 image as the base
-FROM nvidia/cuda:11.8.0-devel-ubuntu20.04
+FROM nvidia/cuda:12.4.0-devel-ubuntu20.04
 
 # Set environment variables to avoid interactive prompts during installation
 ENV DEBIAN_FRONTEND=noninteractive
+ENV CODING_ROOT="/opt/rpad"
+ENV PATH="$PATH:/root/.pixi/bin"
 
 # Install necessary dependencies
 RUN apt-get update && \
@@ -13,45 +15,23 @@ RUN apt-get update && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# Install pyenv
-ENV CODING_ROOT="/opt/rpad"
-
-WORKDIR $CODING_ROOT
-RUN git clone --depth=1 https://github.com/pyenv/pyenv.git .pyenv
-
-ENV PYENV_ROOT="$CODING_ROOT/.pyenv"
-ENV PATH="$PYENV_ROOT/shims:$PYENV_ROOT/bin:$PATH"
-
-# Install Python 3.10 using pyenv
-RUN pyenv install 3.10.0 && pyenv global 3.10.0
-
-# Make the working directory the home directory
-RUN mkdir $CODING_ROOT/code
+# Create directories
+RUN mkdir -p $CODING_ROOT/code $CODING_ROOT/data $CODING_ROOT/logs
 WORKDIR $CODING_ROOT/code
 
-# Base requirements layer - these will be cached
-COPY ./requirements.txt $CODING_ROOT/code/requirements.txt
-RUN pip install -r requirements.txt
+# Install Pixi
+RUN curl -fsSL https://pixi.sh/install.sh | bash
 
-# Flash-attn layer - this will be cached unless requirements.txt changes
-RUN pip install flash-attn==2.7.2.post1 --no-build-isolation
-
-# Now copy your application code (which changes frequently)
+COPY ./pyproject.toml $CODING_ROOT/code/pyproject.toml
+COPY ./pixi.lock $CODING_ROOT/code/pixi.lock
 COPY ./src $CODING_ROOT/code/src
 COPY ./setup.py $CODING_ROOT/code/setup.py
-COPY ./pyproject.toml $CODING_ROOT/code/pyproject.toml
-
-# Install your app in dev mode - only this needs to rebuild when code changes
-RUN pip install -e .[develop]
-
-# Changes to the configs and scripts will not require a rebuild
 COPY ./configs $CODING_ROOT/code/configs
 COPY ./scripts $CODING_ROOT/code/scripts
 
-RUN git config --global --add safe.directory /root/code
+# Install dependencies using Pixi
+RUN pixi install && \
+    pixi run install-deps
 
-# Make a data and logs directory.
-RUN mkdir $CODING_ROOT/data $CODING_ROOT/logs
-
-# Set up the entry point
-CMD ["python", "-c", "import torch; print(torch.cuda.is_available())"]
+# Set the default command to test CUDA availability
+CMD ["pixi", "run", "test-cuda"]

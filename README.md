@@ -7,6 +7,7 @@ This project uses [pixi](https://pixi.sh/latest/) for dependency management.
 ``` bash
 pixi install
 pixi run install-deps
+pixi run setup-pre-commit
 pixi shell
 ```
 
@@ -105,10 +106,12 @@ To run the training script:
 docker run \
     -v </path/to/dataset>:/opt/rpad/data \
     -v $(pwd)/logs:/opt/rpad/logs \
+    -v $(pwd)/mano:/opt/rpad/code/mano \
     --gpus all \
+    --shm-size=8G \
     -e WANDB_API_KEY=$WANDB_API_KEY \
     -e WANDB_DOCKER_IMAGE=lfd3d \
-    $DOCKERHUB_USERNAME/lfd3d python scripts/train.py \
+    $DOCKERHUB_USERNAME/lfd3d pixi run python scripts/train.py \
         model=df_cross \
         dataset=<dataset-name> \
         dataset.data_dir=/opt/rpad/data

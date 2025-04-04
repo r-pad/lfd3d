@@ -2502,7 +2502,7 @@ packages:
 - pypi: .
   name: lfd3d
   version: 0.1.0
-  sha256: 5df4887e6dbba8af205e53c1947fa1be0d52a1f62d9ebf451986248b920cc7af
+  sha256: bc34c530418b7ff461e3165782e4f5aced311accf5606518d085020455f68b89
   requires_dist:
   - diffusers==0.26.3
   - gif

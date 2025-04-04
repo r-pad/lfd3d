@@ -92,8 +92,10 @@ install-rpad-libs = "pip install git+https://github.com/r-pad/pyg_libs.git git+h
 install-torchdatasets = "pip install git+https://github.com/sriramsk1999/torchdatasets.git"
 install-segment-anything = "pip install git+https://github.com/facebookresearch/segment-anything.git"
 install-mano = "pip install git+https://github.com/hassony2/chumpy.git git+https://github.com/hassony2/manopth.git"
+install-deps = { depends-on = ["install-open3d", "install-pyg", "install-pytorch3d", "install-rpad-libs", "install-torchdatasets", "install-segment-anything", "install-mano"] }
+
 setup-pre-commit = "pre-commit install"
-install-deps = { depends-on = ["install-open3d", "install-pyg", "install-pytorch3d", "install-rpad-libs", "install-torchdatasets", "install-segment-anything", "install-mano", "setup-pre-commit"] }
+test-cuda = "python -c 'import torch; print(torch.cuda.is_available())'"
 
 # Environments
 [tool.pixi.environments]

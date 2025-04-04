@@ -8,12 +8,11 @@ import open3d as o3d
 import torch
 import torch.nn.functional as F
 import torchdatasets as td
+from lfd3d.datasets.base_data import BaseDataModule
+from lfd3d.utils.data_utils import MANOInterface
 from PIL import Image
 from torchvision import transforms
 from tqdm import tqdm
-
-from lfd3d.datasets.base_data import BaseDataModule
-from lfd3d.utils.data_utils import MANOInterface
 
 
 class HOI4DDataset(td.Dataset):
@@ -29,7 +28,7 @@ class HOI4DDataset(td.Dataset):
 
         self.intrinsic_dict = self.load_intrinsics()
         current_dir = os.path.dirname(__file__)
-        with open(f"{current_dir}/hoi4d_videos.json", "r") as f:
+        with open(f"{current_dir}/hoi4d_videos.json") as f:
             self.data_files = json.load(f)
             self.data_files = [f"{self.dataset_dir}/{i}" for i in self.data_files]
         # Events where there is meaningful object motion
@@ -50,7 +49,7 @@ class HOI4DDataset(td.Dataset):
         if self.gt_source == "gflow_tracks":
             # Use tracks generated from General Flow's label_gen_event.py in sriramsk1999/general-flow
             with open(
-                f"{self.root}/../hoi4d_general_flow_event_traj/metadata.json", "r"
+                f"{self.root}/../hoi4d_general_flow_event_traj/metadata.json"
             ) as f:
                 self.event_metadata = json.load(f)["test"]
             self.event_metadata_dict = {
@@ -151,7 +150,7 @@ class HOI4DDataset(td.Dataset):
         placed *outside* the directory. The splits were generated using the code
         in the General Flow codebase
         """
-        with open(f"{self.dataset_dir}/../metadata.json", "r") as f:
+        with open(f"{self.dataset_dir}/../metadata.json") as f:
             all_splits = json.load(f)
         split_data = all_splits[split]
 
@@ -582,7 +581,4 @@ class HOI4DDataModule(BaseDataModule):
                 self.val_datasets[tag].cache(
                     td.cachers.Pickle(Path(self.train_dataset.cache_dir) / f"val_{tag}")
                 )
-            self.val_dataset.cache(
-                td.cachers.Pickle(Path(self.train_dataset.cache_dir) / "val")
-            )
         self.test_dataset = HOI4DDataset(self.root, self.dataset_cfg, "test")
