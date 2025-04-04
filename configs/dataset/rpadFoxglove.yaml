@@ -8,3 +8,4 @@ data_sources: # List of data sources
 
 train_size: null # (int, null) Length of the train dataset
 val_size: null # (int, null) Length of the validation dataset
+num_points: 4096 # points in pcd

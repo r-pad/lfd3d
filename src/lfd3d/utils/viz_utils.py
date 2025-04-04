@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
-import open3d as o3d
+from pytorch3d.ops import sample_farthest_points
+import torch
 
 
 def project_pcd_on_image(pcd, mask, image, K, color):
@@ -72,12 +73,12 @@ def get_img_and_track_pcd(
     colors = image.reshape(-1, 3)[valid_depth]
     image_pcd = np.concatenate([points, colors], axis=-1)
 
-    image_pcd_o3d = o3d.geometry.PointCloud()
-    image_pcd_o3d.points = o3d.utility.Vector3dVector(image_pcd[:, :3])
-    image_pcd_o3d.colors = o3d.utility.Vector3dVector(image_pcd[:, 3:])
-    image_pcd_o3d_downsample = image_pcd_o3d.voxel_down_sample(voxel_size=0.02)
-    image_pcd_pts = np.asarray(image_pcd_o3d_downsample.points)
-    image_pcd_colors = np.asarray(image_pcd_o3d_downsample.colors)
+    image_pcd_pt3d = torch.from_numpy(image_pcd[None])
+    image_pcd_downsample, image_points_idx = sample_farthest_points(image_pcd_pt3d, K=4096, random_start_point=False)
+    image_pcd = image_pcd_downsample.squeeze().numpy()
+
+    image_pcd_pts = image_pcd[:, :3]
+    image_pcd_colors = image_pcd[:, 3:]
 
     init_pcd_pts = init_pcd[mask]
     init_pcd_color = np.repeat(init_pcd_color[None, :], init_pcd_pts.shape[0], axis=0)
@@ -133,61 +134,3 @@ def get_action_anchor_pcd(
 
     viz_pcd = np.concatenate([transformed_pts_3d, viz_pcd_colors], axis=-1)
     return viz_pcd
-
-
-def create_point_cloud_frames(points_colors, n_frames=30, width=640, height=480):
-    """
-    Create frames of a rotating point cloud using headless rendering.
-
-    Args:
-        points_colors: Nx6 numpy array where first 3 columns are XYZ coordinates
-                      and last 3 columns are RGB values (0-255)
-        n_frames: Number of frames to generate
-        width: Width of output frames
-        height: Height of output frames
-
-    Returns:
-        numpy array of shape (n_frames, height, width, 3) with uint8 RGB values
-    """
-    # Create point cloud
-    pcd = o3d.geometry.PointCloud()
-    pcd.points = o3d.utility.Vector3dVector(points_colors[:, :3])
-    pcd.colors = o3d.utility.Vector3dVector(points_colors[:, 3:] / 255.0)
-
-    # Pre-allocate frames array
-    frames = np.empty((n_frames, height, width, 3), dtype=np.uint8)
-
-    # Create offscreen renderer
-    render = o3d.visualization.rendering.OffscreenRenderer(width, height)
-
-    # Create material with larger point size
-    mat = o3d.visualization.rendering.MaterialRecord()
-    mat.base_color = [1.0, 1.0, 1.0, 1.0]
-    mat.shader = "defaultUnlit"
-    mat.point_size = 5.0  # Increased point size
-
-    # Set up scene
-    render.scene.add_geometry("points", pcd, mat)
-    render.scene.set_background([0, 0, 0, 1])  # Set to black for contrast
-
-    # Set up camera positioning and orientation
-    bounds = pcd.get_axis_aligned_bounding_box()
-    center = bounds.get_center()
-    extent = np.linalg.norm(bounds.get_max_bound() - bounds.get_min_bound())
-
-    camera_distance = extent * 0.75
-    up = [0, -1, 0]
-
-    # Generate frames
-    angles = np.linspace(0, 2 * np.pi, n_frames)
-    for i, angle in enumerate(angles):
-        eye = center + camera_distance * np.array([np.sin(angle), 0, np.cos(angle)])
-
-        # Update camera to look at the center of the point cloud
-        render.scene.camera.look_at(center, eye, up)
-
-        # Render frame
-        img = render.render_to_image()
-        frames[i] = np.asarray(img)
-
-    return frames

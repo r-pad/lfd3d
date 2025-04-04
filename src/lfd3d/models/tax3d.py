@@ -20,7 +20,6 @@ from lfd3d.models.dit.models import (
     Rel3D_DiT_PointCloud_Unc_Cross,
 )
 from lfd3d.utils.viz_utils import (
-    create_point_cloud_frames,
     get_action_anchor_pcd,
     get_img_and_track_pcd,
     project_pcd_on_image,
@@ -375,12 +374,6 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
             f"{tag}/action_anchor_pcd": wandb.Object3D(action_anchor_pcd),
             "trainer/global_step": self.global_step,
         }
-
-        if log_pcd_video:
-            # Render video of point cloud
-            pcd_video = create_point_cloud_frames(viz_pcd)
-            pcd_video = np.transpose(pcd_video, (0, 3, 1, 2))
-            viz_dict[f"{tag}/pcd_video"] = wandb.Video(pcd_video, fps=6, format="webm")
 
         wandb.log(viz_dict)
         ###

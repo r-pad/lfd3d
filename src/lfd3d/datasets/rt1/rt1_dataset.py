@@ -4,10 +4,10 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-import open3d as o3d
 import torch
 import torch.nn.functional as F
 import torchdatasets as td
+from pytorch3d.ops import sample_farthest_points
 
 from lfd3d.datasets.base_data import BaseDataModule
 
@@ -31,8 +31,7 @@ class RT1Dataset(td.Dataset):
 
         # No camera intrinsics available, an arbitrary choice based on RT-1 resolution (256, 320)
         self.K = np.array([[257.0, 0, 160], [0, 257.0, 128], [0, 0, 1]])
-        # Voxel size for downsampling
-        self.voxel_size = 0.03
+        self.num_points = dataset_cfg.num_points
 
         self.rt1_index = self.load_split(split)
         self.rt1_index = self.expand_all_events(self.rt1_index)
@@ -186,19 +185,12 @@ class RT1Dataset(td.Dataset):
         points = points * z_flat
         points = points.T  # Shape: (N, 3)
 
-        scene_pcd_o3d = o3d.geometry.PointCloud()
-        scene_pcd_o3d.points = o3d.utility.Vector3dVector(points)
-        scene_pcd_o3d_downsample = scene_pcd_o3d.voxel_down_sample(
-            voxel_size=self.voxel_size
-        )
+        scene_pcd_pt3d = torch.from_numpy(points[None])
+        scene_pcd_downsample, scene_points_idx = sample_farthest_points(scene_pcd_pt3d, K=self.num_points, random_start_point=False)
+        scene_pcd = scene_pcd_downsample.squeeze().numpy()
 
-        scene_pcd = np.asarray(scene_pcd_o3d_downsample.points)
-        # Find closest indices in the original point cloud so we can index the features
-        downsampled_indices = [
-            np.argmin(np.linalg.norm(points - scene_pcd[i], axis=1))
-            for i in range(scene_pcd.shape[0])
-        ]
-        scene_feat_pcd = feat_flat[downsampled_indices]
+        # Get corresponding features at the indices
+        scene_feat_pcd = feat_flat[scene_points_idx.squeeze().numpy()]
         return scene_pcd, scene_feat_pcd
 
     def load_rgb_text_feat(self, event_idx, chunk_idx, height, width):

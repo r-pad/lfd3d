@@ -4,7 +4,6 @@ import pickle
 from pathlib import Path
 
 import numpy as np
-import open3d as o3d
 import torch
 import torch.nn.functional as F
 import torchdatasets as td
@@ -13,6 +12,7 @@ from lfd3d.utils.data_utils import MANOInterface
 from PIL import Image
 from torchvision import transforms
 from tqdm import tqdm
+from pytorch3d.ops import sample_farthest_points
 
 
 class HOI4DDataset(td.Dataset):
@@ -69,8 +69,7 @@ class HOI4DDataset(td.Dataset):
         self.data_files, self.filtered_tracks = self.filter_all_tracks(self.data_files)
 
         self.dataset_cfg = dataset_cfg
-        # Voxel size for downsampling
-        self.voxel_size = 0.03
+        self.num_points = dataset_cfg.num_points
 
         # Target shape of images (same as DINOv2)
         self.orig_shape = (1080, 1920)
@@ -161,10 +160,30 @@ class HOI4DDataset(td.Dataset):
         return split_data_fnames
 
     def load_camera_params(self, dir_name):
-        cam_trajectory = o3d.io.read_pinhole_camera_trajectory(
-            f"{dir_name}/3Dseg/output.log"
-        )
-        cam2world = np.array([i.extrinsic for i in cam_trajectory.parameters])
+        with open(f"{dir_name}/3Dseg/output.log", 'r') as f:
+            lines = f.readlines()
+
+        matrices = []
+        i = 0
+        while i < len(lines):
+            # Skip the first line (e.g., "0 0 1")
+            i += 1
+
+            # Read the next 4 lines for the matrix
+            if i + 4 <= len(lines):
+                matrix_data = []
+                for j in range(4):
+                    # Convert the line to float values
+                    row = list(map(float, lines[i + j].split()))
+                    matrix_data.append(row)
+
+                matrices.append(np.array(matrix_data))
+
+                # Move to the next block (skip 4 matrix lines + 1 header line)
+                i += 4
+            else:
+                break
+        cam2world = np.stack(matrices)
         cam_name = dir_name.split("/")[-7]
         K = self.intrinsic_dict[cam_name]
         return K, cam2world
@@ -404,23 +423,6 @@ class HOI4DDataset(td.Dataset):
         start_tracks = start_tracks[mask]
         end_tracks = end_tracks[mask]
 
-        # Remove statistical outliers
-        start_track_pcd = o3d.geometry.PointCloud()
-        start_mask = np.zeros(start_tracks.shape[0], dtype=bool)
-        start_track_pcd.points = o3d.utility.Vector3dVector(start_tracks)
-        _, inlier_indices = start_track_pcd.remove_statistical_outlier(
-            nb_neighbors=10, std_ratio=0.5
-        )
-        start_mask[inlier_indices] = True
-
-        end_track_pcd = o3d.geometry.PointCloud()
-        end_mask = np.zeros(end_tracks.shape[0], dtype=bool)
-        end_track_pcd.points = o3d.utility.Vector3dVector(end_tracks)
-        _, inlier_indices = end_track_pcd.remove_statistical_outlier(
-            nb_neighbors=10, std_ratio=0.5
-        )
-        end_mask[inlier_indices] = True
-
         mask = np.logical_and(start_mask, end_mask)
         start_tracks = start_tracks[mask]
         end_tracks = end_tracks[mask]
@@ -461,20 +463,12 @@ class HOI4DDataset(td.Dataset):
         points = points * z_flat
         points = points.T  # Shape: (N, 3)
 
-        scene_pcd_o3d = o3d.geometry.PointCloud()
-        scene_pcd_o3d.points = o3d.utility.Vector3dVector(points)
-        scene_pcd_o3d_downsample = scene_pcd_o3d.voxel_down_sample(
-            voxel_size=self.voxel_size
-        )
+        scene_pcd_pt3d = torch.from_numpy(points[None])
+        scene_pcd_downsample, scene_points_idx = sample_farthest_points(scene_pcd_pt3d, K=self.num_points, random_start_point=False)
+        scene_pcd = scene_pcd_downsample.squeeze().numpy()
 
-        scene_pcd = np.asarray(scene_pcd_o3d_downsample.points)
-
-        # Find closest indices in the original point cloud so we can index the features
-        downsampled_indices = [
-            np.argmin(np.linalg.norm(points - scene_pcd[i], axis=1))
-            for i in range(scene_pcd.shape[0])
-        ]
-        scene_feat_pcd = feat_flat[downsampled_indices]
+        # Get corresponding features at the indices
+        scene_feat_pcd = feat_flat[scene_points_idx.squeeze().numpy()]
         return scene_pcd, scene_feat_pcd
 
     def compose_caption(self, dir_name, event):

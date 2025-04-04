@@ -1,7 +1,6 @@
 import os
 
 import numpy as np
-import open3d as o3d
 import torch
 from hydra.core.hydra_config import HydraConfig
 from manopth.manolayer import ManoLayer
@@ -146,6 +145,8 @@ def combine_meshes(meshes):
     Returns:
         combined_mesh: A single Open3D triangle mesh
     """
+    import open3d as o3d
+
     # Initialize vertices and triangles lists
     vertices = []
     triangles = []
