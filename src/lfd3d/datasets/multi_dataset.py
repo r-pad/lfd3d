@@ -3,8 +3,8 @@ import random
 from pathlib import Path
 
 import torch
-import torch.utils.data as data
 import torchdatasets as td
+from torch.utils import data
 from torch.utils.data.distributed import DistributedSampler
 
 from lfd3d.datasets.base_data import BaseDataModule
@@ -20,6 +20,7 @@ class MultiDatasetDataModule(BaseDataModule):
     def setup(self, stage: str = "fit"):
         self.stage = stage
         self.val_datasets = {}
+        self.test_datasets = {}
 
         name_to_dataset_mapping = {"rt1": RT1Dataset, "hoi4d": HOI4DDataset}
         self.train_datasets_, self.val_datasets_, self.test_datasets_ = [], [], []
@@ -38,7 +39,7 @@ class MultiDatasetDataModule(BaseDataModule):
 
         self.train_dataset = data.ConcatDataset(self.train_datasets_)
         self.val_datasets[self.val_tags[0]] = data.ConcatDataset(self.val_datasets_)
-        self.test_dataset = data.ConcatDataset(self.test_datasets_)
+        self.test_datasets[self.val_tags[0]] = data.ConcatDataset(self.test_datasets_)
 
         # For training with multiple datasets, we need a custom DistibutedSampler
         # and a custom BatchSampler. This is because the datasets items may have different

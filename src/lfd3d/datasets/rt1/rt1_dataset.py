@@ -7,9 +7,8 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 import torchdatasets as td
-from pytorch3d.ops import sample_farthest_points
-
 from lfd3d.datasets.base_data import BaseDataModule
+from pytorch3d.ops import sample_farthest_points
 
 
 class RT1Dataset(td.Dataset):
@@ -47,7 +46,7 @@ class RT1Dataset(td.Dataset):
         Test splits are from 3D-VLA. Train/val were manually generated.
         """
         current_dir = os.path.dirname(__file__)
-        with open(f"{current_dir}/fractal20220817_data_{split}.txt", "r") as f:
+        with open(f"{current_dir}/fractal20220817_data_{split}.txt") as f:
             split_idxs = f.readlines()
         split_idxs = [int(i) for i in split_idxs]
         return split_idxs
@@ -186,7 +185,9 @@ class RT1Dataset(td.Dataset):
         points = points.T  # Shape: (N, 3)
 
         scene_pcd_pt3d = torch.from_numpy(points[None])
-        scene_pcd_downsample, scene_points_idx = sample_farthest_points(scene_pcd_pt3d, K=self.num_points, random_start_point=False)
+        scene_pcd_downsample, scene_points_idx = sample_farthest_points(
+            scene_pcd_pt3d, K=self.num_points, random_start_point=False
+        )
         scene_pcd = scene_pcd_downsample.squeeze().numpy()
 
         # Get corresponding features at the indices
@@ -282,10 +283,13 @@ class RT1DataModule(BaseDataModule):
 
     def setup(self, stage: str = "fit"):
         self.stage = stage
+        self.val_datasets = {}
+        self.test_datasets = {}
 
         self.train_dataset = RT1Dataset(self.root, self.dataset_cfg, "train")
         for tag in self.val_tags:
             self.val_datasets[tag] = RT1Dataset(self.root, self.dataset_cfg, "val")
+            self.test_datasets[tag] = RT1Dataset(self.root, self.dataset_cfg, "test")
         if self.train_dataset.cache_dir:
             self.train_dataset.cache(
                 td.cachers.Pickle(Path(self.train_dataset.cache_dir))
@@ -294,4 +298,3 @@ class RT1DataModule(BaseDataModule):
                 self.val_datasets[tag].cache(
                     td.cachers.Pickle(Path(self.train_dataset.cache_dir) / f"val_{tag}")
                 )
-        self.test_dataset = RT1Dataset(self.root, self.dataset_cfg, "test")

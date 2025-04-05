@@ -4,8 +4,8 @@ import cv2
 import numpy as np
 import torch
 import torch.nn.functional as F
-import torch.utils.data as data
 from pytorch3d.ops import sample_farthest_points
+from torch.utils import data
 
 from lfd3d.datasets.base_data import BaseDataModule
 
@@ -110,7 +110,9 @@ class GenGoalGenDataset(data.Dataset):
         points = points.T  # Shape: (N, 3)
 
         scene_pcd_pt3d = torch.from_numpy(points[None])
-        scene_pcd_downsample, scene_points_idx = sample_farthest_points(scene_pcd_pt3d, K=self.num_points, random_start_point=False)
+        scene_pcd_downsample, scene_points_idx = sample_farthest_points(
+            scene_pcd_pt3d, K=self.num_points, random_start_point=False
+        )
         scene_pcd = scene_pcd_downsample.squeeze().numpy()
 
         # Get corresponding features at the indices
@@ -228,4 +230,7 @@ class GenGoalGenDataset(data.Dataset):
 class GenGoalGenDataModule(BaseDataModule):
     def setup(self, stage: str = "fit"):
         self.stage = stage
-        self.test_dataset = GenGoalGenDataset(self.root, self.dataset_cfg, "test")
+        self.test_datasets = {}
+        self.test_datasets["test_gen"] = GenGoalGenDataset(
+            self.root, self.dataset_cfg, "test"
+        )

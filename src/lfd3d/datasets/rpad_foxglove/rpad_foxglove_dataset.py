@@ -7,17 +7,16 @@ import numpy as np
 import torch
 import torchdatasets as td
 import zarr
-from PIL import Image
-from sklearn.decomposition import PCA
-from torchvision import transforms
-from transformers import AutoModel, AutoProcessor
-from pytorch3d.ops import sample_farthest_points
-
 from lfd3d.datasets.base_data import BaseDataModule
 from lfd3d.datasets.rgb_text_feature_gen import (
     get_dinov2_image_embedding,
     get_siglip_text_embedding,
 )
+from PIL import Image
+from pytorch3d.ops import sample_farthest_points
+from sklearn.decomposition import PCA
+from torchvision import transforms
+from transformers import AutoModel, AutoProcessor
 
 
 class RpadFoxgloveDataset(td.Dataset):
@@ -288,7 +287,9 @@ class RpadFoxgloveDataset(td.Dataset):
         points = points.T  # Shape: (N, 3)
 
         scene_pcd_pt3d = torch.from_numpy(points[None])
-        scene_pcd_downsample, scene_points_idx = sample_farthest_points(scene_pcd_pt3d, K=self.num_points, random_start_point=False)
+        scene_pcd_downsample, scene_points_idx = sample_farthest_points(
+            scene_pcd_pt3d, K=self.num_points, random_start_point=False
+        )
         scene_pcd = scene_pcd_downsample.squeeze().numpy()
 
         # Get corresponding features at the indices
@@ -354,12 +355,16 @@ class RpadFoxgloveDataModule(BaseDataModule):
     def setup(self, stage: str = "fit"):
         self.stage = stage
         self.val_datasets = {}
+        self.test_datasets = {}
 
         self.train_dataset = RpadFoxgloveDataset(self.root, self.dataset_cfg, "train")
         for tag in self.val_tags:
             dataset_cfg = self.dataset_cfg.copy()
             dataset_cfg.data_sources = [tag]
             self.val_datasets[tag] = RpadFoxgloveDataset(self.root, dataset_cfg, "val")
+            self.test_datasets[tag] = RpadFoxgloveDataset(
+                self.root, dataset_cfg, "test"
+            )
 
         if self.train_dataset.cache_dir:
             self.train_dataset.cache(
@@ -369,4 +374,8 @@ class RpadFoxgloveDataModule(BaseDataModule):
                 self.val_datasets[tag].cache(
                     td.cachers.Pickle(Path(self.train_dataset.cache_dir) / f"val_{tag}")
                 )
-        self.test_dataset = RpadFoxgloveDataset(self.root, self.dataset_cfg, "test")
+                self.test_datasets[tag].cache(
+                    td.cachers.Pickle(
+                        Path(self.train_dataset.cache_dir) / f"test_{tag}"
+                    )
+                )
