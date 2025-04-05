@@ -13,12 +13,13 @@ from torch import nn, optim
 
 from lfd3d.metrics.pcd_metrics import chamfer_distance, rmse_pcd
 from lfd3d.models.dit.diffusion import create_diffusion
-from lfd3d.models.dit.models import DiT_PointCloud, DiT_PointCloud_Cross
-from lfd3d.models.dit.models import DiT_PointCloud_Unc as DiT_pcu
 from lfd3d.models.dit.models import (
+    DiT_PointCloud,
+    DiT_PointCloud_Cross,
     DiT_PointCloud_Unc_Cross,
     Rel3D_DiT_PointCloud_Unc_Cross,
 )
+from lfd3d.models.dit.models import DiT_PointCloud_Unc as DiT_pcu
 from lfd3d.utils.viz_utils import (
     get_action_anchor_pcd,
     get_img_and_track_pcd,
@@ -146,7 +147,7 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         self.mode = cfg.mode  # train or eval
         self.val_outputs: defaultdict[str, List[Dict]] = defaultdict(list)
         self.train_outputs: List[Dict] = []
-        self.predict_outputs: List[Dict] = []
+        self.predict_outputs: defaultdict[str, List[Dict]] = defaultdict(list)
 
         # prediction type-specific processing
         # TODO: eventually, this should be removed by updating dataset to use "point" instead of "pc"
@@ -277,11 +278,6 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
             pred_dict: the prediction dictionary
             tag: the tag to use for logging
         """
-
-        # Some opengl issues with creating the video on the cluster
-        # It's not very useful anyway so keeping it disabled.
-        log_pcd_video = False
-
         batch_size = batch[self.label_key].points_padded().shape[0]
         # pick a random sample in the batch to visualize
         viz_idx = np.random.randint(0, batch_size)
@@ -330,7 +326,7 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
             batch["depths"][viz_idx, 1].cpu().numpy(),
         )
 
-        ### Project tracks to image and save
+        # Project tracks to image and save
         init_rgb_proj = project_pcd_on_image(pcd, padding_mask, rgb_init, K, GREEN)
         end_rgb_proj = project_pcd_on_image(gt_pcd, padding_mask, rgb_end, K, RED)
         pred_rgb_proj = project_pcd_on_image(pred_pcd, padding_mask, rgb_end, K, BLUE)
@@ -540,6 +536,7 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         The test dataset is expected to be first dataloader_idx.
         Visualizations are logged with dataloader_idx=0
         """
+        eval_tag = self.trainer.datamodule.eval_tags[dataloader_idx]
         pred_dict = self.predict(batch)
         pred = pred_dict[self.prediction_type]["pred"]
         ground_truth = batch[self.label_key].to(self.device)
@@ -555,8 +552,7 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
             padding_mask,
         )
 
-        if dataloader_idx == 0:
-            self.predict_outputs.append(pred_dict)
+        self.predict_outputs[eval_tag].append(pred_dict)
 
         return {
             "rmse": pred_dict["rmse"],
@@ -567,25 +563,29 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
 
     def on_predict_epoch_end(self):
         """
-        Visualize first 5 batches in the test set.
+        Visualize first 5 batches in the test sets.
         """
-        batch_size = self.predict_outputs[0]["rmse"].shape[0]
-        rmse = torch.cat([x["rmse"] for x in self.predict_outputs])
-        chamfer_dist = torch.cat([x["chamfer_dist"] for x in self.predict_outputs])
-        cross_displacement = []
-        for i in self.predict_outputs:
-            cross_displacement.extend(i["cross_displacement"]["pred"])
+        for dataloader_idx, eval_tag in enumerate(self.trainer.datamodule.eval_tags):
+            if "test" not in eval_tag:
+                continue
 
-        for i, batch in enumerate(self.trainer.predict_dataloaders[0]):
-            batch_len = len(batch["caption"])
-            for idx in range(batch_len):
-                pred_dict = self.compose_pred_dict_for_viz(
-                    rmse, chamfer_dist, cross_displacement, idx
-                )
-                viz_batch = self.compose_batch_for_viz(batch, idx)
-                self.log_viz_to_wandb(viz_batch, pred_dict, "eval")
-            if i == 5:
-                break
+            pred_outputs = self.predict_outputs[eval_tag]
+            rmse = torch.cat([x["rmse"] for x in pred_outputs])
+            chamfer_dist = torch.cat([x["chamfer_dist"] for x in pred_outputs])
+            cross_displacement = []
+            for i in pred_outputs:
+                cross_displacement.extend(i["cross_displacement"]["pred"])
+
+            for i, batch in enumerate(self.trainer.predict_dataloaders[dataloader_idx]):
+                batch_len = len(batch["caption"])
+                for idx in range(batch_len):
+                    pred_dict = self.compose_pred_dict_for_viz(
+                        rmse, chamfer_dist, cross_displacement, idx
+                    )
+                    viz_batch = self.compose_batch_for_viz(batch, idx)
+                    self.log_viz_to_wandb(viz_batch, pred_dict, eval_tag)
+                if i == 5:
+                    break
         self.predict_outputs.clear()
 
     def compose_pred_dict_for_viz(self, rmse, chamfer_dist, cross_displacement, idx):

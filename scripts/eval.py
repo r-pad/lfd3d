@@ -6,12 +6,40 @@ import pytorch_lightning as pl
 import torch
 import wandb
 from hydra.core.hydra_config import HydraConfig
-
 from lfd3d.utils.script_utils import (
     create_datamodule,
     create_model,
     load_checkpoint_config_from_wandb,
 )
+
+
+class EvalDataModule(pl.LightningDataModule):
+    def __init__(self, dataloaders, tags):
+        super().__init__()
+        self.dataloaders = dataloaders
+        self.eval_tags = tags
+
+    def setup(self, stage=None):
+        pass
+
+    def predict_dataloader(self):
+        return self.dataloaders
+
+
+def get_eval_datamodule(datamodule):
+    tags = datamodule.val_tags
+    eval_dataloaders, eval_tags = [], []
+    for i, (tag, loader) in enumerate(datamodule.test_dataloader().items()):
+        eval_dataloaders.append(loader)
+        eval_tags.append(f"test_{tag}")
+    eval_dataloaders.append(datamodule.train_subset_dataloader())
+    eval_tags.append("train_subset")
+    for i, (tag, loader) in enumerate(datamodule.val_dataloader().items()):
+        eval_dataloaders.append(loader)
+        eval_tags.append(f"val_{tag}")
+
+    eval_datamodule = EvalDataModule(eval_dataloaders, eval_tags)
+    return eval_datamodule
 
 
 @torch.no_grad()
@@ -76,7 +104,7 @@ def main(cfg):
     # Load the network weights.
     ckpt = torch.load(ckpt_file, map_location=device)
     state_dict = {k: v for k, v in ckpt["state_dict"].items()}
-    network.load_state_dict({k.partition(".")[2]: v for k, v, in state_dict.items()})
+    network.load_state_dict({k.partition(".")[2]: v for k, v in state_dict.items()})
     # set model to eval mode
     network.eval()
     model.eval()
@@ -109,13 +137,9 @@ def main(cfg):
     # Upload output to wandb
     wandb.init(entity="r-pad", project="lfd3d", id=cfg.checkpoint.run_id, resume="must")
 
-    dataloaders = [
-        datamodule.test_dataloader(),
-        datamodule.train_subset_dataloader(),
-        datamodule.val_dataloader(),
-    ]
-    preds_dict = {"test": {}, "train_subset": {}, "val": {}}
-    preds = trainer.predict(model, dataloaders=dataloaders)
+    eval_datamodule = get_eval_datamodule(datamodule)
+    preds = trainer.predict(model, datamodule=eval_datamodule)
+    preds_dict = {tag: {} for tag in eval_datamodule.eval_tags}
 
     # Keys to iterate over
     keys = preds[0][0].keys()
@@ -144,14 +168,12 @@ def main(cfg):
 
     # Summary Statistics
     summary_stats = []
-    for metric in [
-        "train_subset/rmse",
-        "train_subset/chamfer_dist",
-        "val/rmse",
-        "val/chamfer_dist",
-        "test/rmse",
-        "test/chamfer_dist",
-    ]:
+    metrics = []
+    for tag in eval_datamodule.eval_tags:
+        for postfix in ["rmse", "chamfer_dist"]:
+            metric = f"{tag}/{postfix}"
+            metrics.append(metric)
+    for metric in metrics:
         pred_metric = preds_dict[metric.split("/")[0]][metric.split("/")[1]]
         summary_stats.append([metric, pred_metric.mean()])
     summary_table = wandb.Table(data=summary_stats, columns=["Metric", "Value"])
