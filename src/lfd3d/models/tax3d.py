@@ -71,7 +71,7 @@ def DiT_PointCloud_xS(use_rotary, **kwargs):
     return DiT_PointCloud(depth=5, hidden_size=hidden_size, num_heads=4, **kwargs)
 
 
-def calc_pcd_metrics(pred_dict, pcd, pred, gt, scale_factor, padding_mask):
+def calc_pcd_metrics(pred_dict, pcd, all_pred, gt, scale_factor, padding_mask):
     """
     Calculate pcd metrics and update pred_dict with the keys.
     Creates point clouds to be measured by applying the predicted
@@ -79,22 +79,10 @@ def calc_pcd_metrics(pred_dict, pcd, pred, gt, scale_factor, padding_mask):
 
     pred_dict: Dictionary with keys to be updated
     pcd: Metric Point Cloud
-    pred: Predicted cross displacement
+    all_pred: Predicted cross displacement of multiple samples
     gt: GT cross displacement
     scale_factor: Scaling factor to bring to metric scale
     padding_mask: Padding mask
-    """
-    pred_pcd = (pcd + pred) * scale_factor[:, None, :]
-    gt_pcd = (pcd + gt) * scale_factor[:, None, :]
-
-    pred_dict["rmse"] = rmse_pcd(pred_pcd, gt_pcd, padding_mask)
-    pred_dict["chamfer_dist"] = chamfer_distance(pred_pcd, gt_pcd, padding_mask)
-    return pred_dict
-
-
-def calc_wta_metrics(pred_dict, pcd, all_pred, gt, scale_factor, padding_mask):
-    """
-    Calculate Winner-Take-All (WTA) pcd metrics and update pred_dict with the keys.
     """
     gt_pcd = (pcd + gt) * scale_factor[:, None, :]
     all_rmse, all_chamfer = [], []
@@ -105,12 +93,11 @@ def calc_wta_metrics(pred_dict, pcd, all_pred, gt, scale_factor, padding_mask):
         all_rmse.append(rmse_pcd(pred_pcd, gt_pcd, padding_mask))
         all_chamfer.append(chamfer_distance(pred_pcd, gt_pcd, padding_mask))
 
+    pred_dict["rmse"] = all_rmse[0]
+    pred_dict["chamfer_dist"] = all_chamfer[0]
     pred_dict["wta_rmse"] = torch.stack(all_rmse).min(0)[0]
     pred_dict["wta_chamfer_dist"] = torch.stack(all_chamfer).min(0)[0]
     return pred_dict
-
-
-# TODO: clean up all unused functions
 
 
 DiT_models = {
@@ -505,10 +492,22 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
 
         # additional logging
         if do_additional_logging:
+            n_samples_wta = self.run_cfg.n_samples_wta
             self.eval()
             with torch.no_grad():
-                pred_dict = self.predict(batch)
-                pred = pred_dict[self.prediction_type]["pred"]
+                all_pred_dict = []
+                for i in range(n_samples_wta):
+                    all_pred_dict.append(self.predict(batch))
+                pred_dict = all_pred_dict[
+                    0
+                ]  # Use one sample for computing other metrics
+                # Store all sample preds for viz
+                pred_dict[self.prediction_type]["all_pred"] = [
+                    i[self.prediction_type]["pred"] for i in all_pred_dict
+                ]
+                pred_dict[self.prediction_type]["all_pred"] = torch.stack(
+                    pred_dict[self.prediction_type]["all_pred"]
+                ).permute(1, 0, 2, 3)
             self.train()  # Switch back to training mode
 
             padding_mask = batch["padding_mask"]
@@ -517,7 +516,7 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
             pred_dict = calc_pcd_metrics(
                 pred_dict,
                 action_pcd.points_padded(),
-                pred,
+                pred_dict[self.prediction_type]["all_pred"],
                 ground_truth.points_padded(),
                 pcd_std,
                 padding_mask,
@@ -579,9 +578,20 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         Validation step for the module. Logs validation metrics and visualizations to wandb.
         """
         val_tag = self.trainer.datamodule.val_tags[dataloader_idx]
+        n_samples_wta = self.run_cfg.n_samples_wta
         self.eval()
         with torch.no_grad():
-            pred_dict = self.predict(batch)
+            all_pred_dict = []
+            for i in range(n_samples_wta):
+                all_pred_dict.append(self.predict(batch))
+            pred_dict = all_pred_dict[0]  # Use one sample for computing other metrics
+            # Store all sample preds for viz
+            pred_dict[self.prediction_type]["all_pred"] = [
+                i[self.prediction_type]["pred"] for i in all_pred_dict
+            ]
+            pred_dict[self.prediction_type]["all_pred"] = torch.stack(
+                pred_dict[self.prediction_type]["all_pred"]
+            ).permute(1, 0, 2, 3)
 
         pred = pred_dict[self.prediction_type]["pred"]
         ground_truth = batch[self.label_key].to(self.device)
@@ -591,7 +601,7 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         pred_dict = calc_pcd_metrics(
             pred_dict,
             action_pcd.points_padded(),
-            pred,
+            pred_dict[self.prediction_type]["all_pred"],
             ground_truth.points_padded(),
             pcd_std,
             padding_mask,
@@ -669,20 +679,11 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         pred_dict = calc_pcd_metrics(
             pred_dict,
             action_pcd.points_padded(),
-            pred,
-            ground_truth.points_padded(),
-            pcd_std,
-            padding_mask,
-        )
-        pred_dict = calc_wta_metrics(
-            pred_dict,
-            action_pcd.points_padded(),
             pred_dict[self.prediction_type]["all_pred"],
             ground_truth.points_padded(),
             pcd_std,
             padding_mask,
         )
-
         self.predict_outputs[eval_tag].append(pred_dict)
 
         return {
