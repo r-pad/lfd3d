@@ -3,7 +3,7 @@ from glob import glob
 
 import cv2
 import numpy as np
-import torch.utils.data as data
+from torch.utils import data
 
 from lfd3d.datasets.base_data import BaseDataModule
 
@@ -62,7 +62,7 @@ class SynthBlockDataset(data.Dataset):
 
         action_pcd = np.load(f"{dir_name}/action_pcd.npy")
         anchor_pcd = np.load(f"{dir_name}/pcd_0.npy")
-        caption = f"putdown block"
+        caption = "putdown block"
 
         cross_displacement = np.load(f"{dir_name}/cross_displacement.npy")
         rgbs, depths = self.load_rgbd(dir_name)
@@ -113,10 +113,14 @@ class SynthBlockDataModule(BaseDataModule):
 
     def setup(self, stage: str = "fit"):
         self.stage = stage
+        self.val_datasets = {}
+        self.test_datasets = {}
 
         self.train_dataset = SynthBlockDataset(self.root, self.dataset_cfg, "train")
         for tag in self.val_tags:
             self.val_datasets[tag] = SynthBlockDataset(
                 self.root, self.dataset_cfg, "val"
             )
-        self.test_dataset = SynthBlockDataset(self.root, self.dataset_cfg, "test")
+            self.test_datasets[tag] = SynthBlockDataset(
+                self.root, self.dataset_cfg, "test"
+            )

@@ -7,11 +7,10 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 import torchdatasets as td
-from PIL import Image
-from torchvision import transforms
-from pytorch3d.ops import sample_farthest_points
-
 from lfd3d.datasets.base_data import BaseDataModule
+from PIL import Image
+from pytorch3d.ops import sample_farthest_points
+from torchvision import transforms
 
 
 class DroidDataset(td.Dataset):
@@ -95,7 +94,7 @@ class DroidDataset(td.Dataset):
         """
         Load the filenames corresponding to each split - [train, val, test]
         """
-        with open(f"{self.current_dir}/{split}.json", "r") as f:
+        with open(f"{self.current_dir}/{split}.json") as f:
             split_idxs = json.load(f)
         return split_idxs
 
@@ -157,7 +156,7 @@ class DroidDataset(td.Dataset):
         init_frame_idx = int(
             os.path.basename(init_image_path).split("_")[1].split(".")[0]
         )
-        end_image_path = glob(f"{self.event_dir}/{droid_idx}/{subgoal_idx+1}*png")[0]
+        end_image_path = glob(f"{self.event_dir}/{droid_idx}/{subgoal_idx + 1}*png")[0]
         end_frame_idx = int(
             os.path.basename(end_image_path).split("_")[1].split(".")[0]
         )
@@ -204,8 +203,9 @@ class DroidDataset(td.Dataset):
         Load RGB/text features generated with DINOv2 and SIGLIP
         """
         features = np.load(f"{self.feat_dir}/{droid_idx}/{event_idx}_compressed.npz")
-        rgb_embed, text_embed = features["rgb_embed"], features["text_embed"].astype(
-            np.float32
+        rgb_embed, text_embed = (
+            features["rgb_embed"],
+            features["text_embed"].astype(np.float32),
         )
 
         upscale_by = 4
@@ -253,7 +253,9 @@ class DroidDataset(td.Dataset):
         points = points.T  # Shape: (N, 3)
 
         scene_pcd_pt3d = torch.from_numpy(points[None])
-        scene_pcd_downsample, scene_points_idx = sample_farthest_points(scene_pcd_pt3d, K=self.num_points, random_start_point=False)
+        scene_pcd_downsample, scene_points_idx = sample_farthest_points(
+            scene_pcd_pt3d, K=self.num_points, random_start_point=False
+        )
         scene_pcd = scene_pcd_downsample.squeeze().numpy()
 
         # Get corresponding features at the indices
@@ -323,10 +325,12 @@ class DroidDataModule(BaseDataModule):
     def setup(self, stage: str = "fit"):
         self.stage = stage
         self.val_datasets = {}
+        self.test_datasets = {}
 
         self.train_dataset = DroidDataset(self.root, self.dataset_cfg, "train")
         for tag in self.val_tags:
             self.val_datasets[tag] = DroidDataset(self.root, self.dataset_cfg, "val")
+            self.test_datasets[tag] = DroidDataset(self.root, self.dataset_cfg, "test")
 
         if self.train_dataset.cache_dir:
             self.train_dataset.cache(
@@ -336,4 +340,3 @@ class DroidDataModule(BaseDataModule):
                 self.val_datasets[tag].cache(
                     td.cachers.Pickle(Path(self.train_dataset.cache_dir) / f"val_{tag}")
                 )
-        self.test_dataset = DroidDataset(self.root, self.dataset_cfg, "test")

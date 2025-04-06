@@ -10,9 +10,9 @@ import torchdatasets as td
 from lfd3d.datasets.base_data import BaseDataModule
 from lfd3d.utils.data_utils import MANOInterface
 from PIL import Image
+from pytorch3d.ops import sample_farthest_points
 from torchvision import transforms
 from tqdm import tqdm
-from pytorch3d.ops import sample_farthest_points
 
 
 class HOI4DDataset(td.Dataset):
@@ -160,7 +160,7 @@ class HOI4DDataset(td.Dataset):
         return split_data_fnames
 
     def load_camera_params(self, dir_name):
-        with open(f"{dir_name}/3Dseg/output.log", 'r') as f:
+        with open(f"{dir_name}/3Dseg/output.log") as f:
             lines = f.readlines()
 
         matrices = []
@@ -464,7 +464,9 @@ class HOI4DDataset(td.Dataset):
         points = points.T  # Shape: (N, 3)
 
         scene_pcd_pt3d = torch.from_numpy(points[None])
-        scene_pcd_downsample, scene_points_idx = sample_farthest_points(scene_pcd_pt3d, K=self.num_points, random_start_point=False)
+        scene_pcd_downsample, scene_points_idx = sample_farthest_points(
+            scene_pcd_pt3d, K=self.num_points, random_start_point=False
+        )
         scene_pcd = scene_pcd_downsample.squeeze().numpy()
 
         # Get corresponding features at the indices
@@ -563,10 +565,12 @@ class HOI4DDataModule(BaseDataModule):
     def setup(self, stage: str = "fit"):
         self.stage = stage
         self.val_datasets = {}
+        self.test_datasets = {}
 
         self.train_dataset = HOI4DDataset(self.root, self.dataset_cfg, "train")
         for tag in self.val_tags:
             self.val_datasets[tag] = HOI4DDataset(self.root, self.dataset_cfg, "val")
+            self.test_datasets[tag] = HOI4DDataset(self.root, self.dataset_cfg, "test")
         if self.train_dataset.cache_dir:
             self.train_dataset.cache(
                 td.cachers.Pickle(Path(self.train_dataset.cache_dir))
@@ -575,4 +579,3 @@ class HOI4DDataModule(BaseDataModule):
                 self.val_datasets[tag].cache(
                     td.cachers.Pickle(Path(self.train_dataset.cache_dir) / f"val_{tag}")
                 )
-        self.test_dataset = HOI4DDataset(self.root, self.dataset_cfg, "test")

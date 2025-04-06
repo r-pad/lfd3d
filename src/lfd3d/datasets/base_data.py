@@ -2,7 +2,7 @@ import os
 
 import pytorch_lightning as pl
 import torch
-import torch.utils.data as data
+from torch.utils import data
 
 from lfd3d.utils.data_utils import collate_pcd_fn
 
@@ -77,15 +77,17 @@ class BaseDataModule(pl.LightningDataModule):
         }
 
     def test_dataloader(self):
-        if not hasattr(self, "test_dataset"):
+        if not hasattr(self, "test_datasets"):
             raise AttributeError(
-                "test_dataset has not been set. Make sure to call setup() first."
+                "test_datasets has not been set. Make sure to call setup() first."
             )
-        test_dataloader = data.DataLoader(
-            self.test_dataset,
-            batch_size=self.val_batch_size,
-            shuffle=False,
-            num_workers=self.num_workers,
-            collate_fn=collate_pcd_fn,
-        )
-        return test_dataloader
+        return {
+            tag: data.DataLoader(
+                dataset,
+                batch_size=self.val_batch_size,
+                shuffle=False,
+                num_workers=self.num_workers,
+                collate_fn=collate_pcd_fn,
+            )
+            for tag, dataset in self.test_datasets.items()
+        }
