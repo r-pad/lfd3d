@@ -10,3 +10,6 @@ num_training_steps: None # Set by the training loop.
 
 check_val_every_n_epochs: 25
 additional_train_logging_period: 300 # Global step period to log additional training metrics
+
+n_samples_wta: 5 # number of samples for evaluating coverage
+save_wta_to_disk: False # save to disk for further examination
