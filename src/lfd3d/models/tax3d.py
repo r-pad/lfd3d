@@ -96,6 +96,7 @@ def calc_pcd_metrics(pred_dict, pcd, all_pred, gt, scale_factor, padding_mask):
     pred_dict["chamfer_dist"] = all_chamfer[0]
     pred_dict["wta_rmse"] = torch.stack(all_rmse).min(0)[0]
     pred_dict["wta_chamfer_dist"] = torch.stack(all_chamfer).min(0)[0]
+    pred_dict["sample_std"] = all_pred.std(dim=(1, 2, 3))  # std deviation of samples
     return pred_dict
 
 
@@ -472,21 +473,17 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         loss = torch.stack([x["loss"] for x in self.train_outputs]).mean()
         log_dictionary["train/loss"] = loss
 
-        extra_keys = any("rmse" in x.keys() for x in self.train_outputs)
-        if extra_keys:
-            rmse = torch.stack(
-                [x["rmse"].mean() for x in self.train_outputs if "rmse" in x]
+        def mean_metric(metric_name):
+            return torch.stack(
+                [x[metric_name].mean() for x in self.train_outputs if metric_name in x]
             ).mean()
-            log_dictionary["train/rmse"] = rmse
 
-            chamfer_dist = torch.stack(
-                [
-                    x["chamfer_dist"].mean()
-                    for x in self.train_outputs
-                    if "chamfer_dist" in x
-                ]
-            ).mean()
-            log_dictionary["train/chamfer_dist"] = chamfer_dist
+        if any("rmse" in x for x in self.train_outputs):
+            log_dictionary["train/rmse"] = mean_metric("rmse")
+            log_dictionary["train/wta_rmse"] = mean_metric("wta_rmse")
+            log_dictionary["train/chamfer_dist"] = mean_metric("chamfer_dist")
+            log_dictionary["train/wta_chamfer_dist"] = mean_metric("wta_chamfer_dist")
+            log_dictionary["train/sample_std"] = mean_metric("sample_std")
 
         ####################################################
         # logging training metrics
@@ -549,30 +546,38 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
 
     def on_validation_epoch_end(self):
         log_dict = {}
+        all_metrics = {
+            "rmse": [],
+            "wta_rmse": [],
+            "chamfer_dist": [],
+            "wta_chamfer_dist": [],
+            "sample_std": [],
+        }
+
         for val_tag in self.trainer.datamodule.val_tags:
             val_outputs = self.val_outputs[val_tag]
-            rmse = torch.stack([x["rmse"].mean() for x in val_outputs]).mean()
-            chamfer_dist = torch.stack(
-                [x["chamfer_dist"].mean() for x in val_outputs]
-            ).mean()
+            tag_metrics = {}
 
-            log_dict[f"val_{val_tag}/rmse"] = rmse
-            log_dict[f"val_{val_tag}/chamfer_dist"] = chamfer_dist
+            for metric in all_metrics.keys():
+                values = torch.stack([x[metric].mean() for x in val_outputs]).mean()
+                tag_metrics[metric] = values
+                all_metrics[metric].append(values)
 
-        all_rmse = torch.cat(
-            [
-                torch.stack([x["rmse"].mean() for x in self.val_outputs[tag]])
-                for tag in self.trainer.datamodule.val_tags
-            ]
-        ).mean()
-        all_chamfer_dist = torch.cat(
-            [
-                torch.stack([x["chamfer_dist"].mean() for x in self.val_outputs[tag]])
-                for tag in self.trainer.datamodule.val_tags
-            ]
-        ).mean()
-        log_dict["val/rmse"] = all_rmse
-        log_dict["val/chamfer_dist"] = all_chamfer_dist
+            # Per dataset metrics
+            for metric, value in tag_metrics.items():
+                log_dict[f"val_{val_tag}/{metric}"] = value
+
+        # Avg over all datasets
+        for metric, values in all_metrics.items():
+            log_dict[f"val/{metric}"] = torch.tensor(values).mean()
+
+        # Minimize the linear combination of RMSE (reconstruction error) and -std (i.e. maximize diversity)
+        # TODO: Find a better metric, and dynamically configure this....
+        alpha = 0.95
+        log_dict["val/rmse_and_std_combi"] = alpha * log_dict["val/rmse"] + (
+            1 - alpha
+        ) * (-log_dict["val/sample_std"])
+
         self.log_dict(
             log_dict,
             add_dataloader_idx=False,

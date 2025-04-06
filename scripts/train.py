@@ -5,15 +5,14 @@ import omegaconf
 import pytorch_lightning as pl
 import torch
 import wandb
-from pytorch_lightning.callbacks import ModelCheckpoint
-from pytorch_lightning.loggers import WandbLogger
-
 from lfd3d.utils.script_utils import (
     PROJECT_ROOT,
     create_datamodule,
     create_model,
     match_fn,
 )
+from pytorch_lightning.callbacks import ModelCheckpoint
+from pytorch_lightning.loggers import WandbLogger
 
 
 @hydra.main(config_path="../configs", config_name="train", version_base="1.3")
@@ -126,6 +125,14 @@ def main(cfg):
                 dirpath=cfg.lightning.checkpoint_dir,
                 filename="{epoch}-{step}-{val/rmse:.3f}",
                 monitor="val/rmse",
+                mode="min",
+                save_weights_only=False,
+                save_last=False,
+            ),
+            ModelCheckpoint(
+                dirpath=cfg.lightning.checkpoint_dir,
+                filename="{epoch}-{step}-{val/rmse_and_std_combi:.3f}",
+                monitor="val/rmse_and_std_combi",
                 mode="min",
                 save_weights_only=False,
                 save_last=False,
