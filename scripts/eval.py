@@ -14,10 +14,12 @@ from lfd3d.utils.script_utils import (
 
 
 class EvalDataModule(pl.LightningDataModule):
-    def __init__(self, dataloaders, tags):
+    def __init__(self, dataloaders, tags, inference_cfg):
         super().__init__()
         self.dataloaders = dataloaders
         self.eval_tags = tags
+        self.n_samples_wta = inference_cfg.n_samples_wta
+        self.save_wta_to_disk = inference_cfg.save_wta_to_disk
 
     def setup(self, stage=None):
         pass
@@ -26,7 +28,7 @@ class EvalDataModule(pl.LightningDataModule):
         return self.dataloaders
 
 
-def get_eval_datamodule(datamodule):
+def get_eval_datamodule(datamodule, inference_cfg):
     tags = datamodule.val_tags
     eval_dataloaders, eval_tags = [], []
     for i, (tag, loader) in enumerate(datamodule.test_dataloader().items()):
@@ -38,7 +40,7 @@ def get_eval_datamodule(datamodule):
         eval_dataloaders.append(loader)
         eval_tags.append(f"val_{tag}")
 
-    eval_datamodule = EvalDataModule(eval_dataloaders, eval_tags)
+    eval_datamodule = EvalDataModule(eval_dataloaders, eval_tags, inference_cfg)
     return eval_datamodule
 
 
@@ -137,7 +139,7 @@ def main(cfg):
     # Upload output to wandb
     wandb.init(entity="r-pad", project="lfd3d", id=cfg.checkpoint.run_id, resume="must")
 
-    eval_datamodule = get_eval_datamodule(datamodule)
+    eval_datamodule = get_eval_datamodule(datamodule, cfg.inference)
     preds = trainer.predict(model, datamodule=eval_datamodule)
     preds_dict = {tag: {} for tag in eval_datamodule.eval_tags}
 
@@ -170,7 +172,7 @@ def main(cfg):
     summary_stats = []
     metrics = []
     for tag in eval_datamodule.eval_tags:
-        for postfix in ["rmse", "chamfer_dist"]:
+        for postfix in ["rmse", "chamfer_dist", "wta_rmse", "wta_chamfer_dist"]:
             metric = f"{tag}/{postfix}"
             metrics.append(metric)
     for metric in metrics:
