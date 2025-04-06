@@ -410,7 +410,13 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         RED, GREEN, BLUE = (255, 0, 0), (0, 255, 0), (0, 0, 255)
 
         all_pred = pred_dict[self.prediction_type]["all_pred"][viz_idx].cpu().numpy()
+        N = all_pred.shape[0]
         end2start = np.linalg.inv(batch["start2end"][viz_idx].cpu().numpy())
+
+        BLUES = [
+            (int(200 * (1 - i / (N - 1))), int(220 * (1 - i / (N - 1))), 255)
+            for i in range(N)
+        ]
 
         goal_text = batch["caption"][viz_idx]
         vid_name = batch["vid_name"][viz_idx]
@@ -435,7 +441,7 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         pcd_endframe = np.hstack((pcd, np.ones((pcd.shape[0], 1))))
         pcd_endframe = (end2start @ pcd_endframe.T).T[:, :3]
         all_pred_pcd_tmp = []
-        for i in range(all_pred_pcd.shape[0]):
+        for i in range(N):
             tmp_pcd = np.hstack((all_pred_pcd[i], np.ones((all_pred_pcd.shape[1], 1))))
             tmp_pcd = (end2start @ tmp_pcd.T).T[:, :3]
             all_pred_pcd_tmp.append(tmp_pcd)
@@ -459,7 +465,7 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
             all_pred_pcd,
             GREEN,
             RED,
-            BLUE,
+            BLUES,
         )
         ###
 
