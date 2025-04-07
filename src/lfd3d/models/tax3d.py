@@ -558,6 +558,9 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
             val_outputs = self.val_outputs[val_tag]
             tag_metrics = {}
 
+            if len(val_outputs) == 0:
+                continue
+
             for metric in all_metrics.keys():
                 values = torch.stack([x[metric].mean() for x in val_outputs]).mean()
                 tag_metrics[metric] = values

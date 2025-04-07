@@ -7,11 +7,11 @@ import torch
 import wandb
 from lfd3d.utils.script_utils import (
     PROJECT_ROOT,
+    ModelCheckpointExplicit,
     create_datamodule,
     create_model,
     match_fn,
 )
-from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import WandbLogger
 
 
@@ -84,7 +84,7 @@ def main(cfg):
     logger = WandbLogger(
         entity=cfg.wandb.entity,
         project=cfg.wandb.project,
-        log_model=True,  # Only log the last checkpoint to wandb, and only the LAST model checkpoint.
+        log_model=False,  # handled explicitly by the callbacks
         save_dir=cfg.wandb.save_dir,
         config=omegaconf.OmegaConf.to_container(
             cfg, resolve=True, throw_on_missing=True
@@ -98,13 +98,6 @@ def main(cfg):
     # Create the trainer.
     # The trainer is responsible for running the training loop, and
     # logging the results.
-    #
-    # There are a few callbacks (which we could customize):
-    # - LogPredictionSamplesCallback: Logs some examples from the dataset,
-    #       and the model's predictions.
-    # - ModelCheckpoint #1: Saves the latest model.
-    # - ModelCheckpoint #2: Saves the best model (according to validation
-    #       loss), and logs it to wandb.
     ######################################################################
 
     # For multi-dataset training, we define our own distributed sampler
@@ -121,7 +114,8 @@ def main(cfg):
         gradient_clip_val=cfg.training.grad_clip_norm,
         use_distributed_sampler=use_distributed_sampler,
         callbacks=[
-            ModelCheckpoint(
+            ModelCheckpointExplicit(
+                artifact_name=f"best_rmse_model-{logger.experiment.id}",
                 dirpath=cfg.lightning.checkpoint_dir,
                 filename="{epoch}-{step}-{val/rmse:.3f}",
                 monitor="val/rmse",
@@ -129,7 +123,8 @@ def main(cfg):
                 save_weights_only=False,
                 save_last=False,
             ),
-            ModelCheckpoint(
+            ModelCheckpointExplicit(
+                artifact_name=f"best_rmse_and_std_combi_model-{logger.experiment.id}",
                 dirpath=cfg.lightning.checkpoint_dir,
                 filename="{epoch}-{step}-{val/rmse_and_std_combi:.3f}",
                 monitor="val/rmse_and_std_combi",
@@ -182,11 +177,6 @@ def main(cfg):
         artifact_dir = cfg.wandb.artifact_dir
         artifact = api.artifact(cfg.checkpoint.reference, type="model")
         ckpt_file = artifact.get_path("model.ckpt").download(root=artifact_dir)
-        # ckpt = torch.load(ckpt_file)
-        # # model.load_state_dict(
-        # #     {k.partition(".")[2]: v for k, v, in ckpt["state_dict"].items()}
-        # # )
-        # model.load_state_dict(ckpt["state_dict"])
     else:
         print("Starting training from scratch.")
         ckpt_file = None
