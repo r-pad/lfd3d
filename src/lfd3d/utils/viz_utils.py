@@ -74,61 +74,14 @@ def get_img_and_track_pcd(
     mask,
     init_pcd,
     gt_pcd,
-    pred_pcd,
-    init_pcd_color,
-    gt_color,
-    pred_color,
-):
-    init_pcd_color, pred_color, gt_color = (
-        np.array(init_pcd_color),
-        np.array(pred_color),
-        np.array(gt_color),
-    )
-
-    image_pcd_pts, image_pcd_colors = get_img_pcd(image, depth, K)
-
-    init_pcd_pts = init_pcd[mask]
-    init_pcd_color = np.repeat(init_pcd_color[None, :], init_pcd_pts.shape[0], axis=0)
-
-    gt_pcd_pts = gt_pcd[mask]
-    gt_color = np.repeat(gt_color[None, :], gt_pcd_pts.shape[0], axis=0)
-
-    pred_pcd_pts = pred_pcd[mask]
-    pred_color = np.repeat(pred_color[None, :], pred_pcd_pts.shape[0], axis=0)
-
-    viz_pcd_pts = np.concatenate(
-        [image_pcd_pts, init_pcd_pts, pred_pcd_pts, gt_pcd_pts], axis=0
-    )
-    viz_pcd_colors = np.concatenate(
-        [image_pcd_colors, init_pcd_color, pred_color, gt_color], axis=0
-    )
-
-    # Flip about x-axis to prevent mirroring of pcd in wandb
-    flip_transform = np.array([[-1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
-
-    homogeneous_pts = np.hstack([viz_pcd_pts, np.ones((viz_pcd_pts.shape[0], 1))])
-    transformed_pts = homogeneous_pts @ flip_transform.T
-    transformed_pts_3d = transformed_pts[:, :3] / transformed_pts[:, 3:]
-
-    viz_pcd = np.concatenate([transformed_pts_3d, viz_pcd_colors], axis=-1)
-    return viz_pcd
-
-
-def get_img_and_wta_tracks_pcd(
-    image,
-    depth,
-    K,
-    mask,
-    init_pcd,
-    gt_pcd,
     all_pred_pcd,
     init_pcd_color,
     gt_color,
-    pred_color,
+    all_pred_color,
 ):
-    init_pcd_color, pred_color, gt_color = (
+    init_pcd_color, all_pred_color, gt_color = (
         np.array(init_pcd_color),
-        np.array(pred_color),
+        np.array(all_pred_color),
         np.array(gt_color),
     )
 
@@ -140,19 +93,21 @@ def get_img_and_wta_tracks_pcd(
     gt_pcd_pts = gt_pcd[mask]
     gt_color = np.repeat(gt_color[None, :], gt_pcd_pts.shape[0], axis=0)
 
-    all_pred_pcd_pts, all_pred_color = [], []
-    pred_color = np.repeat(pred_color[None, :], all_pred_pcd[0][mask].shape[0], axis=0)
-    for pred_pcd in all_pred_pcd:
+    all_pred_pcd_pts, all_pred_colors = [], []
+    for i, pred_pcd in enumerate(all_pred_pcd):
         pred_pcd_pts = pred_pcd[mask]
+        pred_color = np.repeat(
+            all_pred_color[None, i], all_pred_pcd[0][mask].shape[0], axis=0
+        )
         all_pred_pcd_pts.append(pred_pcd_pts)
-        all_pred_color.append(pred_color)
+        all_pred_colors.append(pred_color)
 
     num_pred_points = all_pred_pcd_pts[0].shape[0] * len(all_pred_pcd_pts)
     viz_pcd_pts = np.concatenate(
         [image_pcd_pts, init_pcd_pts, gt_pcd_pts, *all_pred_pcd_pts], axis=0
     )
     viz_pcd_colors = np.concatenate(
-        [image_pcd_colors, init_pcd_color, gt_color, *all_pred_color], axis=0
+        [image_pcd_colors, init_pcd_color, gt_color, *all_pred_colors], axis=0
     )
 
     # Flip about x-axis to prevent mirroring of pcd in wandb

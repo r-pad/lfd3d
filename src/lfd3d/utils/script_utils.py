@@ -1,13 +1,12 @@
 import os
 import pathlib
 import warnings
-from typing import Dict, List, Sequence, Union, cast
+from collections.abc import Sequence
+from typing import Dict, List, Union, cast
 
 import torch
 import torch.utils._pytree as pytree
 import wandb
-from omegaconf import OmegaConf
-
 from lfd3d.datasets import (
     DroidDataModule,
     GenGoalGenDataModule,
@@ -23,8 +22,27 @@ from lfd3d.models.tax3d import (
     DiffusionTransformerNetwork,
     SceneDisplacementModule,
 )
+from omegaconf import OmegaConf
+from pytorch_lightning.callbacks import ModelCheckpoint
 
 PROJECT_ROOT = str(pathlib.Path(__file__).parent.parent.parent.parent.resolve())
+
+
+class ModelCheckpointExplicit(ModelCheckpoint):
+    """
+    Custom callback to save model with a specific name.
+    Useful if we're logging models for multiple (non-dominating) metrics
+    """
+
+    def __init__(self, artifact_name, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.artifact_name = artifact_name
+
+    def on_train_end(self, trainer, pl_module):
+        if self.best_model_path:
+            artifact = wandb.Artifact(self.artifact_name, type="model")
+            artifact.add_file(local_path=self.best_model_path, name="model.ckpt")
+            wandb.log_artifact(artifact, aliases=["latest", "best"])
 
 
 def create_model(cfg):

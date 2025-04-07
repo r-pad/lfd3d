@@ -14,6 +14,12 @@ parser.add_argument("--run_id", type=str, required=True, help="W&B run ID")
 parser.add_argument(
     "--checkpoint_path", type=str, required=True, help="Path to checkpoint file"
 )
+parser.add_argument(
+    "--artifact_type",
+    type=str,
+    required=True,
+    help="Name of artifact (e.g. rmse, rmse_and_std_combi)",
+)
 
 # Parse arguments
 args = parser.parse_args()
@@ -21,7 +27,9 @@ args = parser.parse_args()
 # Initialize wandb and upload artifact
 wandb.init(entity="r-pad", project="lfd3d", id=args.run_id, resume="must")
 
-artifact = wandb.Artifact(f"model-{args.run_id}", type="model")
+artifact = wandb.Artifact(
+    f"best_{args.artifact_type}_model-{args.run_id}", type="model"
+)
 artifact.add_file(local_path=args.checkpoint_path, name="model.ckpt")
 wandb.log_artifact(artifact, aliases=["latest", "best"])
 wandb.finish()

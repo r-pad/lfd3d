@@ -26,7 +26,8 @@ seed: 42
 checkpoint:
   # If we want to load a model for a specific run, we can change that here.
   run_id: ???
-  reference: ${wandb.entity}/${wandb.project}/model-${checkpoint.run_id}:best
+  type: rmse
+  reference: ${wandb.entity}/${wandb.project}/best_${checkpoint.type}_model-${checkpoint.run_id}:best
 
 resources:
   num_workers: 4

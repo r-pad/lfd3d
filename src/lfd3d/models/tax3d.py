@@ -23,7 +23,6 @@ from lfd3d.models.dit.models import DiT_PointCloud_Unc as DiT_pcu
 from lfd3d.utils.viz_utils import (
     get_action_anchor_pcd,
     get_img_and_track_pcd,
-    get_img_and_wta_tracks_pcd,
     project_pcd_on_image,
 )
 
@@ -71,7 +70,7 @@ def DiT_PointCloud_xS(use_rotary, **kwargs):
     return DiT_PointCloud(depth=5, hidden_size=hidden_size, num_heads=4, **kwargs)
 
 
-def calc_pcd_metrics(pred_dict, pcd, pred, gt, scale_factor, padding_mask):
+def calc_pcd_metrics(pred_dict, pcd, all_pred, gt, scale_factor, padding_mask):
     """
     Calculate pcd metrics and update pred_dict with the keys.
     Creates point clouds to be measured by applying the predicted
@@ -79,22 +78,10 @@ def calc_pcd_metrics(pred_dict, pcd, pred, gt, scale_factor, padding_mask):
 
     pred_dict: Dictionary with keys to be updated
     pcd: Metric Point Cloud
-    pred: Predicted cross displacement
+    all_pred: Predicted cross displacement of multiple samples
     gt: GT cross displacement
     scale_factor: Scaling factor to bring to metric scale
     padding_mask: Padding mask
-    """
-    pred_pcd = (pcd + pred) * scale_factor[:, None, :]
-    gt_pcd = (pcd + gt) * scale_factor[:, None, :]
-
-    pred_dict["rmse"] = rmse_pcd(pred_pcd, gt_pcd, padding_mask)
-    pred_dict["chamfer_dist"] = chamfer_distance(pred_pcd, gt_pcd, padding_mask)
-    return pred_dict
-
-
-def calc_wta_metrics(pred_dict, pcd, all_pred, gt, scale_factor, padding_mask):
-    """
-    Calculate Winner-Take-All (WTA) pcd metrics and update pred_dict with the keys.
     """
     gt_pcd = (pcd + gt) * scale_factor[:, None, :]
     all_rmse, all_chamfer = [], []
@@ -105,12 +92,12 @@ def calc_wta_metrics(pred_dict, pcd, all_pred, gt, scale_factor, padding_mask):
         all_rmse.append(rmse_pcd(pred_pcd, gt_pcd, padding_mask))
         all_chamfer.append(chamfer_distance(pred_pcd, gt_pcd, padding_mask))
 
+    pred_dict["rmse"] = all_rmse[0]
+    pred_dict["chamfer_dist"] = all_chamfer[0]
     pred_dict["wta_rmse"] = torch.stack(all_rmse).min(0)[0]
     pred_dict["wta_chamfer_dist"] = torch.stack(all_chamfer).min(0)[0]
+    pred_dict["sample_std"] = all_pred.std(dim=(1, 2, 3))  # std deviation of samples
     return pred_dict
-
-
-# TODO: clean up all unused functions
 
 
 DiT_models = {
@@ -290,7 +277,7 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
 
         return {self.prediction_type: {"pred": pred}}
 
-    def log_viz_to_wandb(self, batch, pred_dict, tag):
+    def log_viz_to_wandb(self, batch, pred_dict, tag, save_wta_to_disk=False):
         """
         Log visualizations to wandb.
 
@@ -298,14 +285,22 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
             batch: the input batch
             pred_dict: the prediction dictionary
             tag: the tag to use for logging
+            save_wta_to_disk: flag to enable saving pcd to file
         """
         batch_size = batch[self.label_key].points_padded().shape[0]
         # pick a random sample in the batch to visualize
         viz_idx = np.random.randint(0, batch_size)
         RED, GREEN, BLUE = (255, 0, 0), (0, 255, 0), (0, 0, 255)
 
-        pred = pred_dict[self.prediction_type]["pred"][viz_idx].cpu().numpy()
+        all_pred = pred_dict[self.prediction_type]["all_pred"][viz_idx].cpu().numpy()
+        N = all_pred.shape[0]
         end2start = np.linalg.inv(batch["start2end"][viz_idx].cpu().numpy())
+
+        # Multiple shades of blue for different samples
+        BLUES = [
+            (int(200 * (1 - i / (N - 1))), int(220 * (1 - i / (N - 1))), 255)
+            for i in range(N)
+        ]
 
         goal_text = batch["caption"][viz_idx]
         vid_name = batch["vid_name"][viz_idx]
@@ -315,7 +310,7 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         gt = batch[self.prediction_type].points_padded()[viz_idx].cpu().numpy()
 
         padding_mask = batch["padding_mask"][viz_idx].cpu().numpy()
-        pred_pcd = pcd + pred
+        all_pred_pcd = pcd + all_pred
         gt_pcd = pcd + gt
 
         # Move center back from action_pcd to the camera frame before viz
@@ -323,7 +318,7 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         pcd_std = batch["pcd_std"][viz_idx].cpu().numpy()
         pcd = (pcd * pcd_std) + pcd_mean
         anchor_pcd = (anchor_pcd * pcd_std) + pcd_mean
-        pred_pcd = (pred_pcd * pcd_std) + pcd_mean
+        all_pred_pcd = (all_pred_pcd * pcd_std) + pcd_mean
         gt_pcd = (gt_pcd * pcd_std) + pcd_mean
 
         # All points cloud are in the start image's coordinate frame
@@ -331,8 +326,12 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         # Transform the point clouds to align with end image coordinate frame
         pcd_endframe = np.hstack((pcd, np.ones((pcd.shape[0], 1))))
         pcd_endframe = (end2start @ pcd_endframe.T).T[:, :3]
-        pred_pcd = np.hstack((pred_pcd, np.ones((pred_pcd.shape[0], 1))))
-        pred_pcd = (end2start @ pred_pcd.T).T[:, :3]
+        all_pred_pcd_tmp = []
+        for i in range(N):
+            tmp_pcd = np.hstack((all_pred_pcd[i], np.ones((all_pred_pcd.shape[1], 1))))
+            tmp_pcd = (end2start @ tmp_pcd.T).T[:, :3]
+            all_pred_pcd_tmp.append(tmp_pcd)
+        all_pred_pcd = np.stack(all_pred_pcd_tmp)
         gt_pcd = np.hstack((gt_pcd, np.ones((gt_pcd.shape[0], 1))))
         gt_pcd = (end2start @ gt_pcd.T).T[:, :3]
 
@@ -350,7 +349,9 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         # Project tracks to image and save
         init_rgb_proj = project_pcd_on_image(pcd, padding_mask, rgb_init, K, GREEN)
         end_rgb_proj = project_pcd_on_image(gt_pcd, padding_mask, rgb_end, K, RED)
-        pred_rgb_proj = project_pcd_on_image(pred_pcd, padding_mask, rgb_end, K, BLUE)
+        pred_rgb_proj = project_pcd_on_image(
+            all_pred_pcd[-1], padding_mask, rgb_end, K, BLUE
+        )
         rgb_proj_viz = cv2.hconcat([init_rgb_proj, end_rgb_proj, pred_rgb_proj])
 
         wandb_proj_img = wandb.Image(
@@ -362,17 +363,17 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         ###
 
         # Visualize point cloud
-        viz_pcd = get_img_and_track_pcd(
+        viz_pcd, num_pred_points = get_img_and_track_pcd(
             rgb_end,
             depth_end,
             K,
             padding_mask,
             pcd_endframe,
             gt_pcd,
-            pred_pcd,
+            all_pred_pcd,
             GREEN,
             RED,
-            BLUE,
+            BLUES,
         )
         ###
 
@@ -385,84 +386,6 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         )
         ###
 
-        viz_dict = {
-            f"{tag}/track_projected_to_rgb": wandb_proj_img,
-            f"{tag}/image_and_tracks_pcd": wandb.Object3D(viz_pcd),
-            f"{tag}/action_anchor_pcd": wandb.Object3D(action_anchor_pcd),
-            "trainer/global_step": self.global_step,
-        }
-
-        wandb.log(viz_dict)
-
-    def log_wta_viz_to_wandb(self, batch, pred_dict, tag, save_wta_to_disk):
-        """
-        Log Winner-Take-All visualizations to wandb.
-
-        Args:
-            batch: the input batch
-            pred_dict: the prediction dictionary
-            tag: the tag to use for logging
-            save_wta_to_disk: flag to enable saving pcd to file
-        """
-        batch_size = batch[self.label_key].points_padded().shape[0]
-        # pick a random sample in the batch to visualize
-        viz_idx = np.random.randint(0, batch_size)
-        RED, GREEN, BLUE = (255, 0, 0), (0, 255, 0), (0, 0, 255)
-
-        all_pred = pred_dict[self.prediction_type]["all_pred"][viz_idx].cpu().numpy()
-        end2start = np.linalg.inv(batch["start2end"][viz_idx].cpu().numpy())
-
-        goal_text = batch["caption"][viz_idx]
-        vid_name = batch["vid_name"][viz_idx]
-        rmse = pred_dict["rmse"][viz_idx]
-        pcd = batch["action_pcd"].points_padded()[viz_idx].cpu().numpy()
-        gt = batch[self.prediction_type].points_padded()[viz_idx].cpu().numpy()
-
-        padding_mask = batch["padding_mask"][viz_idx].cpu().numpy()
-        all_pred_pcd = pcd + all_pred
-        gt_pcd = pcd + gt
-
-        # Move center back from action_pcd to the camera frame before viz
-        pcd_mean = batch["pcd_mean"][viz_idx].cpu().numpy()
-        pcd_std = batch["pcd_std"][viz_idx].cpu().numpy()
-        pcd = (pcd * pcd_std) + pcd_mean
-        all_pred_pcd = (all_pred_pcd * pcd_std) + pcd_mean
-        gt_pcd = (gt_pcd * pcd_std) + pcd_mean
-
-        # All points cloud are in the start image's coordinate frame
-        # We need to visualize the end image, therefore need to apply transform
-        # Transform the point clouds to align with end image coordinate frame
-        pcd_endframe = np.hstack((pcd, np.ones((pcd.shape[0], 1))))
-        pcd_endframe = (end2start @ pcd_endframe.T).T[:, :3]
-        all_pred_pcd_tmp = []
-        for i in range(all_pred_pcd.shape[0]):
-            tmp_pcd = np.hstack((all_pred_pcd[i], np.ones((all_pred_pcd.shape[1], 1))))
-            tmp_pcd = (end2start @ tmp_pcd.T).T[:, :3]
-            all_pred_pcd_tmp.append(tmp_pcd)
-        all_pred_pcd = np.stack(all_pred_pcd_tmp)
-
-        gt_pcd = np.hstack((gt_pcd, np.ones((gt_pcd.shape[0], 1))))
-        gt_pcd = (end2start @ gt_pcd.T).T[:, :3]
-
-        K = batch["intrinsics"][viz_idx].cpu().numpy()
-        rgb_end = batch["rgbs"][viz_idx, 1].cpu().numpy()
-        depth_end = batch["depths"][viz_idx, 1].cpu().numpy()
-
-        # Visualize point cloud
-        viz_pcd, num_pred_points = get_img_and_wta_tracks_pcd(
-            rgb_end,
-            depth_end,
-            K,
-            padding_mask,
-            pcd_endframe,
-            gt_pcd,
-            all_pred_pcd,
-            GREEN,
-            RED,
-            BLUE,
-        )
-        ###
-
         if save_wta_to_disk:
             scene_pcd = viz_pcd[:-num_pred_points]
             all_gripper_pcd = viz_pcd[-num_pred_points:]
@@ -472,9 +395,12 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
             np.save(f"{vid_name}-{goal_text}-rmse={rmse}_scene_pcd.npy", scene_pcd)
 
         viz_dict = {
-            f"{tag}/image_and_all_tracks_pcd": wandb.Object3D(viz_pcd),
+            f"{tag}/track_projected_to_rgb": wandb_proj_img,
+            f"{tag}/image_and_tracks_pcd": wandb.Object3D(viz_pcd),
+            f"{tag}/action_anchor_pcd": wandb.Object3D(action_anchor_pcd),
             "trainer/global_step": self.global_step,
         }
+
         wandb.log(viz_dict)
 
     def training_step(self, batch, batch_idx):
@@ -499,10 +425,22 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
 
         # additional logging
         if do_additional_logging:
+            n_samples_wta = self.run_cfg.n_samples_wta
             self.eval()
             with torch.no_grad():
-                pred_dict = self.predict(batch)
-                pred = pred_dict[self.prediction_type]["pred"]
+                all_pred_dict = []
+                for i in range(n_samples_wta):
+                    all_pred_dict.append(self.predict(batch))
+                pred_dict = all_pred_dict[
+                    0
+                ]  # Use one sample for computing other metrics
+                # Store all sample preds for viz
+                pred_dict[self.prediction_type]["all_pred"] = [
+                    i[self.prediction_type]["pred"] for i in all_pred_dict
+                ]
+                pred_dict[self.prediction_type]["all_pred"] = torch.stack(
+                    pred_dict[self.prediction_type]["all_pred"]
+                ).permute(1, 0, 2, 3)
             self.train()  # Switch back to training mode
 
             padding_mask = batch["padding_mask"]
@@ -511,7 +449,7 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
             pred_dict = calc_pcd_metrics(
                 pred_dict,
                 action_pcd.points_padded(),
-                pred,
+                pred_dict[self.prediction_type]["all_pred"],
                 ground_truth.points_padded(),
                 pcd_std,
                 padding_mask,
@@ -535,21 +473,17 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         loss = torch.stack([x["loss"] for x in self.train_outputs]).mean()
         log_dictionary["train/loss"] = loss
 
-        extra_keys = any("rmse" in x.keys() for x in self.train_outputs)
-        if extra_keys:
-            rmse = torch.stack(
-                [x["rmse"].mean() for x in self.train_outputs if "rmse" in x]
+        def mean_metric(metric_name):
+            return torch.stack(
+                [x[metric_name].mean() for x in self.train_outputs if metric_name in x]
             ).mean()
-            log_dictionary["train/rmse"] = rmse
 
-            chamfer_dist = torch.stack(
-                [
-                    x["chamfer_dist"].mean()
-                    for x in self.train_outputs
-                    if "chamfer_dist" in x
-                ]
-            ).mean()
-            log_dictionary["train/chamfer_dist"] = chamfer_dist
+        if any("rmse" in x for x in self.train_outputs):
+            log_dictionary["train/rmse"] = mean_metric("rmse")
+            log_dictionary["train/wta_rmse"] = mean_metric("wta_rmse")
+            log_dictionary["train/chamfer_dist"] = mean_metric("chamfer_dist")
+            log_dictionary["train/wta_chamfer_dist"] = mean_metric("wta_chamfer_dist")
+            log_dictionary["train/sample_std"] = mean_metric("sample_std")
 
         ####################################################
         # logging training metrics
@@ -573,9 +507,20 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         Validation step for the module. Logs validation metrics and visualizations to wandb.
         """
         val_tag = self.trainer.datamodule.val_tags[dataloader_idx]
+        n_samples_wta = self.run_cfg.n_samples_wta
         self.eval()
         with torch.no_grad():
-            pred_dict = self.predict(batch)
+            all_pred_dict = []
+            for i in range(n_samples_wta):
+                all_pred_dict.append(self.predict(batch))
+            pred_dict = all_pred_dict[0]  # Use one sample for computing other metrics
+            # Store all sample preds for viz
+            pred_dict[self.prediction_type]["all_pred"] = [
+                i[self.prediction_type]["pred"] for i in all_pred_dict
+            ]
+            pred_dict[self.prediction_type]["all_pred"] = torch.stack(
+                pred_dict[self.prediction_type]["all_pred"]
+            ).permute(1, 0, 2, 3)
 
         pred = pred_dict[self.prediction_type]["pred"]
         ground_truth = batch[self.label_key].to(self.device)
@@ -585,7 +530,7 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         pred_dict = calc_pcd_metrics(
             pred_dict,
             action_pcd.points_padded(),
-            pred,
+            pred_dict[self.prediction_type]["all_pred"],
             ground_truth.points_padded(),
             pcd_std,
             padding_mask,
@@ -601,30 +546,41 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
 
     def on_validation_epoch_end(self):
         log_dict = {}
+        all_metrics = {
+            "rmse": [],
+            "wta_rmse": [],
+            "chamfer_dist": [],
+            "wta_chamfer_dist": [],
+            "sample_std": [],
+        }
+
         for val_tag in self.trainer.datamodule.val_tags:
             val_outputs = self.val_outputs[val_tag]
-            rmse = torch.stack([x["rmse"].mean() for x in val_outputs]).mean()
-            chamfer_dist = torch.stack(
-                [x["chamfer_dist"].mean() for x in val_outputs]
-            ).mean()
+            tag_metrics = {}
 
-            log_dict[f"val_{val_tag}/rmse"] = rmse
-            log_dict[f"val_{val_tag}/chamfer_dist"] = chamfer_dist
+            if len(val_outputs) == 0:
+                continue
 
-        all_rmse = torch.cat(
-            [
-                torch.stack([x["rmse"].mean() for x in self.val_outputs[tag]])
-                for tag in self.trainer.datamodule.val_tags
-            ]
-        ).mean()
-        all_chamfer_dist = torch.cat(
-            [
-                torch.stack([x["chamfer_dist"].mean() for x in self.val_outputs[tag]])
-                for tag in self.trainer.datamodule.val_tags
-            ]
-        ).mean()
-        log_dict["val/rmse"] = all_rmse
-        log_dict["val/chamfer_dist"] = all_chamfer_dist
+            for metric in all_metrics.keys():
+                values = torch.stack([x[metric].mean() for x in val_outputs]).mean()
+                tag_metrics[metric] = values
+                all_metrics[metric].append(values)
+
+            # Per dataset metrics
+            for metric, value in tag_metrics.items():
+                log_dict[f"val_{val_tag}/{metric}"] = value
+
+        # Avg over all datasets
+        for metric, values in all_metrics.items():
+            log_dict[f"val/{metric}"] = torch.tensor(values).mean()
+
+        # Minimize the linear combination of RMSE (reconstruction error) and -std (i.e. maximize diversity)
+        # TODO: Find a better metric, and dynamically configure this....
+        alpha = 0.95
+        log_dict["val/rmse_and_std_combi"] = alpha * log_dict["val/rmse"] + (
+            1 - alpha
+        ) * (-log_dict["val/sample_std"])
+
         self.log_dict(
             log_dict,
             add_dataloader_idx=False,
@@ -663,20 +619,11 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         pred_dict = calc_pcd_metrics(
             pred_dict,
             action_pcd.points_padded(),
-            pred,
-            ground_truth.points_padded(),
-            pcd_std,
-            padding_mask,
-        )
-        pred_dict = calc_wta_metrics(
-            pred_dict,
-            action_pcd.points_padded(),
             pred_dict[self.prediction_type]["all_pred"],
             ground_truth.points_padded(),
             pcd_std,
             padding_mask,
         )
-
         self.predict_outputs[eval_tag].append(pred_dict)
 
         return {
@@ -717,9 +664,6 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
                     )
                     viz_batch = self.compose_batch_for_viz(batch, idx)
                     self.log_viz_to_wandb(viz_batch, pred_dict, eval_tag)
-                    self.log_wta_viz_to_wandb(
-                        viz_batch, pred_dict, eval_tag, save_wta_to_disk
-                    )
                 if i == 5:
                     break
         self.predict_outputs.clear()
