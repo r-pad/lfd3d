@@ -1,7 +1,6 @@
 name: rpadFoxglove
 data_dir: ""
 cache_dir: null
-type: cross_displacement # (flow, point) Type of dataset
 data_sources: # List of data sources
   - human
   - aloha

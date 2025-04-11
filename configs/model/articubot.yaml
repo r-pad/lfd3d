@@ -1,0 +1,7 @@
+name: articubot
+
+# Model settings
+type: cross_displacement # (flow, point) Type of model
+in_channels: 3 # Number of input channels
+num_classes: 13 # xyz of 4 points and weight of points
+keep_gripper_in_fps: False

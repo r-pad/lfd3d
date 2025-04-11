@@ -1,0 +1,1239 @@
+# from articubot -> model_invariant.py
+
+# NOTE:
+# Trying to implement PointNet++
+# Borrowed from: https://github.com/yanx27/Pointnet_Pointnet2_pytorch
+
+import random
+from collections import defaultdict
+from time import time
+from typing import Dict, List
+
+import cv2
+import numpy as np
+import pytorch_lightning as pl
+import torch
+import torch.nn.functional as F
+import wandb
+from diffusers import get_cosine_schedule_with_warmup
+from pytorch3d.structures import Pointclouds
+from torch import nn, optim
+
+from lfd3d.models.tax3d import calc_pcd_metrics
+from lfd3d.utils.viz_utils import (
+    get_action_anchor_pcd,
+    get_img_and_track_pcd,
+    project_pcd_on_image,
+)
+
+
+def timeit(tag, t):
+    print(f"{tag}: {time() - t}s")
+    return time()
+
+
+def pc_normalize(pc):
+    l = pc.shape[0]
+    centroid = np.mean(pc, axis=0)
+    pc = pc - centroid
+    m = np.max(np.sqrt(np.sum(pc**2, axis=1)))
+    pc = pc / m
+    return pc
+
+
+def square_distance(src, dst):
+    """
+    Calculate Euclid distance between each two points.
+
+    src^T * dst = xn * xm + yn * ym + zn * zm;
+    sum(src^2, dim=-1) = xn*xn + yn*yn + zn*zn;
+    sum(dst^2, dim=-1) = xm*xm + ym*ym + zm*zm;
+    dist = (xn - xm)^2 + (yn - ym)^2 + (zn - zm)^2
+         = sum(src**2,dim=-1)+sum(dst**2,dim=-1)-2*src^T*dst
+
+    Input:
+        src: source points, [B, N, C]
+        dst: target points, [B, M, C]
+    Output:
+        dist: per-point square distance, [B, N, M]
+    """
+    B, N, _ = src.shape
+    _, M, _ = dst.shape
+    dist = -2 * torch.matmul(src, dst.permute(0, 2, 1))
+    dist += torch.sum(src**2, -1).view(B, N, 1)
+    dist += torch.sum(dst**2, -1).view(B, 1, M)
+    return dist
+
+
+def index_points(points, idx):
+    """
+
+    Input:
+        points: input points data, [B, N, C]
+        idx: sample index data, [B, S]
+    Return:
+        new_points:, indexed points data, [B, S, C]
+    """
+    device = points.device
+    B = points.shape[0]
+    view_shape = list(idx.shape)
+    view_shape[1:] = [1] * (len(view_shape) - 1)
+    repeat_shape = list(idx.shape)
+    repeat_shape[0] = 1
+    batch_indices = (
+        torch.arange(B, dtype=torch.long)
+        .to(device)
+        .view(view_shape)
+        .repeat(repeat_shape)
+    )
+    new_points = points[batch_indices, idx, :]
+    return new_points
+
+
+def farthest_point_sample(xyz_, npoint, keep_gripper_in_fps=False):
+    """
+    Input:
+        xyz: pointcloud data, [B, N, 3]
+        npoint: number of samples
+    Return:
+        centroids: sampled pointcloud index, [B, npoint]
+    """
+    if keep_gripper_in_fps:  # NOTE: assuming there are 4 gripper points
+        xyz = xyz_[:, :-4, :]
+        npoint = npoint - 4
+    else:
+        xyz = xyz_
+
+    device = xyz.device
+    B, N, C = xyz.shape
+    centroids = torch.zeros(B, npoint, dtype=torch.long).to(device)
+    distance = torch.ones(B, N).to(device) * 1e10
+    farthest = torch.randint(0, N, (B,), dtype=torch.long).to(device)
+    farthest = farthest * 0  # set to 0
+    batch_indices = torch.arange(B, dtype=torch.long).to(device)
+    for i in range(npoint):
+        centroids[:, i] = farthest
+        centroid = xyz[batch_indices, farthest, :].view(B, 1, 3)
+        dist = torch.sum((xyz - centroid) ** 2, -1)
+        mask = dist < distance
+        distance[mask] = dist[mask]
+        farthest = torch.max(distance, -1)[1]
+
+    if keep_gripper_in_fps:
+        gripper_indices = torch.Tensor([N, N + 1, N + 2, N + 3]).long().to(device)
+        gripper_indices = gripper_indices.unsqueeze(0).repeat(B, 1)
+        centroids = torch.cat([centroids, gripper_indices], dim=1)
+    return centroids
+
+
+def query_ball_point(radius, nsample, xyz, new_xyz):
+    """
+    Input:
+        radius: local region radius
+        nsample: max sample number in local region
+        xyz: all points, [B, N, 3]
+        new_xyz: query points, [B, S, 3]
+    Return:
+        group_idx: grouped points index, [B, S, nsample]
+    """
+    device = xyz.device
+    B, N, C = xyz.shape
+    _, S, _ = new_xyz.shape
+    group_idx = (
+        torch.arange(N, dtype=torch.long).to(device).view(1, 1, N).repeat([B, S, 1])
+    )
+    sqrdists = square_distance(new_xyz, xyz)
+    group_idx[sqrdists > radius**2] = N
+    group_idx = group_idx.sort(dim=-1)[0][:, :, :nsample]
+    group_first = group_idx[:, :, 0].view(B, S, 1).repeat([1, 1, nsample])
+    mask = group_idx == N
+    group_idx[mask] = group_first[mask]
+    return group_idx
+
+
+def sample_and_group(npoint, radius, nsample, xyz, points, returnfps=False):
+    """
+    Input:
+        npoint:
+        radius:
+        nsample:
+        xyz: input points position data, [B, N, 3]
+        points: input points data, [B, N, D]
+    Return:
+        new_xyz: sampled points position data, [B, npoint, nsample, 3]
+        new_points: sampled points data, [B, npoint, nsample, 3+D]
+    """
+    B, N, C = xyz.shape
+    S = npoint
+    fps_idx = farthest_point_sample(xyz, npoint)  # [B, npoint, C]
+    new_xyz = index_points(xyz, fps_idx)
+    idx = query_ball_point(radius, nsample, xyz, new_xyz)
+    grouped_xyz = index_points(xyz, idx)  # [B, npoint, nsample, C]
+    grouped_xyz_norm = grouped_xyz - new_xyz.view(B, S, 1, C)
+
+    if points is not None:
+        grouped_points = index_points(points, idx)
+        new_points = torch.cat(
+            [grouped_xyz_norm, grouped_points], dim=-1
+        )  # [B, npoint, nsample, C+D]
+    else:
+        new_points = grouped_xyz_norm
+    if returnfps:
+        return new_xyz, new_points, grouped_xyz, fps_idx
+    else:
+        return new_xyz, new_points
+
+
+def sample_and_group_all(xyz, points):
+    """
+    Input:
+        xyz: input points position data, [B, N, 3]
+        points: input points data, [B, N, D]
+    Return:
+        new_xyz: sampled points position data, [B, 1, 3]
+        new_points: sampled points data, [B, 1, N, 3+D]
+    """
+    device = xyz.device
+    B, N, C = xyz.shape
+    new_xyz = torch.zeros(B, 1, C).to(device)
+    grouped_xyz = xyz.view(B, 1, N, C)
+    if points is not None:
+        new_points = torch.cat([grouped_xyz, points.view(B, 1, N, -1)], dim=-1)
+    else:
+        new_points = grouped_xyz
+    return new_xyz, new_points
+
+
+class PointNetSetAbstraction(nn.Module):
+    def __init__(self, npoint, radius, nsample, in_channel, mlp, group_all):
+        super(PointNetSetAbstraction, self).__init__()
+        self.npoint = npoint
+        self.radius = radius
+        self.nsample = nsample
+        self.mlp_convs = nn.ModuleList()
+        self.mlp_bns = nn.ModuleList()
+        last_channel = in_channel
+        for out_channel in mlp:
+            self.mlp_convs.append(nn.Conv2d(last_channel, out_channel, 1))
+            self.mlp_bns.append(nn.BatchNorm2d(out_channel))
+            last_channel = out_channel
+        self.group_all = group_all
+
+    def forward(self, xyz, points):
+        """
+        Input:
+            xyz: input points position data, [B, C, N]
+            points: input points data, [B, D, N]
+        Return:
+            new_xyz: sampled points position data, [B, C, S]
+            new_points_concat: sample points feature data, [B, D', S]
+        """
+        xyz = xyz.permute(0, 2, 1)
+        if points is not None:
+            points = points.permute(0, 2, 1)
+
+        if self.group_all:
+            new_xyz, new_points = sample_and_group_all(xyz, points)
+        else:
+            new_xyz, new_points = sample_and_group(
+                self.npoint, self.radius, self.nsample, xyz, points
+            )
+        # new_xyz: sampled points position data, [B, npoint, C]
+        # new_points: sampled points data, [B, npoint, nsample, C+D]
+        new_points = new_points.permute(0, 3, 2, 1)  # [B, C+D, nsample,npoint]
+        for i, conv in enumerate(self.mlp_convs):
+            bn = self.mlp_bns[i]
+            new_points = F.relu(bn(conv(new_points)))
+
+        new_points = torch.max(new_points, 2)[0]
+        new_xyz = new_xyz.permute(0, 2, 1)
+        return new_xyz, new_points
+
+
+class PointNetSetAbstractionMsg(nn.Module):
+    def __init__(
+        self,
+        npoint,
+        radius_list,
+        nsample_list,
+        in_channel,
+        mlp_list,
+        keep_gripper_in_fps=False,
+    ):
+        super(PointNetSetAbstractionMsg, self).__init__()
+        self.keep_gripper_in_fps = keep_gripper_in_fps
+        self.npoint = npoint
+        self.radius_list = radius_list
+        self.nsample_list = nsample_list
+        self.conv_blocks = nn.ModuleList()
+        self.bn_blocks = nn.ModuleList()
+        for i in range(len(mlp_list)):
+            convs = nn.ModuleList()
+            bns = nn.ModuleList()
+            last_channel = in_channel + 3
+            for out_channel in mlp_list[i]:
+                convs.append(nn.Conv2d(last_channel, out_channel, 1))
+                bns.append(nn.BatchNorm2d(out_channel))
+                last_channel = out_channel
+            self.conv_blocks.append(convs)
+            self.bn_blocks.append(bns)
+
+    def forward(self, xyz, points):
+        """
+        Input:
+            xyz: input points position data, [B, C, N]
+            points: input points data, [B, D, N]
+        Return:
+            new_xyz: sampled points position data, [B, C, S]
+            new_points_concat: sample points feature data, [B, D', S]
+        """
+        xyz = xyz.permute(0, 2, 1)
+        if points is not None:
+            points = points.permute(0, 2, 1)
+
+        B, N, C = xyz.shape
+        S = self.npoint
+        new_xyz = index_points(
+            xyz, farthest_point_sample(xyz, S, self.keep_gripper_in_fps)
+        )
+        new_points_list = []
+        for i, radius in enumerate(self.radius_list):
+            K = self.nsample_list[i]
+            group_idx = query_ball_point(radius, K, xyz, new_xyz)
+            grouped_xyz = index_points(xyz, group_idx)
+            grouped_xyz -= new_xyz.view(B, S, 1, C)
+            if points is not None:
+                grouped_points = index_points(points, group_idx)
+                grouped_points = torch.cat([grouped_points, grouped_xyz], dim=-1)
+            else:
+                grouped_points = grouped_xyz
+
+            grouped_points = grouped_points.permute(0, 3, 2, 1)  # [B, D, K, S]
+            for j in range(len(self.conv_blocks[i])):
+                conv = self.conv_blocks[i][j]
+                bn = self.bn_blocks[i][j]
+                grouped_points = F.relu(bn(conv(grouped_points)))
+            new_points = torch.max(grouped_points, 2)[0]  # [B, D', S]
+            new_points_list.append(new_points)
+
+        new_xyz = new_xyz.permute(0, 2, 1)
+        new_points_concat = torch.cat(new_points_list, dim=1)
+        return new_xyz, new_points_concat
+
+
+class PointNetFeaturePropagation(nn.Module):
+    def __init__(self, in_channel, mlp):
+        super(PointNetFeaturePropagation, self).__init__()
+        self.mlp_convs = nn.ModuleList()
+        self.mlp_bns = nn.ModuleList()
+        last_channel = in_channel
+        for out_channel in mlp:
+            self.mlp_convs.append(nn.Conv1d(last_channel, out_channel, 1))
+            self.mlp_bns.append(nn.BatchNorm1d(out_channel))
+            last_channel = out_channel
+
+    def forward(self, xyz1, xyz2, points1, points2):
+        """
+        Input:
+            xyz1: input points position data, [B, C, N]
+            xyz2: sampled input points position data, [B, C, S]
+            points1: input points data, [B, D, N]
+            points2: input points data, [B, D, S]
+        Return:
+            new_points: upsampled points data, [B, D', N]
+        """
+        xyz1 = xyz1.permute(0, 2, 1)
+        xyz2 = xyz2.permute(0, 2, 1)
+
+        points2 = points2.permute(0, 2, 1)
+        B, N, C = xyz1.shape
+        _, S, _ = xyz2.shape
+
+        if S == 1:
+            interpolated_points = points2.repeat(1, N, 1)
+        else:
+            dists = square_distance(xyz1, xyz2)
+            dists, idx = dists.sort(dim=-1)
+            dists, idx = dists[:, :, :3], idx[:, :, :3]  # [B, N, 3]
+
+            dist_recip = 1.0 / (dists + 1e-8)
+            norm = torch.sum(dist_recip, dim=2, keepdim=True)
+            weight = dist_recip / norm
+            interpolated_points = torch.sum(
+                index_points(points2, idx) * weight.view(B, N, 3, 1), dim=2
+            )
+
+        if points1 is not None:
+            points1 = points1.permute(0, 2, 1)
+            new_points = torch.cat([points1, interpolated_points], dim=-1)
+        else:
+            new_points = interpolated_points
+
+        new_points = new_points.permute(0, 2, 1)
+        for i, conv in enumerate(self.mlp_convs):
+            bn = self.mlp_bns[i]
+            new_points = F.relu(bn(conv(new_points)))
+        return new_points
+
+
+class PointNet2(nn.Module):
+    def __init__(self, num_classes):
+        super(PointNet2, self).__init__()
+        # self.sa1 = PointNetSetAbstractionMsg(npoint=1024, radius_list=[0.05, 0.1], nsample_list=[16, 32], in_channel=3, mlp_list=[[16, 16, 32], [32, 32, 64]])
+        self.sa1 = PointNetSetAbstractionMsg(
+            npoint=1024,
+            radius_list=[0.05, 0.1],
+            nsample_list=[16, 32],
+            in_channel=0,
+            mlp_list=[[16, 16, 32], [32, 32, 64]],
+        )
+        self.sa2 = PointNetSetAbstractionMsg(
+            npoint=256,
+            radius_list=[0.1, 0.2],
+            nsample_list=[16, 32],
+            in_channel=96,
+            mlp_list=[[64, 64, 128], [64, 96, 128]],
+        )
+        self.sa3 = PointNetSetAbstractionMsg(
+            64, [0.2, 0.4], [16, 32], 128 + 128, [[128, 196, 256], [128, 196, 256]]
+        )
+        self.sa4 = PointNetSetAbstractionMsg(
+            16, [0.4, 0.8], [16, 32], 256 + 256, [[256, 256, 512], [256, 384, 512]]
+        )
+        self.fp4 = PointNetFeaturePropagation(512 + 512 + 256 + 256, [256, 256])
+        self.fp3 = PointNetFeaturePropagation(128 + 128 + 256, [256, 256])
+        self.fp2 = PointNetFeaturePropagation(32 + 64 + 256, [256, 128])
+        self.fp1 = PointNetFeaturePropagation(128, [128, 128, 128])
+        self.conv1 = nn.Conv1d(128, 128, 1)
+        self.bn1 = nn.BatchNorm1d(128)
+        self.conv2 = nn.Conv1d(128, num_classes, 1)
+
+    def forward(self, xyz):
+        l0_points = xyz
+        l0_xyz = xyz[:, :3, :]
+        # l1_xyz, l1_points = self.sa1(l0_xyz, l0_points) # (B, 3, 1024) (B, 96, 1024)
+        l1_xyz, l1_points = self.sa1(l0_xyz, None)  # (B, 3, 1024) (B, 96, 1024)
+        l2_xyz, l2_points = self.sa2(l1_xyz, l1_points)  # (B, 3, 256) (B, 256, 256)
+        l3_xyz, l3_points = self.sa3(l2_xyz, l2_points)  # (B, 3, 64) (B, 512, 64)
+        l4_xyz, l4_points = self.sa4(l3_xyz, l3_points)  # (B, 3, 16) (B, 1024, 16)
+
+        l3_points = self.fp4(l3_xyz, l4_xyz, l3_points, l4_points)  # (B, 512, 64)
+        l2_points = self.fp3(l2_xyz, l3_xyz, l2_points, l3_points)  # (B, 256, 256)
+        l1_points = self.fp2(l1_xyz, l2_xyz, l1_points, l2_points)  # (B, 128, 1024)
+        l0_points = self.fp1(l0_xyz, l1_xyz, None, l1_points)
+
+        x = F.relu(self.bn1(self.conv1(l0_points)))
+        x = self.conv2(x)
+        # x = F.log_softmax(x, dim=1)
+        x = x.permute(0, 2, 1)
+        return x  # x shape: B, N, num_classes
+
+
+class PointNet2_super(nn.Module):
+    def __init__(self, num_classes, input_channel=3, keep_gripper_in_fps=False):
+        super(PointNet2_super, self).__init__()
+        self.sa1 = PointNetSetAbstractionMsg(
+            npoint=1024,
+            radius_list=[0.025, 0.05],
+            nsample_list=[16, 32],
+            in_channel=input_channel - 3,
+            mlp_list=[[16, 16, 32], [32, 32, 64]],
+            keep_gripper_in_fps=keep_gripper_in_fps,
+        )
+        self.sa2 = PointNetSetAbstractionMsg(
+            npoint=512,
+            radius_list=[0.05, 0.1],
+            nsample_list=[16, 32],
+            in_channel=96,
+            mlp_list=[[64, 64, 128], [64, 96, 128]],
+            keep_gripper_in_fps=keep_gripper_in_fps,
+        )
+        self.sa3 = PointNetSetAbstractionMsg(
+            256,
+            [0.1, 0.2],
+            [16, 32],
+            128 + 128,
+            [[128, 196, 256], [128, 196, 256]],
+            keep_gripper_in_fps=keep_gripper_in_fps,
+        )
+        self.sa4 = PointNetSetAbstractionMsg(
+            128,
+            [0.2, 0.4],
+            [16, 32],
+            256 + 256,
+            [[256, 256, 512], [256, 384, 512]],
+            keep_gripper_in_fps=keep_gripper_in_fps,
+        )
+        self.sa5 = PointNetSetAbstractionMsg(
+            64,
+            [0.4, 0.8],
+            [16, 32],
+            512 + 512,
+            [[512, 512, 512], [512, 512, 512]],
+            keep_gripper_in_fps=keep_gripper_in_fps,
+        )
+        self.sa6 = PointNetSetAbstractionMsg(
+            16,
+            [0.8, 1.6],
+            [16, 32],
+            512 + 512,
+            [[512, 512, 512], [512, 512, 512]],
+            keep_gripper_in_fps=keep_gripper_in_fps,
+        )
+        self.fp6 = PointNetFeaturePropagation(512 + 512 + 512 + 512, [512, 512])
+        self.fp5 = PointNetFeaturePropagation(512 + 512 + 256 + 256, [512, 512])
+        self.fp4 = PointNetFeaturePropagation(1024, [256, 256])
+        self.fp3 = PointNetFeaturePropagation(128 + 128 + 256, [256, 256])
+        self.fp2 = PointNetFeaturePropagation(32 + 64 + 256, [256, 128])
+        self.fp1 = PointNetFeaturePropagation(128, [128, 128, 128])
+        self.conv1 = nn.Conv1d(128, 128, 1)
+        self.bn1 = nn.BatchNorm1d(128)
+        # self.drop1 = nn.Dropout(0.5)
+        self.conv2 = nn.Conv1d(128, num_classes, 1)
+
+    def forward(self, xyz):
+        l0_points = xyz
+        l0_xyz = xyz[:, :3, :]
+
+        if xyz.shape[1] > 3:
+            l1_xyz, l1_points = self.sa1(l0_xyz, xyz[:, 3:, :])
+        else:
+            l1_xyz, l1_points = self.sa1(l0_xyz, None)  # (B, 3, 1024) (B, 96, 1024)
+
+        l2_xyz, l2_points = self.sa2(l1_xyz, l1_points)  # (B, 3, 512) (B, 256, 512)
+        l3_xyz, l3_points = self.sa3(l2_xyz, l2_points)  # (B, 3, 256) (B, 512, 256)
+        l4_xyz, l4_points = self.sa4(l3_xyz, l3_points)  # (B, 3, 128) (B, 1024, 16)
+        l5_xyz, l5_points = self.sa5(l4_xyz, l4_points)  # (B, 3, 64) (B , 1024, 64)
+        l6_xyz, l6_points = self.sa6(l5_xyz, l5_points)  # (B, 3, 16) (B, 1024, 16)
+
+        l5_points = self.fp6(l5_xyz, l6_xyz, l5_points, l6_points)  # (B, 512, 64)
+        l4_points = self.fp5(l4_xyz, l5_xyz, l4_points, l5_points)  # (B, 512, 128)
+        l3_points = self.fp4(l3_xyz, l4_xyz, l3_points, l4_points)  # (B, 256, 256)
+        l2_points = self.fp3(l2_xyz, l3_xyz, l2_points, l3_points)  # (B, 256, 512)
+        l1_points = self.fp2(l1_xyz, l2_xyz, l1_points, l2_points)  # (B, 128, 1024)
+        l0_points = self.fp1(l0_xyz, l1_xyz, None, l1_points)  # (B, 128, num_point)
+
+        x = F.relu(self.bn1(self.conv1(l0_points)))
+        x = self.conv2(x)
+        # x = F.log_softmax(x, dim=1)
+        x = x.permute(0, 2, 1)
+        return x  # x shape: B, N, num_classes
+
+
+class PointNet2_superplus(nn.Module):
+    def __init__(self, num_classes):
+        super(PointNet2_superplus, self).__init__()
+        self.sa0 = PointNetSetAbstractionMsg(
+            npoint=2048,
+            radius_list=[0.0125, 0.025],
+            nsample_list=[16, 32],
+            in_channel=0,
+            mlp_list=[[32, 32, 64], [64, 64, 128]],
+        )
+        self.sa1 = PointNetSetAbstractionMsg(
+            npoint=1024,
+            radius_list=[0.025, 0.05],
+            nsample_list=[16, 32],
+            in_channel=64 + 128,
+            mlp_list=[[64, 64, 128], [128, 196, 256]],
+        )
+        self.sa2 = PointNetSetAbstractionMsg(
+            npoint=512,
+            radius_list=[0.05, 0.1],
+            nsample_list=[16, 32],
+            in_channel=128 + 256,
+            mlp_list=[[128, 196, 256], [128, 196, 256]],
+        )
+        self.sa3 = PointNetSetAbstractionMsg(
+            256, [0.1, 0.2], [16, 32], 256 + 256, [[256, 384, 512], [256, 384, 512]]
+        )
+        self.sa4 = PointNetSetAbstractionMsg(
+            128, [0.2, 0.4], [16, 32], 512 + 512, [[256, 384, 512], [256, 384, 512]]
+        )
+        self.sa5 = PointNetSetAbstractionMsg(
+            64, [0.4, 0.8], [16, 32], 512 + 512, [[512, 512, 512], [512, 512, 512]]
+        )
+        self.sa6 = PointNetSetAbstractionMsg(
+            16, [0.8, 1.6], [16, 32], 512 + 512, [[512, 512, 512], [512, 512, 512]]
+        )
+        self.fp6 = PointNetFeaturePropagation(512 + 512 + 512 + 512, [512, 512, 512])
+        self.fp5 = PointNetFeaturePropagation(512 + 512 + 512, [512, 512, 512])
+        self.fp4 = PointNetFeaturePropagation(512 + 512 + 512, [512, 384, 256])
+        self.fp3 = PointNetFeaturePropagation(256 + 256 + 256, [256, 256, 256])
+        self.fp2 = PointNetFeaturePropagation(256 + 256 + 128, [256, 128, 128])
+        self.fp1 = PointNetFeaturePropagation(128 + 128 + 64, [128, 128, 128])
+        self.fp0 = PointNetFeaturePropagation(128, [128, 128, 128])
+        self.conv1 = nn.Conv1d(128, 128, 1)
+        self.bn1 = nn.BatchNorm1d(128)
+        # self.drop1 = nn.Dropout(0.5)
+        self.conv2 = nn.Conv1d(128, num_classes, 1)
+
+    def forward(self, xyz):
+        l0_points = xyz
+        l0_xyz = xyz[:, :3, :]
+
+        l01_xyz, l01_points = self.sa0(l0_xyz, None)  # (B, 3, 1024) (B, 96, 1024)
+        l1_xyz, l1_points = self.sa1(l01_xyz, l01_points)  # (B, 3, 1024) (B, 96, 1024)
+        l2_xyz, l2_points = self.sa2(l1_xyz, l1_points)  # (B, 3, 512) (B, 256, 512)
+        l3_xyz, l3_points = self.sa3(l2_xyz, l2_points)  # (B, 3, 256) (B, 512, 256)
+        l4_xyz, l4_points = self.sa4(l3_xyz, l3_points)  # (B, 3, 128) (B, 1024, 16)
+        l5_xyz, l5_points = self.sa5(l4_xyz, l4_points)  # (B, 3, 64) (B , 1024, 64)
+        l6_xyz, l6_points = self.sa6(l5_xyz, l5_points)  # (B, 3, 16) (B, 1024, 16)
+
+        l5_points = self.fp6(l5_xyz, l6_xyz, l5_points, l6_points)  # (B, 512, 64)
+        l4_points = self.fp5(l4_xyz, l5_xyz, l4_points, l5_points)  # (B, 512, 128)
+        l3_points = self.fp4(l3_xyz, l4_xyz, l3_points, l4_points)  # (B, 256, 256)
+        l2_points = self.fp3(l2_xyz, l3_xyz, l2_points, l3_points)  # (B, 256, 512)
+        l1_points = self.fp2(l1_xyz, l2_xyz, l1_points, l2_points)  # (B, 128, 1024)
+        l01_points = self.fp1(
+            l01_xyz, l1_xyz, l01_points, l1_points
+        )  # (B, 128, num_point)
+        l0_points = self.fp0(l0_xyz, l01_xyz, None, l01_points)  # (B, 128, num_point)
+
+        x = F.relu(self.bn1(self.conv1(l0_points)))
+        x = self.conv2(x)
+        x = x.permute(0, 2, 1)
+        return x  # x shape: B, N, num_classes
+
+
+class ArticubotNetwork(nn.Module):
+    """
+    Modified version of PointNet2_super to work with this codebase
+    """
+
+    def __init__(self, model_cfg):
+        super(ArticubotNetwork, self).__init__()
+
+        num_classes = model_cfg.num_classes
+        input_channel = model_cfg.in_channels
+        keep_gripper_in_fps = model_cfg.keep_gripper_in_fps
+
+        self.sa1 = PointNetSetAbstractionMsg(
+            npoint=1024,
+            radius_list=[0.025, 0.05],
+            nsample_list=[16, 32],
+            in_channel=input_channel - 3,
+            mlp_list=[[16, 16, 32], [32, 32, 64]],
+            keep_gripper_in_fps=keep_gripper_in_fps,
+        )
+        self.sa2 = PointNetSetAbstractionMsg(
+            npoint=512,
+            radius_list=[0.05, 0.1],
+            nsample_list=[16, 32],
+            in_channel=96,
+            mlp_list=[[64, 64, 128], [64, 96, 128]],
+            keep_gripper_in_fps=keep_gripper_in_fps,
+        )
+        self.sa3 = PointNetSetAbstractionMsg(
+            256,
+            [0.1, 0.2],
+            [16, 32],
+            128 + 128,
+            [[128, 196, 256], [128, 196, 256]],
+            keep_gripper_in_fps=keep_gripper_in_fps,
+        )
+        self.sa4 = PointNetSetAbstractionMsg(
+            128,
+            [0.2, 0.4],
+            [16, 32],
+            256 + 256,
+            [[256, 256, 512], [256, 384, 512]],
+            keep_gripper_in_fps=keep_gripper_in_fps,
+        )
+        self.sa5 = PointNetSetAbstractionMsg(
+            64,
+            [0.4, 0.8],
+            [16, 32],
+            512 + 512,
+            [[512, 512, 512], [512, 512, 512]],
+            keep_gripper_in_fps=keep_gripper_in_fps,
+        )
+        self.sa6 = PointNetSetAbstractionMsg(
+            16,
+            [0.8, 1.6],
+            [16, 32],
+            512 + 512,
+            [[512, 512, 512], [512, 512, 512]],
+            keep_gripper_in_fps=keep_gripper_in_fps,
+        )
+        self.fp6 = PointNetFeaturePropagation(512 + 512 + 512 + 512, [512, 512])
+        self.fp5 = PointNetFeaturePropagation(512 + 512 + 256 + 256, [512, 512])
+        self.fp4 = PointNetFeaturePropagation(1024, [256, 256])
+        self.fp3 = PointNetFeaturePropagation(128 + 128 + 256, [256, 256])
+        self.fp2 = PointNetFeaturePropagation(32 + 64 + 256, [256, 128])
+        self.fp1 = PointNetFeaturePropagation(128, [128, 128, 128])
+        self.conv1 = nn.Conv1d(128, 128, 1)
+        self.bn1 = nn.BatchNorm1d(128)
+        # self.drop1 = nn.Dropout(0.5)
+        self.conv2 = nn.Conv1d(128, num_classes, 1)
+
+    def forward(self, xyz):
+        l0_points = xyz
+        l0_xyz = xyz[:, :3, :]
+
+        if xyz.shape[1] > 3:
+            l1_xyz, l1_points = self.sa1(l0_xyz, xyz[:, 3:, :])
+        else:
+            l1_xyz, l1_points = self.sa1(l0_xyz, None)  # (B, 3, 1024) (B, 96, 1024)
+
+        l2_xyz, l2_points = self.sa2(l1_xyz, l1_points)  # (B, 3, 512) (B, 256, 512)
+        l3_xyz, l3_points = self.sa3(l2_xyz, l2_points)  # (B, 3, 256) (B, 512, 256)
+        l4_xyz, l4_points = self.sa4(l3_xyz, l3_points)  # (B, 3, 128) (B, 1024, 16)
+        l5_xyz, l5_points = self.sa5(l4_xyz, l4_points)  # (B, 3, 64) (B , 1024, 64)
+        l6_xyz, l6_points = self.sa6(l5_xyz, l5_points)  # (B, 3, 16) (B, 1024, 16)
+
+        l5_points = self.fp6(l5_xyz, l6_xyz, l5_points, l6_points)  # (B, 512, 64)
+        l4_points = self.fp5(l4_xyz, l5_xyz, l4_points, l5_points)  # (B, 512, 128)
+        l3_points = self.fp4(l3_xyz, l4_xyz, l3_points, l4_points)  # (B, 256, 256)
+        l2_points = self.fp3(l2_xyz, l3_xyz, l2_points, l3_points)  # (B, 256, 512)
+        l1_points = self.fp2(l1_xyz, l2_xyz, l1_points, l2_points)  # (B, 128, 1024)
+        l0_points = self.fp1(l0_xyz, l1_xyz, None, l1_points)  # (B, 128, num_point)
+
+        x = F.relu(self.bn1(self.conv1(l0_points)))
+        x = self.conv2(x)
+        # x = F.log_softmax(x, dim=1)
+        x = x.permute(0, 2, 1)
+        return x  # x shape: B, N, num_classes
+
+
+class GoalRegressionModule(pl.LightningModule):
+    """
+    A goal generation module that handles model training, inference, evaluation and visualization.
+    Based on CrossDisplacementModule but reworked to use the Articubot high-level model.
+    """
+
+    def __init__(self, network, cfg) -> None:
+        super().__init__()
+        self.network = network
+        self.model_cfg = cfg.model
+        self.prediction_type = self.model_cfg.type  # flow or point
+        self.mode = cfg.mode  # train or eval
+        self.val_outputs: defaultdict[str, List[Dict]] = defaultdict(list)
+        self.train_outputs: List[Dict] = []
+        self.predict_outputs: defaultdict[str, List[Dict]] = defaultdict(list)
+
+        if self.prediction_type != "cross_displacement":
+            raise ValueError(f"Invalid prediction type: {self.prediction_type}")
+        self.label_key = "cross_displacement"
+
+        # mode-specific processing
+        if self.mode == "train":
+            self.run_cfg = cfg.training
+            # training-specific params
+            self.lr = self.run_cfg.lr
+            self.weight_decay = self.run_cfg.weight_decay
+            self.num_training_steps = self.run_cfg.num_training_steps
+            self.lr_warmup_steps = self.run_cfg.lr_warmup_steps
+            self.additional_train_logging_period = (
+                self.run_cfg.additional_train_logging_period
+            )
+        elif self.mode == "eval":
+            self.run_cfg = cfg.inference
+        else:
+            raise ValueError(f"Invalid mode: {self.mode}")
+
+        # data params
+        self.batch_size = self.run_cfg.batch_size
+        self.val_batch_size = self.run_cfg.val_batch_size
+
+        # TODO: Make config param
+        self.GRIPPER_IDX = [6, 197, 174]  # indexes of selected gripper points
+        self.weight_loss_weight = 10  # weight of the weighted displacement loss term
+
+    def configure_optimizers(self):
+        assert self.mode == "train", "Can only configure optimizers in training mode."
+        optimizer = optim.AdamW(
+            self.parameters(), lr=self.lr, weight_decay=self.weight_decay
+        )
+        lr_scheduler = get_cosine_schedule_with_warmup(
+            optimizer=optimizer,
+            num_warmup_steps=self.lr_warmup_steps,
+            num_training_steps=self.num_training_steps,
+        )
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {
+                "scheduler": lr_scheduler,
+                "interval": "step",  # Step after every batch
+            },
+        }
+
+    def extract_gt_4_points(self, batch):
+        cross_displacement = batch[self.label_key].points_padded()
+        initial_gripper = batch["action_pcd"].points_padded()
+        ground_truth_gripper = initial_gripper + cross_displacement
+
+        # Select specific idxs to compute the loss over
+        # TODO: Find a cleaner way to pass the idxs
+        gt_primary_points = ground_truth_gripper[:, self.GRIPPER_IDX, :]
+        # Assumes 0/1 are tips to be averaged
+        gt_extra_point = (gt_primary_points[:, 0, :] + gt_primary_points[:, 1, :]) / 2
+        gt = torch.cat([gt_primary_points, gt_extra_point[:, None, :]], dim=1)
+
+        init_primary_points = initial_gripper[:, self.GRIPPER_IDX, :]
+        init_extra_point = (
+            init_primary_points[:, 0, :] + init_primary_points[:, 1, :]
+        ) / 2
+        init = torch.cat([init_primary_points, init_extra_point[:, None, :]], dim=1)
+        return init, gt
+
+    def get_weighted_displacement(self, outputs):
+        weights = outputs[:, :, -1]  # B, N
+        outputs = outputs[:, :, :-1]  # B, N, 12
+
+        # softmax the weights
+        weights = torch.nn.functional.softmax(weights, dim=1)
+
+        # sum the displacement of the predicted gripper point cloud according to the weights
+        outputs = outputs * weights.unsqueeze(-1)
+        outputs = outputs.sum(dim=1)
+        return outputs.reshape(-1, 4, 3)
+
+    def forward(self, batch):
+        initial_gripper = batch["action_pcd"].points_padded()
+        scene_pcd = batch["anchor_pcd"].points_padded()
+        batch_size, pcd_size, _ = scene_pcd.shape
+        # Network currently doesn't see action pcd
+        outputs = self.network(scene_pcd.permute(0, 2, 1))
+        init, gt = self.extract_gt_4_points(batch)
+        pred_points = self.get_weighted_displacement(outputs)
+
+        pred_displacement = outputs[:, :, :-1].reshape(batch_size, pcd_size, 4, 3)
+        gt_displacement = scene_pcd[:, :, None, :] - gt[:, None, :, :]
+
+        weighted_avg_loss = F.mse_loss(pred_points, gt)
+        per_point_displacement_loss = F.mse_loss(pred_displacement, gt_displacement)
+        loss = per_point_displacement_loss + self.weight_loss_weight * weighted_avg_loss
+
+        return None, loss
+
+    @torch.no_grad()
+    def predict(self, batch, progress=False):
+        """
+        Compute prediction for a given batch.
+
+        Args:
+            batch: the input batch
+            progress: whether to show progress bar
+        """
+        batch_size, sample_size = batch[self.label_key].points_padded().shape[:2]
+        scene_pcd = batch["anchor_pcd"].points_padded()
+        outputs = self.network(scene_pcd.permute(0, 2, 1))
+        init, gt = self.extract_gt_4_points(batch)
+
+        pred = self.get_weighted_displacement(outputs)
+        pred_displacement = pred - init
+        return {self.prediction_type: {"pred": pred}}
+
+    def log_viz_to_wandb(self, batch, pred_dict, tag):
+        """
+        Log visualizations to wandb.
+
+        Args:
+            batch: the input batch
+            pred_dict: the prediction dictionary
+            tag: the tag to use for logging
+        """
+        batch_size = batch[self.label_key].points_padded().shape[0]
+        # pick a random sample in the batch to visualize
+        viz_idx = np.random.randint(0, batch_size)
+        RED, GREEN, BLUE = (255, 0, 0), (0, 255, 0), (0, 0, 255)
+        BLUES = [BLUE]
+
+        all_pred = pred_dict[self.prediction_type]["all_pred"][viz_idx].cpu().numpy()
+        N = all_pred.shape[0]
+        end2start = np.linalg.inv(batch["start2end"][viz_idx].cpu().numpy())
+
+        goal_text = batch["caption"][viz_idx]
+        vid_name = batch["vid_name"][viz_idx]
+        rmse = pred_dict["rmse"][viz_idx]
+        anchor_pcd = batch["anchor_pcd"].points_padded()[viz_idx].cpu().numpy()
+
+        pcd, gt = self.extract_gt_4_points(batch)
+        pcd, gt = pcd.cpu().numpy()[viz_idx], gt.cpu().numpy()[viz_idx]
+        all_pred_pcd = pcd + all_pred
+        gt_pcd = gt
+        padding_mask = torch.ones(gt.shape[0]).bool().numpy()
+
+        # Move center back from action_pcd to the camera frame before viz
+        pcd_mean = batch["pcd_mean"][viz_idx].cpu().numpy()
+        pcd_std = batch["pcd_std"][viz_idx].cpu().numpy()
+        pcd = (pcd * pcd_std) + pcd_mean
+        anchor_pcd = (anchor_pcd * pcd_std) + pcd_mean
+        all_pred_pcd = (all_pred_pcd * pcd_std) + pcd_mean
+        gt_pcd = (gt_pcd * pcd_std) + pcd_mean
+
+        # All points cloud are in the start image's coordinate frame
+        # We need to visualize the end image, therefore need to apply transform
+        # Transform the point clouds to align with end image coordinate frame
+        pcd_endframe = np.hstack((pcd, np.ones((pcd.shape[0], 1))))
+        pcd_endframe = (end2start @ pcd_endframe.T).T[:, :3]
+        all_pred_pcd_tmp = []
+        for i in range(N):
+            tmp_pcd = np.hstack((all_pred_pcd[i], np.ones((all_pred_pcd.shape[1], 1))))
+            tmp_pcd = (end2start @ tmp_pcd.T).T[:, :3]
+            all_pred_pcd_tmp.append(tmp_pcd)
+        all_pred_pcd = np.stack(all_pred_pcd_tmp)
+        gt_pcd = np.hstack((gt_pcd, np.ones((gt_pcd.shape[0], 1))))
+        gt_pcd = (end2start @ gt_pcd.T).T[:, :3]
+
+        K = batch["intrinsics"][viz_idx].cpu().numpy()
+
+        rgb_init, rgb_end = (
+            batch["rgbs"][viz_idx, 0].cpu().numpy(),
+            batch["rgbs"][viz_idx, 1].cpu().numpy(),
+        )
+        depth_init, depth_end = (
+            batch["depths"][viz_idx, 0].cpu().numpy(),
+            batch["depths"][viz_idx, 1].cpu().numpy(),
+        )
+
+        # Project tracks to image and save
+        init_rgb_proj = project_pcd_on_image(pcd, padding_mask, rgb_init, K, GREEN)
+        end_rgb_proj = project_pcd_on_image(gt_pcd, padding_mask, rgb_end, K, RED)
+        pred_rgb_proj = project_pcd_on_image(
+            all_pred_pcd[-1], padding_mask, rgb_end, K, BLUE
+        )
+        rgb_proj_viz = cv2.hconcat([init_rgb_proj, end_rgb_proj, pred_rgb_proj])
+
+        wandb_proj_img = wandb.Image(
+            rgb_proj_viz,
+            caption=f"Left: Initial Frame (GT Track)\n; Middle: Final Frame (GT Track)\n\
+            ; Right: Final Frame (Pred Track)\n; Goal Description : {goal_text};\n\
+            rmse={rmse};\nvideo path = {vid_name}; ",
+        )
+        ###
+
+        # Visualize point cloud
+        viz_pcd, num_pred_points = get_img_and_track_pcd(
+            rgb_end,
+            depth_end,
+            K,
+            padding_mask,
+            pcd_endframe,
+            gt_pcd,
+            all_pred_pcd,
+            GREEN,
+            RED,
+            BLUES,
+        )
+        ###
+
+        # Visualize action/anchor point cloud
+        action_anchor_pcd = get_action_anchor_pcd(
+            pcd,
+            anchor_pcd,
+            GREEN,
+            RED,
+        )
+        ###
+
+        viz_dict = {
+            f"{tag}/track_projected_to_rgb": wandb_proj_img,
+            f"{tag}/image_and_tracks_pcd": wandb.Object3D(viz_pcd),
+            f"{tag}/action_anchor_pcd": wandb.Object3D(action_anchor_pcd),
+            "trainer/global_step": self.global_step,
+        }
+
+        wandb.log(viz_dict)
+
+    def training_step(self, batch, batch_idx):
+        """
+        Training step for the module. Logs training metrics and visualizations to wandb.
+        """
+        self.train()
+        batch_size = batch[self.label_key].points_padded().shape[0]
+
+        _, loss = self(batch)
+        action_pcd = batch["action_pcd"]
+        #########################################################
+        # logging training metrics
+        #########################################################
+        train_metrics = {"loss": loss}
+
+        # determine if additional logging should be done
+        do_additional_logging = (
+            self.global_step % self.additional_train_logging_period == 0
+            and self.global_step != 0
+        )
+
+        # additional logging
+        if do_additional_logging:
+            self.eval()
+            with torch.no_grad():
+                all_pred_dict = [self.predict(batch)]
+                pred_dict = all_pred_dict[
+                    0
+                ]  # Use one sample for computing other metrics
+                # Store all sample preds for viz
+                pred_dict[self.prediction_type]["all_pred"] = [
+                    i[self.prediction_type]["pred"] for i in all_pred_dict
+                ]
+                pred_dict[self.prediction_type]["all_pred"] = torch.stack(
+                    pred_dict[self.prediction_type]["all_pred"]
+                ).permute(1, 0, 2, 3)
+            self.train()  # Switch back to training mode
+
+            init, gt = self.extract_gt_4_points(batch)
+            gt_displacement = gt - init
+
+            padding_mask = torch.ones(gt.shape[0], gt.shape[1]).bool()
+            pcd_std = batch["pcd_std"]
+            ground_truth = batch[self.label_key].to(self.device)
+            pred_dict = calc_pcd_metrics(
+                pred_dict,
+                init,
+                pred_dict[self.prediction_type]["all_pred"],
+                gt_displacement,
+                pcd_std,
+                padding_mask,
+            )
+            train_metrics.update(pred_dict)
+
+            if self.trainer.is_global_zero:
+                ####################################################
+                # logging visualizations
+                ####################################################
+                self.log_viz_to_wandb(batch, pred_dict, "train")
+
+        self.train_outputs.append(train_metrics)
+        return loss
+
+    def on_train_epoch_end(self):
+        if len(self.train_outputs) == 0:
+            return
+
+        log_dictionary = {}
+        loss = torch.stack([x["loss"] for x in self.train_outputs]).mean()
+        log_dictionary["train/loss"] = loss
+
+        def mean_metric(metric_name):
+            return torch.stack(
+                [x[metric_name].mean() for x in self.train_outputs if metric_name in x]
+            ).mean()
+
+        if any("rmse" in x for x in self.train_outputs):
+            log_dictionary["train/rmse"] = mean_metric("rmse")
+            log_dictionary["train/wta_rmse"] = mean_metric("wta_rmse")
+            log_dictionary["train/chamfer_dist"] = mean_metric("chamfer_dist")
+            log_dictionary["train/wta_chamfer_dist"] = mean_metric("wta_chamfer_dist")
+            log_dictionary["train/sample_std"] = mean_metric("sample_std")
+
+        ####################################################
+        # logging training metrics
+        ####################################################
+        self.log_dict(
+            log_dictionary,
+            add_dataloader_idx=False,
+            prog_bar=True,
+            sync_dist=True,
+        )
+        self.train_outputs.clear()
+
+    def on_validation_epoch_start(self):
+        # Choose a random batch index for each validation epoch
+        self.random_val_viz_idx = random.randint(
+            0, len(self.trainer.val_dataloaders) - 1
+        )
+
+    def validation_step(self, batch, batch_idx, dataloader_idx=0):
+        """
+        Validation step for the module. Logs validation metrics and visualizations to wandb.
+        """
+        val_tag = self.trainer.datamodule.val_tags[dataloader_idx]
+        self.eval()
+        with torch.no_grad():
+            all_pred_dict = [self.predict(batch)]
+            pred_dict = all_pred_dict[0]  # Use one sample for computing other metrics
+            # Store all sample preds for viz
+            pred_dict[self.prediction_type]["all_pred"] = [
+                i[self.prediction_type]["pred"] for i in all_pred_dict
+            ]
+            pred_dict[self.prediction_type]["all_pred"] = torch.stack(
+                pred_dict[self.prediction_type]["all_pred"]
+            ).permute(1, 0, 2, 3)
+
+        init, gt = self.extract_gt_4_points(batch)
+        gt_displacement = gt - init
+
+        padding_mask = torch.ones(gt.shape[0], gt.shape[1]).bool()
+        pcd_std = batch["pcd_std"]
+        ground_truth = batch[self.label_key].to(self.device)
+        pred_dict = calc_pcd_metrics(
+            pred_dict,
+            init,
+            pred_dict[self.prediction_type]["all_pred"],
+            gt_displacement,
+            pcd_std,
+            padding_mask,
+        )
+        self.val_outputs[val_tag].append(pred_dict)
+
+        ####################################################
+        # logging visualizations
+        ####################################################
+        if batch_idx == self.random_val_viz_idx and self.trainer.is_global_zero:
+            self.log_viz_to_wandb(batch, pred_dict, f"val_{val_tag}")
+        return pred_dict
+
+    def on_validation_epoch_end(self):
+        log_dict = {}
+        all_metrics = {
+            "rmse": [],
+            "wta_rmse": [],
+            "chamfer_dist": [],
+            "wta_chamfer_dist": [],
+            "sample_std": [],
+        }
+
+        for val_tag in self.trainer.datamodule.val_tags:
+            val_outputs = self.val_outputs[val_tag]
+            tag_metrics = {}
+
+            if len(val_outputs) == 0:
+                continue
+
+            for metric in all_metrics.keys():
+                values = torch.stack([x[metric].mean() for x in val_outputs]).mean()
+                tag_metrics[metric] = values
+                all_metrics[metric].append(values)
+
+            # Per dataset metrics
+            for metric, value in tag_metrics.items():
+                log_dict[f"val_{val_tag}/{metric}"] = value
+
+        # Avg over all datasets
+        for metric, values in all_metrics.items():
+            log_dict[f"val/{metric}"] = torch.tensor(values).mean()
+
+        # Minimize the linear combination of RMSE (reconstruction error) and -std (i.e. maximize diversity)
+        # TODO: Find a better metric, and dynamically configure this....
+        alpha = 0.95
+        log_dict["val/rmse_and_std_combi"] = alpha * log_dict["val/rmse"] + (
+            1 - alpha
+        ) * (-log_dict["val/sample_std"])
+
+        self.log_dict(
+            log_dict,
+            add_dataloader_idx=False,
+            sync_dist=True,
+        )
+        self.val_outputs.clear()
+
+    def predict_step(self, batch, batch_idx, dataloader_idx=0):
+        """
+        Prediction step for model evaluation.
+
+        The test dataset is expected to be first dataloader_idx.
+        Visualizations are logged with dataloader_idx=0
+        """
+        eval_tag = self.trainer.datamodule.eval_tags[dataloader_idx]
+        all_pred_dict = [self.predict(batch)]
+
+        pred_dict = all_pred_dict[0]  # Use one sample for computing other metrics
+        # Store all sample preds for viz
+        pred_dict[self.prediction_type]["all_pred"] = [
+            i[self.prediction_type]["pred"] for i in all_pred_dict
+        ]
+        pred_dict[self.prediction_type]["all_pred"] = torch.stack(
+            pred_dict[self.prediction_type]["all_pred"]
+        ).permute(1, 0, 2, 3)
+
+        init, gt = self.extract_gt_4_points(batch)
+        gt_displacement = gt - init
+
+        padding_mask = torch.ones(gt.shape[0], gt.shape[1]).bool()
+        pcd_std = batch["pcd_std"]
+        ground_truth = batch[self.label_key].to(self.device)
+        pred_dict = calc_pcd_metrics(
+            pred_dict,
+            init,
+            pred_dict[self.prediction_type]["all_pred"],
+            gt_displacement,
+            pcd_std,
+            padding_mask,
+        )
+        self.predict_outputs[eval_tag].append(pred_dict)
+
+        return {
+            "rmse": pred_dict["rmse"],
+            "chamfer_dist": pred_dict["chamfer_dist"],
+            "wta_rmse": pred_dict["wta_rmse"],
+            "wta_chamfer_dist": pred_dict["wta_chamfer_dist"],
+            "vid_name": batch["vid_name"],
+            "caption": batch["caption"],
+        }
+
+    def on_predict_epoch_end(self):
+        """
+        Visualize first 5 batches in the test sets.
+        """
+        save_wta_to_disk = self.trainer.datamodule.save_wta_to_disk
+        for dataloader_idx, eval_tag in enumerate(self.trainer.datamodule.eval_tags):
+            if "test" not in eval_tag:
+                continue
+
+            pred_outputs = self.predict_outputs[eval_tag]
+            rmse = torch.cat([x["rmse"] for x in pred_outputs])
+            chamfer_dist = torch.cat([x["chamfer_dist"] for x in pred_outputs])
+            cross_displacement, all_cross_displacement = [], []
+            for i in pred_outputs:
+                cross_displacement.extend(i["cross_displacement"]["pred"])
+                all_cross_displacement.extend(i["cross_displacement"]["all_pred"])
+
+            for i, batch in enumerate(self.trainer.predict_dataloaders[dataloader_idx]):
+                batch_len = len(batch["caption"])
+                for idx in range(batch_len):
+                    pred_dict = self.compose_pred_dict_for_viz(
+                        rmse,
+                        chamfer_dist,
+                        cross_displacement,
+                        all_cross_displacement,
+                        idx,
+                    )
+                    viz_batch = self.compose_batch_for_viz(batch, idx)
+                    self.log_viz_to_wandb(viz_batch, pred_dict, eval_tag)
+                if i == 5:
+                    break
+        self.predict_outputs.clear()
+
+    def compose_pred_dict_for_viz(
+        self, rmse, chamfer_dist, cross_displacement, all_cross_displacement, idx
+    ):
+        return {
+            "rmse": [rmse[idx]],
+            "chamfer_dist": [chamfer_dist[idx]],
+            "cross_displacement": {
+                "pred": cross_displacement[idx][None],
+                "all_pred": all_cross_displacement[idx][None],
+            },
+        }
+
+    def compose_batch_for_viz(self, batch, idx):
+        viz_batch = {}
+        for key in batch.keys():
+            if type(batch[key]) == Pointclouds:
+                pcd = batch[key].points_padded()[idx]
+                viz_batch[key] = Pointclouds(points=pcd[None])
+            elif key in ["rgbs", "depths"]:
+                viz_batch[key] = batch[key][idx][None]
+            else:
+                viz_batch[key] = [batch[key][idx]]
+        return viz_batch
+
+
+if __name__ == "__main__":
+    model = PointNet2(num_classes=10).cuda()
+    model.eval()
+    # torch.manual_seed(0)
+    # torch.cuda.manual_seed_all(0)
+    # torch.backends.cudnn.deterministic = True
+    inpput = torch.rand(1, 3, 2000).cuda()
+    out = model(inpput)
+    max_diff = -1
+    for _ in range(1):
+        inpput_translated = inpput + 50
+        out_translated = model(inpput_translated)
+        diff = torch.norm(out - out_translated)
+        max_diff = max(max_diff, diff)
+        print("difference: ", diff)

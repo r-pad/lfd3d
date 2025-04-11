@@ -26,7 +26,7 @@ dependencies = [
     "pip>=25.0.1,<26",
     "zarr>=2.12,<3",
     "lightning-utilities==0.11.7",
-    "ipdb>=0.13.13,<0.14", "addict==2.4.0",
+    "ipdb>=0.13.13,<0.14", "addict==2.4.0", "mujoco>=3.3.1,<4",
 ]
 
 [project.optional-dependencies]
