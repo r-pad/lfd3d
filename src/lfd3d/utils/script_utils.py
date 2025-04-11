@@ -16,6 +16,7 @@ from lfd3d.datasets import (
     RT1DataModule,
     SynthBlockDataModule,
 )
+from lfd3d.models.articubot import ArticubotNetwork, GoalRegressionModule
 from lfd3d.models.diptv3 import DiPTv3, DiPTv3Adapter
 from lfd3d.models.tax3d import (
     CrossDisplacementModule,
@@ -59,6 +60,9 @@ def create_model(cfg):
             DiPTv3(in_channels=40), final_dimension=6
         )
         module_fn = CrossDisplacementModule
+    elif cfg.model.name == "articubot":
+        network_fn = ArticubotNetwork
+        module_fn = GoalRegressionModule
     else:
         raise NotImplementedError(cfg.model.name)
 
@@ -70,12 +74,6 @@ def create_model(cfg):
 
 
 def create_datamodule(cfg):
-    # check that dataset and model types are compatible
-    if cfg.model.type != cfg.dataset.type:
-        raise ValueError(
-            f"Model type: '{cfg.model.type}' and dataset type: '{cfg.dataset.type}' are incompatible."
-        )
-
     dataset_map = {
         "hoi4d": HOI4DDataModule,
         "droid": DroidDataModule,

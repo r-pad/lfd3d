@@ -1,0 +1,6 @@
+name: articubot
+
+# Model settings
+type: weighted_displacement # (flow, point) Type of model
+in_channels: 3 # Number of input channels
+num_classes: 13 # xyz of 4 points and weight of points

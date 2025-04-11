@@ -1,5 +1,4 @@
 name: multi
-type: cross_displacement
 
 defaults:
   - rt1@datasets.rt1
