@@ -77,7 +77,7 @@ def calc_pcd_metrics(pred_dict, pcd, all_pred, gt, scale_factor, padding_mask):
     and gt displacements to the metric pcd.
 
     pred_dict: Dictionary with keys to be updated
-    pcd: Metric Point Cloud
+    pcd: Normalized Point Cloud
     all_pred: Predicted cross displacement of multiple samples
     gt: GT cross displacement
     scale_factor: Scaling factor to bring to metric scale
