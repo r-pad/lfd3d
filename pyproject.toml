@@ -22,11 +22,10 @@ dependencies = [
     "sentencepiece",
     "robot_descriptions",
     "trimesh",
-    "tensorflow-datasets",
     "pip>=25.0.1,<26",
     "zarr>=2.12,<3",
     "lightning-utilities==0.11.7",
-    "ipdb>=0.13.13,<0.14", "addict==2.4.0", "mujoco>=3.3.1,<4",
+    "ipdb>=0.13.13,<0.14", "addict==2.4.0", "mujoco>=3.3.1,<4", "tensorflow-datasets>=4.9.8,<5", "tensorflow-cpu>=2.19.0,<3",
 ]
 
 [project.optional-dependencies]
@@ -61,7 +60,7 @@ cuda-toolkit = "12.4.*"
 gcc = "11.*"
 gxx = "11.*"
 setuptools = "==65.5.0"
-protobuf = ">=5.29.3,<6"
+protobuf = "*"
 
 # PyPI-specific dependencies
 [tool.pixi.pypi-dependencies]
@@ -69,7 +68,6 @@ lfd3d = { path = ".", editable = true }
 torch = { version = "==2.4.1", index = "https://download.pytorch.org/whl/cu124" }
 torchvision = "*"
 timm = "==0.9.12"
-tensorflow-cpu = "==2.19.0"
 fvcore = "==0.1.5.post20221221"
 iopath = "==0.1.9"
 opencv-python = "*"
