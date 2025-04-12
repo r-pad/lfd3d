@@ -737,7 +737,6 @@ class GoalRegressionModule(pl.LightningModule):
         self.val_batch_size = self.run_cfg.val_batch_size
 
         # TODO: Make config param
-        self.GRIPPER_IDX = [6, 197, 174]  # indexes of selected gripper points
         self.weight_loss_weight = 10  # weight of the weighted displacement loss term
 
     def configure_optimizers(self):
@@ -762,15 +761,18 @@ class GoalRegressionModule(pl.LightningModule):
         cross_displacement = batch[self.label_key].points_padded()
         initial_gripper = batch["action_pcd"].points_padded()
         ground_truth_gripper = initial_gripper + cross_displacement
+        batch_indices = torch.arange(
+            ground_truth_gripper.shape[0], device=ground_truth_gripper.device
+        ).unsqueeze(1)
 
         # Select specific idxs to compute the loss over
         # TODO: Find a cleaner way to pass the idxs
-        gt_primary_points = ground_truth_gripper[:, self.GRIPPER_IDX, :]
+        gt_primary_points = ground_truth_gripper[batch_indices, batch["gripper_idx"], :]
         # Assumes 0/1 are tips to be averaged
         gt_extra_point = (gt_primary_points[:, 0, :] + gt_primary_points[:, 1, :]) / 2
         gt = torch.cat([gt_primary_points, gt_extra_point[:, None, :]], dim=1)
 
-        init_primary_points = initial_gripper[:, self.GRIPPER_IDX, :]
+        init_primary_points = initial_gripper[batch_indices, batch["gripper_idx"], :]
         init_extra_point = (
             init_primary_points[:, 0, :] + init_primary_points[:, 1, :]
         ) / 2
@@ -811,19 +813,21 @@ class GoalRegressionModule(pl.LightningModule):
     def predict(self, batch, progress=False):
         """
         Compute prediction for a given batch.
+        NOTE: To maintain consistency with the codebase,
+        this returns the displacement to the goal position,
+        not the actual goal position itself.
 
         Args:
             batch: the input batch
             progress: whether to show progress bar
         """
-        batch_size, sample_size = batch[self.label_key].points_padded().shape[:2]
         scene_pcd = batch["anchor_pcd"].points_padded()
         outputs = self.network(scene_pcd.permute(0, 2, 1))
         init, gt = self.extract_gt_4_points(batch)
 
         pred = self.get_weighted_displacement(outputs)
         pred_displacement = pred - init
-        return {self.prediction_type: {"pred": pred}}
+        return {self.prediction_type: {"pred": pred_displacement}}
 
     def log_viz_to_wandb(self, batch, pred_dict, tag):
         """
@@ -905,7 +909,7 @@ class GoalRegressionModule(pl.LightningModule):
         ###
 
         # Visualize point cloud
-        viz_pcd, num_pred_points = get_img_and_track_pcd(
+        viz_pcd, _ = get_img_and_track_pcd(
             rgb_end,
             depth_end,
             K,

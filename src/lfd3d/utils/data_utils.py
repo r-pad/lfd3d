@@ -44,93 +44,67 @@ class MANOInterface:
 
 def collate_pcd_fn(batch):
     """
-    Custom collate function that handles:
-    - Point clouds (action_pcd, anchor_pcd and cross_displacement)
-    - Strings (caption and vid_name)
-    - Regular tensors (intrinsics, rgbs, depths, start2end)
+    Generic collate function that handles different data types:
+    - Point clouds: detected by checking shape and creating Pointclouds objects
+    - Strings: stored as lists without modification
+    - Tensors: stacked into batches
 
     Args:
         batch: List of dictionaries containing the items from dataset
-
     Returns:
         Collated dictionary with properly batched items
     """
-    # Initialize lists to store items
-    action_pcds = []
-    anchor_pcds = []
-    anchor_feat_pcds = []
-    cross_displacements = []
-    captions = []
-    text_embeds = []
-    vid_names = []
-    intrinsics = []
-    rgbs = []
-    depths = []
-    start2ends = []
-    pcd_means = []
-    pcd_stds = []
+    keys = batch[0].keys()
+    collated_batch = {}
 
-    # Separate items from batch
-    for item in batch:
-        # Convert point clouds to tensors if they aren't already
-        action_pcd = torch.as_tensor(item["action_pcd"]).float()
-        anchor_pcd = torch.as_tensor(item["anchor_pcd"]).float()
-        anchor_feat_pcd = torch.as_tensor(item["anchor_feat_pcd"]).float()
-        cross_displacement = torch.as_tensor(item["cross_displacement"]).float()
+    # Process each key
+    for key in keys:
+        values = [item[key] for item in batch]
 
-        action_pcds.append(action_pcd)
-        anchor_feat_pcds.append(anchor_feat_pcd)
-        anchor_pcds.append(anchor_pcd)
-        cross_displacements.append(cross_displacement)
-        captions.append(item["caption"])
-        vid_names.append(item["vid_name"])
+        # Detect type of first element to determine collation strategy
+        sample = values[0]
 
-        # Convert other items to tensors if they aren't already
-        intrinsics.append(torch.as_tensor(item["intrinsics"]))
-        text_embeds.append(torch.as_tensor(item["text_embed"]))
-        rgbs.append(torch.as_tensor(item["rgbs"]))
-        depths.append(torch.as_tensor(item["depths"]))
-        start2ends.append(torch.as_tensor(item["start2end"]))
-        pcd_means.append(torch.as_tensor(item["pcd_mean"]))
-        pcd_stds.append(torch.as_tensor(item["pcd_std"]))
+        if isinstance(sample, str):
+            collated_batch[key] = values
 
-    # Create Pointclouds objects
-    action_pointclouds = Pointclouds(points=action_pcds)
-    anchor_pointclouds = Pointclouds(points=anchor_pcds, features=anchor_feat_pcds)
-    cross_displacement_pointclouds = Pointclouds(points=cross_displacements)
+        # handle anchor pcd separately ...
+        elif "anchor" in key:
+            if "anchor_pcd" in collated_batch:
+                continue
+            anchor_pcds = [
+                torch.as_tensor(item["anchor_pcd"]).float() for item in batch
+            ]
+            anchor_feat_pcds = [
+                torch.as_tensor(item["anchor_feat_pcd"]).float() for item in batch
+            ]
+            anchor_pointclouds = Pointclouds(
+                points=anchor_pcds, features=anchor_feat_pcds
+            )
+            collated_batch["anchor_pcd"] = anchor_pointclouds
 
-    batch_size, max_points, _ = action_pointclouds.points_padded().shape
-    num_points = action_pointclouds.num_points_per_cloud()
-    padding_mask = torch.arange(max_points)[None, :] < num_points[:, None]
+        # Process point clouds and exclude intrinsics
+        elif (
+            isinstance(sample, np.ndarray)
+            and len(sample.shape) == 2
+            and sample.shape[1] == 3
+            and key != "intrinsics"
+        ):
+            tensor_values = [torch.as_tensor(v).float() for v in values]
+            collated_batch[key] = Pointclouds(points=tensor_values)
+            # If this is the first point cloud, calculate padding mask
+            if "padding_mask" not in collated_batch:
+                batch_size, max_points, *_ = collated_batch[key].points_padded().shape
+                num_points = collated_batch[key].num_points_per_cloud()
+                padding_mask = torch.arange(max_points)[None, :] < num_points[:, None]
+                collated_batch["padding_mask"] = padding_mask
 
-    # Stack regular tensors
-    intrinsics_batch = torch.stack(intrinsics)
-    text_embeds_batch = torch.stack(text_embeds)
-    rgbs_batch = torch.stack(rgbs)
-    depths_batch = torch.stack(depths)
-    start2ends_batch = torch.stack(start2ends)
-    pcd_means_batch = torch.stack(pcd_means)
-    pcd_stds_batch = torch.stack(pcd_stds)
+        elif isinstance(sample, (np.ndarray, list, int)) or torch.is_tensor(sample):
+            # Convert to tensors if they aren't already
+            tensor_values = [torch.as_tensor(v) for v in values]
+            collated_batch[key] = torch.stack(tensor_values)
 
-    # Create the output dictionary
-    collated_batch = {
-        # Point clouds
-        "action_pcd": action_pointclouds,
-        "anchor_pcd": anchor_pointclouds,
-        "cross_displacement": cross_displacement_pointclouds,
-        "padding_mask": padding_mask,
-        # Strings
-        "caption": captions,
-        "vid_name": vid_names,
-        # Regular tensors
-        "intrinsics": intrinsics_batch,
-        "text_embed": text_embeds_batch,
-        "rgbs": rgbs_batch,
-        "depths": depths_batch,
-        "start2end": start2ends_batch,
-        "pcd_mean": pcd_means_batch,
-        "pcd_std": pcd_stds_batch,
-    }
+        else:
+            raise ValueError("Unexpected type for key:", key)
 
     return collated_batch
 

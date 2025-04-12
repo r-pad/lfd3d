@@ -70,14 +70,18 @@ class RpadFoxgloveDataset(td.Dataset):
         self.dinov2 = torch.hub.load("facebookresearch/dinov2", "dinov2_vitl14_reg").to(
             "cpu"
         )
+        # indexes of selected gripper points -> handpicked
+        self.GRIPPER_IDX = {
+            "aloha": np.array([6, 197, 174]),
+            "human": np.array([343, 763, 60]),
+        }
 
     def __len__(self):
         return self.size
 
-    def is_in_data_source(self, demo):
+    def source_of_data(self, demo):
         """
-        Filters out demos which aren't specified as a data source.
-        i.e. if we specify "aloha" as a data source, filter out all human demos
+        Return the source of the current demo i.e. method of collection
         """
         # Currently identifying demo type by checking number of vertices
         # For human data, we have 778 vertices from the MANO mesh
@@ -91,7 +95,7 @@ class RpadFoxgloveDataset(td.Dataset):
         else:
             raise NotImplementedError
 
-        return demo_type in self.data_sources
+        return demo_type
 
     def expand_all_events(self):
         """This function *expands* each event to have an associated event_idx.
@@ -114,7 +118,7 @@ class RpadFoxgloveDataset(td.Dataset):
                 print(f"No GT found for {demo_name}")
                 continue
 
-            if not self.is_in_data_source(demo):
+            if self.source_of_data(demo) not in self.data_sources:
                 continue
 
             events = demo["events"]
@@ -317,6 +321,8 @@ class RpadFoxgloveDataset(td.Dataset):
             rgb_embed, depths[0], K_
         )
 
+        gripper_idx = self.GRIPPER_IDX[self.source_of_data(self.dataset[demo_name])]
+
         # Center on action_pcd
         action_pcd_mean = start_tracks.mean(axis=0)
         start_tracks = start_tracks - action_pcd_mean
@@ -343,6 +349,7 @@ class RpadFoxgloveDataset(td.Dataset):
             "vid_name": demo_name,
             "pcd_mean": action_pcd_mean,
             "pcd_std": scene_pcd_std,
+            "gripper_idx": gripper_idx,
         }
         return item
 
