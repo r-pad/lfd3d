@@ -187,6 +187,7 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         # data params
         self.batch_size = self.run_cfg.batch_size
         self.val_batch_size = self.run_cfg.val_batch_size
+        self.max_depth = cfg.dataset.max_depth
 
         # diffusion params
         self.noise_schedule = self.model_cfg.diff_noise_schedule
@@ -291,6 +292,7 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         # pick a random sample in the batch to visualize
         viz_idx = np.random.randint(0, batch_size)
         RED, GREEN, BLUE = (255, 0, 0), (0, 255, 0), (0, 0, 255)
+        max_depth = self.max_depth
 
         all_pred = pred_dict[self.prediction_type]["all_pred"][viz_idx].cpu().numpy()
         N = all_pred.shape[0]
@@ -374,6 +376,7 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
             GREEN,
             RED,
             BLUES,
+            max_depth,
         )
         ###
 

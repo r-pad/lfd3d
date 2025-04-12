@@ -34,6 +34,7 @@ class DroidDataset(td.Dataset):
             self.idx_to_fname_mapping = json.load(f)
 
         self.num_points = dataset_cfg.num_points
+        self.max_depth = dataset_cfg.max_depth
         self.captions = {}
 
         self.droid_index = self.load_split(split)
@@ -237,7 +238,7 @@ class DroidDataset(td.Dataset):
         feat_flat = rgb_embed.reshape(-1, rgb_embed.shape[-1])
 
         # Remove points with invalid depth
-        valid_depth = np.logical_and(z_flat > 0, z_flat < 2)
+        valid_depth = np.logical_and(z_flat > 0, z_flat < self.max_depth)
         x_flat = x_flat[valid_depth]
         y_flat = y_flat[valid_depth]
         z_flat = z_flat[valid_depth]

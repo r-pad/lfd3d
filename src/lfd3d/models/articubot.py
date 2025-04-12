@@ -735,6 +735,7 @@ class GoalRegressionModule(pl.LightningModule):
         # data params
         self.batch_size = self.run_cfg.batch_size
         self.val_batch_size = self.run_cfg.val_batch_size
+        self.max_depth = cfg.dataset.max_depth
 
         # TODO: Make config param
         self.weight_loss_weight = 10  # weight of the weighted displacement loss term
@@ -843,6 +844,7 @@ class GoalRegressionModule(pl.LightningModule):
         viz_idx = np.random.randint(0, batch_size)
         RED, GREEN, BLUE = (255, 0, 0), (0, 255, 0), (0, 0, 255)
         BLUES = [BLUE]
+        max_depth = self.max_depth
 
         all_pred = pred_dict[self.prediction_type]["all_pred"][viz_idx].cpu().numpy()
         N = all_pred.shape[0]
@@ -920,6 +922,7 @@ class GoalRegressionModule(pl.LightningModule):
             GREEN,
             RED,
             BLUES,
+            max_depth,
         )
         ###
 

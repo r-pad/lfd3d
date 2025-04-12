@@ -41,6 +41,7 @@ class GenGoalGenDataset(data.Dataset):
         self.K[2, 2] = 1
 
         self.num_points = dataset_cfg.num_points
+        self.max_depth = dataset_cfg.max_depth
 
     def __len__(self):
         return self.size
@@ -94,7 +95,7 @@ class GenGoalGenDataset(data.Dataset):
         feat_flat = rgb_embed.reshape(-1, rgb_embed.shape[-1])
 
         # Remove points with invalid depth
-        valid_depth = np.logical_and(z_flat > 0, z_flat < 2)
+        valid_depth = np.logical_and(z_flat > 0, z_flat < self.max_depth)
         x_flat = x_flat[valid_depth]
         y_flat = y_flat[valid_depth]
         z_flat = z_flat[valid_depth]
@@ -133,7 +134,7 @@ class GenGoalGenDataset(data.Dataset):
         z_flat = depth[segmask]
 
         # Remove points with invalid depth
-        valid_depth = np.logical_and(z_flat > 0, z_flat < 2)
+        valid_depth = np.logical_and(z_flat > 0, z_flat < self.max_depth)
         x_flat = x_flat[valid_depth]
         y_flat = y_flat[valid_depth]
         z_flat = z_flat[valid_depth]

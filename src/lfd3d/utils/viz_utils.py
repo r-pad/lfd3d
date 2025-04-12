@@ -25,7 +25,7 @@ def project_pcd_on_image(pcd, mask, image, K, color):
     return viz_image
 
 
-def get_img_pcd(image, depth, K):
+def get_img_pcd(image, depth, K, max_depth):
     height, width = depth.shape
     # Create pixel coordinate grid
     x = np.arange(width)
@@ -38,7 +38,7 @@ def get_img_pcd(image, depth, K):
     z_flat = depth.flatten()
 
     # Remove points with invalid depth
-    valid_depth = np.logical_and(z_flat > 0, z_flat < 2)
+    valid_depth = np.logical_and(z_flat > 0, z_flat < max_depth)
     x_flat = x_flat[valid_depth]
     y_flat = y_flat[valid_depth]
     z_flat = z_flat[valid_depth]
@@ -78,6 +78,7 @@ def get_img_and_track_pcd(
     init_pcd_color,
     gt_color,
     all_pred_color,
+    max_depth,
 ):
     init_pcd_color, all_pred_color, gt_color = (
         np.array(init_pcd_color),
@@ -85,7 +86,7 @@ def get_img_and_track_pcd(
         np.array(gt_color),
     )
 
-    image_pcd_pts, image_pcd_colors = get_img_pcd(image, depth, K)
+    image_pcd_pts, image_pcd_colors = get_img_pcd(image, depth, K, max_depth)
 
     init_pcd_pts = init_pcd[mask]
     init_pcd_color = np.repeat(init_pcd_color[None, :], init_pcd_pts.shape[0], axis=0)
