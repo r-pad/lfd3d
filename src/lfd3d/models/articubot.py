@@ -696,6 +696,70 @@ class ArticubotNetwork(nn.Module):
         return x  # x shape: B, N, num_classes
 
 
+class ArticubotSmallNetwork(nn.Module):
+    def __init__(self, model_cfg):
+        super(ArticubotSmallNetwork, self).__init__()
+
+        num_classes = model_cfg.num_classes
+        input_channel = model_cfg.in_channels
+        keep_gripper_in_fps = model_cfg.keep_gripper_in_fps
+
+        # Reduced SA layers: Only sa1, sa2, sa3 with smaller MLPs
+        self.sa1 = PointNetSetAbstractionMsg(
+            npoint=512,  # Reduced from 1024
+            radius_list=[0.025, 0.05],
+            nsample_list=[16, 32],
+            in_channel=input_channel - 3,
+            mlp_list=[[16, 16], [32, 32]],  # Smaller MLP
+            keep_gripper_in_fps=keep_gripper_in_fps,
+        )
+        self.sa2 = PointNetSetAbstractionMsg(
+            npoint=256,  # Reduced from 512
+            radius_list=[0.05, 0.1],
+            nsample_list=[16, 32],
+            in_channel=48,  # Adjusted based on sa1 output
+            mlp_list=[[32, 32, 64], [64, 64]],  # Smaller MLP
+            keep_gripper_in_fps=keep_gripper_in_fps,
+        )
+        self.sa3 = PointNetSetAbstractionMsg(
+            npoint=128,  # Reduced from 256
+            radius_list=[0.1, 0.2],
+            nsample_list=[16, 32],
+            in_channel=128,  # Adjusted based on sa2 output
+            mlp_list=[[64, 64, 128], [128, 128]],  # Smaller MLP
+            keep_gripper_in_fps=keep_gripper_in_fps,
+        )
+
+        # Reduced FP layers: Only fp3, fp2, fp1
+        self.fp3 = PointNetFeaturePropagation(128 + 128 + 128, [128, 128])  # Adjusted input channels
+        self.fp2 = PointNetFeaturePropagation(48 + 128, [128, 64])   # Adjusted input channels
+        self.fp1 = PointNetFeaturePropagation(64, [64, 64, 64])
+
+        self.conv1 = nn.Conv1d(64, 64, 1)  # Reduced channels
+        self.bn1 = nn.BatchNorm1d(64)
+        self.conv2 = nn.Conv1d(64, num_classes, 1)
+
+    def forward(self, xyz):
+        l0_points = xyz
+        l0_xyz = xyz[:, :3, :]
+
+        if xyz.shape[1] > 3:
+            l1_xyz, l1_points = self.sa1(l0_xyz, xyz[:, 3:, :])
+        else:
+            l1_xyz, l1_points = self.sa1(l0_xyz, None)
+
+        l2_xyz, l2_points = self.sa2(l1_xyz, l1_points)
+        l3_xyz, l3_points = self.sa3(l2_xyz, l2_points)
+
+        l2_points = self.fp3(l2_xyz, l3_xyz, l2_points, l3_points)
+        l1_points = self.fp2(l1_xyz, l2_xyz, l1_points, l2_points)
+        l0_points = self.fp1(l0_xyz, l1_xyz, None, l1_points)
+
+        x = nn.functional.relu(self.bn1(self.conv1(l0_points)))
+        x = self.conv2(x)  # [B, num_classes, N]
+        return x.permute(0, 2, 1)  # [B, N, num_classes]
+
+
 class GoalRegressionModule(pl.LightningModule):
     """
     A goal generation module that handles model training, inference, evaluation and visualization.
