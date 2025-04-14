@@ -377,6 +377,7 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
             RED,
             BLUES,
             max_depth,
+            anchor_pcd.shape[0],
         )
         ###
 

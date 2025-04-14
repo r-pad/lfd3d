@@ -24,6 +24,7 @@ from lfd3d.utils.viz_utils import (
     get_action_anchor_pcd,
     get_img_and_track_pcd,
     project_pcd_on_image,
+    save_weighted_displacement_pcd_viz,
 )
 
 
@@ -731,8 +732,12 @@ class ArticubotSmallNetwork(nn.Module):
         )
 
         # Reduced FP layers: Only fp3, fp2, fp1
-        self.fp3 = PointNetFeaturePropagation(128 + 128 + 128, [128, 128])  # Adjusted input channels
-        self.fp2 = PointNetFeaturePropagation(48 + 128, [128, 64])   # Adjusted input channels
+        self.fp3 = PointNetFeaturePropagation(
+            128 + 128 + 128, [128, 128]
+        )  # Adjusted input channels
+        self.fp2 = PointNetFeaturePropagation(
+            48 + 128, [128, 64]
+        )  # Adjusted input channels
         self.fp1 = PointNetFeaturePropagation(64, [64, 64, 64])
 
         self.conv1 = nn.Conv1d(64, 64, 1)  # Reduced channels
@@ -892,15 +897,16 @@ class GoalRegressionModule(pl.LightningModule):
 
         pred = self.get_weighted_displacement(outputs)
         pred_displacement = pred - init
-        return {self.prediction_type: {"pred": pred_displacement}}
+        return {self.prediction_type: {"pred": pred_displacement}}, outputs
 
-    def log_viz_to_wandb(self, batch, pred_dict, tag):
+    def log_viz_to_wandb(self, batch, pred_dict, weighted_displacement, tag):
         """
         Log visualizations to wandb.
 
         Args:
             batch: the input batch
             pred_dict: the prediction dictionary
+            weighted_displacement: the output of the articubot model
             tag: the tag to use for logging
         """
         batch_size = batch[self.label_key].points_padded().shape[0]
@@ -918,6 +924,7 @@ class GoalRegressionModule(pl.LightningModule):
         vid_name = batch["vid_name"][viz_idx]
         rmse = pred_dict["rmse"][viz_idx]
         anchor_pcd = batch["anchor_pcd"].points_padded()[viz_idx].cpu().numpy()
+        weighted_displacement = weighted_displacement[viz_idx].cpu().numpy()
 
         pcd, gt = self.extract_gt_4_points(batch)
         pcd, gt = pcd.cpu().numpy()[viz_idx], gt.cpu().numpy()[viz_idx]
@@ -987,6 +994,7 @@ class GoalRegressionModule(pl.LightningModule):
             RED,
             BLUES,
             max_depth,
+            anchor_pcd.shape[0],
         )
         ###
 
@@ -998,6 +1006,8 @@ class GoalRegressionModule(pl.LightningModule):
             RED,
         )
         ###
+
+        _ = save_weighted_displacement_pcd_viz(anchor_pcd, weighted_displacement)
 
         viz_dict = {
             f"{tag}/track_projected_to_rgb": wandb_proj_img,
@@ -1033,12 +1043,11 @@ class GoalRegressionModule(pl.LightningModule):
             self.eval()
             with torch.no_grad():
                 all_pred_dict = [self.predict(batch)]
-                pred_dict = all_pred_dict[
-                    0
-                ]  # Use one sample for computing other metrics
+                # Use one sample for computing other metrics
+                pred_dict, weighted_displacement = all_pred_dict[0]
                 # Store all sample preds for viz
                 pred_dict[self.prediction_type]["all_pred"] = [
-                    i[self.prediction_type]["pred"] for i in all_pred_dict
+                    i[0][self.prediction_type]["pred"] for i in all_pred_dict
                 ]
                 pred_dict[self.prediction_type]["all_pred"] = torch.stack(
                     pred_dict[self.prediction_type]["all_pred"]
@@ -1065,7 +1074,7 @@ class GoalRegressionModule(pl.LightningModule):
                 ####################################################
                 # logging visualizations
                 ####################################################
-                self.log_viz_to_wandb(batch, pred_dict, "train")
+                self.log_viz_to_wandb(batch, pred_dict, weighted_displacement, "train")
 
         self.train_outputs.append(train_metrics)
         return loss
@@ -1115,10 +1124,11 @@ class GoalRegressionModule(pl.LightningModule):
         self.eval()
         with torch.no_grad():
             all_pred_dict = [self.predict(batch)]
-            pred_dict = all_pred_dict[0]  # Use one sample for computing other metrics
+            pred_dict, weighted_displacement = all_pred_dict[0]
+
             # Store all sample preds for viz
             pred_dict[self.prediction_type]["all_pred"] = [
-                i[self.prediction_type]["pred"] for i in all_pred_dict
+                i[0][self.prediction_type]["pred"] for i in all_pred_dict
             ]
             pred_dict[self.prediction_type]["all_pred"] = torch.stack(
                 pred_dict[self.prediction_type]["all_pred"]
@@ -1144,7 +1154,9 @@ class GoalRegressionModule(pl.LightningModule):
         # logging visualizations
         ####################################################
         if batch_idx == self.random_val_viz_idx and self.trainer.is_global_zero:
-            self.log_viz_to_wandb(batch, pred_dict, f"val_{val_tag}")
+            self.log_viz_to_wandb(
+                batch, pred_dict, weighted_displacement, f"val_{val_tag}"
+            )
         return pred_dict
 
     def on_validation_epoch_end(self):
@@ -1201,10 +1213,10 @@ class GoalRegressionModule(pl.LightningModule):
         eval_tag = self.trainer.datamodule.eval_tags[dataloader_idx]
         all_pred_dict = [self.predict(batch)]
 
-        pred_dict = all_pred_dict[0]  # Use one sample for computing other metrics
+        pred_dict, weighted_displacement = all_pred_dict[0]
         # Store all sample preds for viz
         pred_dict[self.prediction_type]["all_pred"] = [
-            i[self.prediction_type]["pred"] for i in all_pred_dict
+            i[0][self.prediction_type]["pred"] for i in all_pred_dict
         ]
         pred_dict[self.prediction_type]["all_pred"] = torch.stack(
             pred_dict[self.prediction_type]["all_pred"]
@@ -1263,7 +1275,9 @@ class GoalRegressionModule(pl.LightningModule):
                         idx,
                     )
                     viz_batch = self.compose_batch_for_viz(batch, idx)
-                    self.log_viz_to_wandb(viz_batch, pred_dict, eval_tag)
+                    self.log_viz_to_wandb(
+                        viz_batch, pred_dict, weighted_displacement, eval_tag
+                    )
                 if i == 5:
                     break
         self.predict_outputs.clear()
