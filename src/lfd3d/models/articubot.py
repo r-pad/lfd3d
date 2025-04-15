@@ -780,6 +780,8 @@ class GoalRegressionModule(pl.LightningModule):
         self.val_outputs: defaultdict[str, List[Dict]] = defaultdict(list)
         self.train_outputs: List[Dict] = []
         self.predict_outputs: defaultdict[str, List[Dict]] = defaultdict(list)
+        self.fixed_variance = cfg.model.fixed_variance
+        self.is_gmm = cfg.model.is_gmm
 
         if self.prediction_type != "cross_displacement":
             raise ValueError(f"Invalid prediction type: {self.prediction_type}")
@@ -867,14 +869,44 @@ class GoalRegressionModule(pl.LightningModule):
         batch_size, pcd_size, _ = scene_pcd.shape
         # Network currently doesn't see action pcd
         outputs = self.network(scene_pcd.permute(0, 2, 1))
+
         init, gt = self.extract_gt_4_points(batch)
         pred_points = self.get_weighted_displacement(outputs)
-
         pred_displacement = outputs[:, :, :-1].reshape(batch_size, pcd_size, 4, 3)
         gt_displacement = scene_pcd[:, :, None, :] - gt[:, None, :, :]
+        weights = outputs[:, :, -1]  # B, N
+
+        if self.is_gmm:
+            diff = (pred_displacement - gt_displacement).reshape(
+                batch_size, pcd_size, -1
+            )  # Shape: (B, N, 12)
+            exponent = -0.5 * torch.sum(
+                (diff**2) / self.fixed_variance, dim=2
+            )  # Shape: (B, N), sum over the guassian dimension
+            log_gaussians = exponent
+
+            # Compute log mixing coefficients
+            log_mixing_coeffs = torch.log_softmax(
+                weights, dim=1
+            )  # softmax the weight along the per-point dimension, shape B, N
+            log_mixing_coeffs = torch.clamp(
+                log_mixing_coeffs, min=-10
+            )  # Prevent extreme values
+
+            max_log = torch.max(
+                log_gaussians + log_mixing_coeffs, dim=1, keepdim=True
+            ).values  # get the per-batch max log along all the points, B, 1
+            log_probs = max_log.squeeze(1) + torch.logsumexp(
+                log_gaussians + log_mixing_coeffs - max_log, dim=1
+            )  # B,
+
+            per_point_displacement_loss = -torch.mean(
+                log_probs
+            )  # mean of the negative log likelihood
+        else:
+            per_point_displacement_loss = F.mse_loss(pred_displacement, gt_displacement)
 
         weighted_avg_loss = F.mse_loss(pred_points, gt)
-        per_point_displacement_loss = F.mse_loss(pred_displacement, gt_displacement)
         loss = per_point_displacement_loss + self.weight_loss_weight * weighted_avg_loss
 
         return None, loss
@@ -1187,7 +1219,7 @@ class GoalRegressionModule(pl.LightningModule):
 
         # Avg over all datasets
         for metric, values in all_metrics.items():
-            log_dict[f"val/{metric}"] = torch.tensor(values).mean()
+            log_dict[f"val/{metric}"] = torch.stack(values).mean()
 
         # Minimize the linear combination of RMSE (reconstruction error) and -std (i.e. maximize diversity)
         # TODO: Find a better metric, and dynamically configure this....

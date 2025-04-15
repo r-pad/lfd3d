@@ -576,7 +576,7 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
 
         # Avg over all datasets
         for metric, values in all_metrics.items():
-            log_dict[f"val/{metric}"] = torch.tensor(values).mean()
+            log_dict[f"val/{metric}"] = torch.stack(values).mean()
 
         # Minimize the linear combination of RMSE (reconstruction error) and -std (i.e. maximize diversity)
         # TODO: Find a better metric, and dynamically configure this....
