@@ -200,7 +200,7 @@ def save_weighted_displacement_pcd_viz(pcd, weighted_displacement):
     sample_idx = np.random.choice(N, sample_lines, replace=False)
     sampled_pcd = pcd[sample_idx]
     sampled_vectors = vectors[sample_idx]
-    sampled_endpoints = sampled_pcd + sampled_vectors
+    sampled_endpoints = sampled_pcd - sampled_vectors
     # The vertices for the paths include all starting points followed by endpoints.
     line_vertices = np.vstack([sampled_pcd, sampled_endpoints])
 

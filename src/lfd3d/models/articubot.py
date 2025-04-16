@@ -780,6 +780,9 @@ class GoalRegressionModule(pl.LightningModule):
         self.val_outputs: defaultdict[str, List[Dict]] = defaultdict(list)
         self.train_outputs: List[Dict] = []
         self.predict_outputs: defaultdict[str, List[Dict]] = defaultdict(list)
+        self.predict_weighted_displacements: defaultdict[str, List[Dict]] = defaultdict(
+            list
+        )
         self.fixed_variance = cfg.model.fixed_variance
         self.is_gmm = cfg.model.is_gmm
 
@@ -1269,6 +1272,7 @@ class GoalRegressionModule(pl.LightningModule):
             padding_mask,
         )
         self.predict_outputs[eval_tag].append(pred_dict)
+        self.predict_weighted_displacements[eval_tag].append(weighted_displacement)
 
         return {
             "rmse": pred_dict["rmse"],
@@ -1292,12 +1296,17 @@ class GoalRegressionModule(pl.LightningModule):
             rmse = torch.cat([x["rmse"] for x in pred_outputs])
             chamfer_dist = torch.cat([x["chamfer_dist"] for x in pred_outputs])
             cross_displacement, all_cross_displacement = [], []
-            for i in pred_outputs:
-                cross_displacement.extend(i["cross_displacement"]["pred"])
-                all_cross_displacement.extend(i["cross_displacement"]["all_pred"])
+            weighted_displacements = []
+            for i, pred in enumerate(pred_outputs):
+                cross_displacement.extend(pred["cross_displacement"]["pred"])
+                all_cross_displacement.extend(pred["cross_displacement"]["all_pred"])
+                weighted_displacements.append(
+                    self.predict_weighted_displacements[eval_tag][i]
+                )
 
             for i, batch in enumerate(self.trainer.predict_dataloaders[dataloader_idx]):
                 batch_len = len(batch["caption"])
+                weighted_displacement_batch = weighted_displacements[i]
                 for idx in range(batch_len):
                     pred_dict = self.compose_pred_dict_for_viz(
                         rmse,
@@ -1308,7 +1317,10 @@ class GoalRegressionModule(pl.LightningModule):
                     )
                     viz_batch = self.compose_batch_for_viz(batch, idx)
                     self.log_viz_to_wandb(
-                        viz_batch, pred_dict, weighted_displacement, eval_tag
+                        viz_batch,
+                        pred_dict,
+                        weighted_displacement_batch[idx][None],
+                        eval_tag,
                     )
                 if i == 5:
                     break
@@ -1332,7 +1344,7 @@ class GoalRegressionModule(pl.LightningModule):
             if type(batch[key]) == Pointclouds:
                 pcd = batch[key].points_padded()[idx]
                 viz_batch[key] = Pointclouds(points=pcd[None])
-            elif key in ["rgbs", "depths"]:
+            elif key in ["rgbs", "depths", "gripper_idx"]:
                 viz_batch[key] = batch[key][idx][None]
             else:
                 viz_batch[key] = [batch[key][idx]]

@@ -359,6 +359,8 @@ class RpadFoxgloveDataModule(BaseDataModule):
     def __init__(self, batch_size, val_batch_size, num_workers, dataset_cfg):
         super().__init__(batch_size, val_batch_size, num_workers, dataset_cfg)
         self.val_tags = ["human", "aloha"]
+        # Subset of train to use for eval
+        self.TRAIN_SUBSET_SIZE = 20
 
     def setup(self, stage: str = "fit"):
         self.stage = stage
