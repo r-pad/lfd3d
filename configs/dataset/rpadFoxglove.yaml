@@ -10,3 +10,5 @@ val_size: null # (int, null) Length of the validation dataset
 num_points: 8192 # points in pcd
 max_depth: 1 # filter out pcd beyond this depth
 normalize: False # If false, leave in original scale (could be metric or relative depth), if true, normalize to 0 mean and unit std
+rgb_text_feat: False # Enable/disable computation of rgb/text features
+use_intermediate_frames: True # Use all intermediate frames in [start, end] as input to the model instead of only the start frame.

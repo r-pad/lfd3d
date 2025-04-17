@@ -103,9 +103,9 @@ class RpadFoxgloveDataset(td.Dataset):
         Updates `self.captions` with each event and its various subgoals
 
         Returns:
-            expanded_index (list of tuples (int, int)): A list of tuples
-                  where each tuple contains the event index and the corresponding
-                  chunk index.
+            expanded_index (list of tuples (int/fname, int, [indexes])):
+        A list of tuples where each tuple contains the event index, subgoal index
+        and start/end frame indexes
         """
         expanded_index = []
 
@@ -124,14 +124,13 @@ class RpadFoxgloveDataset(td.Dataset):
             idx = np.argsort(events["event"])
             sorted_event = np.asarray(events["event"])[idx]
 
-            expanded_event_idx = [(demo_name, i) for i in range(num_events)]
-            expanded_event_caption = {
-                (demo_name, i): sorted_event[i].replace("_", " ")
-                for i in range(num_events)
-            }
-
-            expanded_index.extend(expanded_event_idx)
-            self.captions.update(expanded_event_caption)
+            for i in range(num_events):
+                expanded_event_idx = self.get_event_start_end_indexes(demo_name, i)
+                expanded_event_caption = {
+                    (demo_name, i): sorted_event[i].replace("_", " ")
+                }
+                expanded_index.extend(expanded_event_idx)
+                self.captions.update(expanded_event_caption)
         return expanded_index
 
     def load_camera_params(self, demo_name):
@@ -163,7 +162,7 @@ class RpadFoxgloveDataset(td.Dataset):
         K_[1, 2] -= crop_offset_y  # Adjust cy for crop
         return K_
 
-    def get_event_start_end_ts(self, demo_name, subgoal_idx):
+    def get_event_start_end_indexes(self, demo_name, subgoal_idx):
         demo = self.dataset[demo_name]
 
         events = demo["events"]
@@ -183,14 +182,6 @@ class RpadFoxgloveDataset(td.Dataset):
             event_start_ts = datetime.fromisoformat(
                 sorted_end[subgoal_idx - 1]
             ).timestamp()
-        return event_start_ts, event_end_ts
-
-    def load_rgbd(self, demo_name, subgoal_idx, K):
-        demo = self.dataset[demo_name]
-
-        event_start_ts, event_end_ts = self.get_event_start_end_ts(
-            demo_name, subgoal_idx
-        )
 
         rgb_ts = demo["raw"]["rgb"]["image_rect"]["publish_ts"]
         depth_ts = demo["raw"]["depth_registered"]["image_rect"]["publish_ts"]
@@ -201,13 +192,53 @@ class RpadFoxgloveDataset(td.Dataset):
         event_start_idx_depth = np.searchsorted(depth_ts, event_start_ts)
         event_end_idx_depth = np.searchsorted(depth_ts, event_end_ts)
 
+        if self.dataset_cfg.use_intermediate_frames:
+            rgb_ts_event = rgb_ts[event_start_idx_rgb : event_end_idx_rgb - 1]
+
+            event_data = []
+            for rgb_idx_offset in range(rgb_ts_event.shape[0]):
+                rgb_idx = event_start_idx_rgb + rgb_idx_offset
+                rgb_timestamp = rgb_ts_event[rgb_idx_offset]
+
+                # Find the index of the closest depth timestamp
+                depth_idx = np.searchsorted(depth_ts, rgb_timestamp)
+                event_data.append(
+                    (
+                        demo_name,
+                        subgoal_idx,
+                        {
+                            "rgb_start": rgb_idx,
+                            "rgb_end": event_end_idx_rgb,
+                            "depth_start": depth_idx,
+                            "depth_end": event_end_idx_depth,
+                        },
+                    )
+                )
+        else:
+            event_data = [
+                (
+                    demo_name,
+                    subgoal_idx,
+                    {
+                        "rgb_start": event_start_idx_rgb,
+                        "rgb_end": event_end_idx_rgb,
+                        "depth_start": event_start_idx_depth,
+                        "depth_end": event_end_idx_depth,
+                    },
+                )
+            ]
+        return event_data
+
+    def load_rgbd(self, demo_name, subgoal_idx, event_indexes, K):
+        demo = self.dataset[demo_name]
+
         # Return rgb/depth at beginning and end of event
         rgb_init = Image.fromarray(
-            demo["raw"]["rgb"]["image_rect"]["img"][event_start_idx_rgb]
+            demo["raw"]["rgb"]["image_rect"]["img"][event_indexes["rgb_start"]]
         )
         rgb_init = np.asarray(self.rgb_preprocess(rgb_init))
         rgb_end = Image.fromarray(
-            demo["raw"]["rgb"]["image_rect"]["img"][event_end_idx_rgb]
+            demo["raw"]["rgb"]["image_rect"]["img"][event_indexes["rgb_end"]]
         )
         rgb_end = np.asarray(self.rgb_preprocess(rgb_end))
         rgbs = np.array([rgb_init, rgb_end])
@@ -215,7 +246,7 @@ class RpadFoxgloveDataset(td.Dataset):
         depth_init = (
             (
                 demo["raw"]["depth_registered"]["image_rect"]["img"][
-                    event_start_idx_depth
+                    event_indexes["depth_start"]
                 ]
                 / 1000.0
             )
@@ -227,7 +258,7 @@ class RpadFoxgloveDataset(td.Dataset):
         depth_end = (
             (
                 demo["raw"]["depth_registered"]["image_rect"]["img"][
-                    event_end_idx_depth
+                    event_indexes["depth_end"]
                 ]
                 / 1000.0
             )
@@ -238,7 +269,7 @@ class RpadFoxgloveDataset(td.Dataset):
         depth_end = np.asarray(self.depth_preprocess(depth_end))
         depths = np.array([depth_init, depth_end])
 
-        return rgbs, depths, event_start_idx_rgb, event_end_idx_rgb
+        return rgbs, depths
 
     def load_gripper_pcd(self, demo_name, event_start_idx, event_end_idx):
         demo = self.dataset[demo_name]
@@ -250,6 +281,17 @@ class RpadFoxgloveDataset(td.Dataset):
         """
         Compute RGB/text features generated with DINOv2 and SIGLIP
         """
+        # Compress RGB features
+        pca_n_components = 256
+        siglip_dim = 1152
+
+        if not self.dataset_cfg.rgb_text_feat:
+            text_embed = np.zeros(siglip_dim)
+            rgb_embed = np.zeros(
+                (self.target_shape, self.target_shape, pca_n_components)
+            )
+            return rgb_embed, text_embed
+
         # Compute features on CPU to avoid CUDA multiprocessing issues
         # We're only computing the features once and caching so its okay.
         text_embed = get_siglip_text_embedding(
@@ -262,8 +304,6 @@ class RpadFoxgloveDataset(td.Dataset):
             Image.fromarray(rgb), dinov2=self.dinov2, device="cpu"
         )
 
-        # Compress RGB features
-        pca_n_components = 256
         pca_model = PCA(n_components=pca_n_components)
         rgb_embed = pca_model.fit_transform(rgb_embed.reshape(-1, rgb_embed.shape[2]))
         rgb_embed = rgb_embed.reshape(
@@ -319,19 +359,17 @@ class RpadFoxgloveDataset(td.Dataset):
         return scene_pcd, scene_feat_pcd
 
     def __getitem__(self, idx):
-        demo_name, subgoal_idx = self.dataset_index[idx]
+        demo_name, subgoal_idx, event_indexes = self.dataset_index[idx]
 
         K_ = self.get_scaled_intrinsics(*self.load_camera_params(demo_name))
 
         caption = self.captions[(demo_name, subgoal_idx)]
         start2end = torch.eye(4)  # Static camera
 
-        rgbs, depths, event_start_idx, event_end_idx = self.load_rgbd(
-            demo_name, subgoal_idx, K_
-        )
+        rgbs, depths = self.load_rgbd(demo_name, subgoal_idx, event_indexes, K_)
 
         start_tracks, end_tracks = self.load_gripper_pcd(
-            demo_name, event_start_idx, event_end_idx
+            demo_name, event_indexes["rgb_start"], event_indexes["rgb_end"]
         )
 
         rgb_embed, text_embed = self.compute_rgb_text_feat(rgbs[0], caption)
