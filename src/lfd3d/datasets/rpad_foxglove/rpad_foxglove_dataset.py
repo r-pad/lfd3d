@@ -115,21 +115,18 @@ class RpadFoxgloveDataset(td.Dataset):
 
             demo = self.dataset[demo_name]
 
-            if "gripper_pos" not in demo.keys():
-                print(f"No GT found for {demo_name}")
-                continue
-
             if self.source_of_data(demo) not in self.data_sources:
                 continue
 
             events = demo["events"]
             num_events = len(events["event"])
+
+            idx = np.argsort(events["event"])
+            sorted_event = np.asarray(events["event"])[idx]
+
             expanded_event_idx = [(demo_name, i) for i in range(num_events)]
             expanded_event_caption = {
-                (demo_name, i): (
-                    events["end"][i],
-                    events["event"][i].replace("_", " "),
-                )
+                (demo_name, i): sorted_event[i].replace("_", " ")
                 for i in range(num_events)
             }
 
@@ -139,9 +136,10 @@ class RpadFoxgloveDataset(td.Dataset):
 
     def load_camera_params(self, demo_name):
         demo = self.dataset[demo_name]
-        K = demo["_rgb_camera_info"]["k"][0]
-        height = demo["_rgb_camera_info"]["height"][0]
-        width = demo["_rgb_camera_info"]["width"][0]
+        cam_info = demo["raw"]["rgb"]["camera_info"]
+        K = cam_info["k"][0]
+        height = cam_info["height"][0]
+        width = cam_info["width"][0]
         return K, (height, width)
 
     def get_scaled_intrinsics(self, K, orig_shape):
@@ -168,9 +166,10 @@ class RpadFoxgloveDataset(td.Dataset):
     def get_event_start_end_ts(self, demo_name, subgoal_idx):
         demo = self.dataset[demo_name]
 
-        event_end_ts = datetime.fromisoformat(
-            demo["events"]["end"][subgoal_idx]
-        ).timestamp()
+        events = demo["events"]
+        idx = np.argsort(events["event"])
+        sorted_end = np.asarray(events["end"])[idx]
+        event_end_ts = datetime.fromisoformat(sorted_end[subgoal_idx]).timestamp()
 
         if subgoal_idx == 0:
             # First frame where we have non-zero gripper_pos
@@ -178,11 +177,11 @@ class RpadFoxgloveDataset(td.Dataset):
             event_start_idx = np.argmax(
                 np.any(np.asarray(demo["gripper_pos"]) != 0, axis=(1, 2))
             )
-            event_start_ts = demo["_rgb_image_rect"]["ts"][event_start_idx]
+            event_start_ts = demo["raw"]["rgb"]["image_rect"]["ts"][event_start_idx]
         else:
             # Start timestamp is end timestamp of previous subgoal
             event_start_ts = datetime.fromisoformat(
-                demo["events"]["end"][subgoal_idx - 1]
+                sorted_end[subgoal_idx - 1]
             ).timestamp()
         return event_start_ts, event_end_ts
 
@@ -193,8 +192,8 @@ class RpadFoxgloveDataset(td.Dataset):
             demo_name, subgoal_idx
         )
 
-        rgb_ts = demo["_rgb_image_rect"]["publish_ts"]
-        depth_ts = demo["_depth_registered_image_rect"]["publish_ts"]
+        rgb_ts = demo["raw"]["rgb"]["image_rect"]["publish_ts"]
+        depth_ts = demo["raw"]["depth_registered"]["image_rect"]["publish_ts"]
 
         event_start_idx_rgb = np.searchsorted(rgb_ts, event_start_ts)
         event_end_idx_rgb = np.searchsorted(rgb_ts, event_end_ts)
@@ -203,15 +202,21 @@ class RpadFoxgloveDataset(td.Dataset):
         event_end_idx_depth = np.searchsorted(depth_ts, event_end_ts)
 
         # Return rgb/depth at beginning and end of event
-        rgb_init = Image.fromarray(demo["_rgb_image_rect"]["img"][event_start_idx_rgb])
+        rgb_init = Image.fromarray(
+            demo["raw"]["rgb"]["image_rect"]["img"][event_start_idx_rgb]
+        )
         rgb_init = np.asarray(self.rgb_preprocess(rgb_init))
-        rgb_end = Image.fromarray(demo["_rgb_image_rect"]["img"][event_end_idx_rgb])
+        rgb_end = Image.fromarray(
+            demo["raw"]["rgb"]["image_rect"]["img"][event_end_idx_rgb]
+        )
         rgb_end = np.asarray(self.rgb_preprocess(rgb_end))
         rgbs = np.array([rgb_init, rgb_end])
 
         depth_init = (
             (
-                demo["_depth_registered_image_rect"]["img"][event_start_idx_depth]
+                demo["raw"]["depth_registered"]["image_rect"]["img"][
+                    event_start_idx_depth
+                ]
                 / 1000.0
             )
             .squeeze()
@@ -220,7 +225,12 @@ class RpadFoxgloveDataset(td.Dataset):
         depth_init = Image.fromarray(depth_init)
         depth_init = np.asarray(self.depth_preprocess(depth_init))
         depth_end = (
-            (demo["_depth_registered_image_rect"]["img"][event_end_idx_depth] / 1000.0)
+            (
+                demo["raw"]["depth_registered"]["image_rect"]["img"][
+                    event_end_idx_depth
+                ]
+                / 1000.0
+            )
             .squeeze()
             .astype(np.float32)
         )
@@ -306,7 +316,7 @@ class RpadFoxgloveDataset(td.Dataset):
 
         K_ = self.get_scaled_intrinsics(*self.load_camera_params(demo_name))
 
-        _, caption = self.captions[(demo_name, subgoal_idx)]
+        caption = self.captions[(demo_name, subgoal_idx)]
         start2end = torch.eye(4)  # Static camera
 
         rgbs, depths, event_start_idx, event_end_idx = self.load_rgbd(
