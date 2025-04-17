@@ -53,6 +53,13 @@ class SynthBlockDataset(data.Dataset):
         depths = np.array([depth_init, depth_end])
         return rgbs, depths
 
+    def get_normalize_mean_std(self, action_pcd, scene_pcd):
+        if self.dataset_cfg.normalize is False:
+            mean, std = 0, np.array([1.0, 1.0, 1.0])
+        else:
+            mean, std = action_pcd.mean(axis=0), scene_pcd.std(axis=0)
+        return mean, std
+
     def __getitem__(self, index):
         raise NotImplementedError(
             "switch to gripper-only prediction + dino features. not yet implemented for this dataset."
@@ -75,12 +82,13 @@ class SynthBlockDataset(data.Dataset):
 
         start2end = np.eye(4)
 
+        action_pcd_mean, scene_pcd_std = self.get_normalize_mean_std(
+            action_pcd, anchor_pcd
+        )
         # Center on action_pcd
-        action_pcd_mean = action_pcd.mean(axis=0)
         action_pcd = action_pcd - action_pcd_mean
         anchor_pcd = anchor_pcd - action_pcd_mean
         # Standardize on scene_pcd
-        scene_pcd_std = anchor_pcd.std(axis=0)
         action_pcd = action_pcd / scene_pcd_std
         anchor_pcd = anchor_pcd / scene_pcd_std
         cross_displacement = cross_displacement / scene_pcd_std

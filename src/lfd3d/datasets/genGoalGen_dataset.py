@@ -81,6 +81,13 @@ class GenGoalGenDataset(data.Dataset):
 
         return rgbs, depths, segmask
 
+    def get_normalize_mean_std(self, action_pcd, scene_pcd):
+        if self.dataset_cfg.normalize is False:
+            mean, std = 0, np.array([1.0, 1.0, 1.0])
+        else:
+            mean, std = action_pcd.mean(axis=0), scene_pcd.std(axis=0)
+        return mean, std
+
     def get_scene_pcd(self, rgb_embed, depth, K):
         height, width = depth.shape
         # Create pixel coordinate grid
@@ -199,12 +206,13 @@ class GenGoalGenDataset(data.Dataset):
         anchor_pcd, anchor_feat_pcd = self.get_scene_pcd(rgb_embed, depths[0], self.K)
         action_pcd = self.get_action_pcd(depths[0], segmask, self.K)
 
+        action_pcd_mean, scene_pcd_std = self.get_normalize_mean_std(
+            action_pcd, anchor_pcd
+        )
         # Center on action_pcd
-        action_pcd_mean = action_pcd.mean(axis=0)
         action_pcd = action_pcd - action_pcd_mean
         anchor_pcd = anchor_pcd - action_pcd_mean
         # Standardize on scene_pcd
-        scene_pcd_std = anchor_pcd.std(axis=0)
         action_pcd = action_pcd / scene_pcd_std
         anchor_pcd = anchor_pcd / scene_pcd_std
         cross_displacement = np.zeros_like(action_pcd)

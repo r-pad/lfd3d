@@ -224,6 +224,13 @@ class DroidDataset(td.Dataset):
         )
         return rgb_embed, text_embed
 
+    def get_normalize_mean_std(self, action_pcd, scene_pcd):
+        if self.dataset_cfg.normalize is False:
+            mean, std = 0, np.array([1.0, 1.0, 1.0])
+        else:
+            mean, std = action_pcd.mean(axis=0), scene_pcd.std(axis=0)
+        return mean, std
+
     def get_scene_pcd(self, rgb_embed, depth, K):
         height, width = depth.shape
         # Create pixel coordinate grid
@@ -288,13 +295,14 @@ class DroidDataset(td.Dataset):
             rgb_embed, depths[0], K_
         )
 
+        action_pcd_mean, scene_pcd_std = self.get_normalize_mean_std(
+            start_tracks, start_scene_pcd
+        )
         # Center on action_pcd
-        action_pcd_mean = start_tracks.mean(axis=0)
         start_tracks = start_tracks - action_pcd_mean
         end_tracks = end_tracks - action_pcd_mean
         start_scene_pcd = start_scene_pcd - action_pcd_mean
         # Standardize on scene_pcd
-        scene_pcd_std = start_scene_pcd.std(axis=0)
         start_tracks = start_tracks / scene_pcd_std
         end_tracks = end_tracks / scene_pcd_std
         start_scene_pcd = start_scene_pcd / scene_pcd_std
