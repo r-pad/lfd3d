@@ -286,9 +286,10 @@ class RpadFoxgloveDataset(td.Dataset):
         siglip_dim = 1152
 
         if not self.dataset_cfg.rgb_text_feat:
-            text_embed = np.zeros(siglip_dim)
+            text_embed = np.zeros(siglip_dim, dtype=np.float32)
             rgb_embed = np.zeros(
-                (self.target_shape, self.target_shape, pca_n_components)
+                (self.target_shape, self.target_shape, pca_n_components),
+                dtype=np.float32,
             )
             return rgb_embed, text_embed
 
