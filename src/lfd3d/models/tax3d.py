@@ -201,8 +201,8 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
 
     def configure_optimizers(self):
         assert self.mode == "train", "Can only configure optimizers in training mode."
-        optimizer = optim.AdamW(
-            self.parameters(), lr=self.lr, weight_decay=self.weight_decay
+        optimizer = optim.SGD(
+            self.parameters(), lr=self.lr
         )
         lr_scheduler = get_cosine_schedule_with_warmup(
             optimizer=optimizer,
@@ -406,6 +406,37 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         }
 
         wandb.log(viz_dict)
+
+    def on_before_optimizer_step(self, optimizer):
+        torch.nn.utils.clip_grad_norm_(self.parameters(), max_norm=0.3)
+        if self.global_step % 500 == 0 and self.trainer.is_global_zero:
+            # Log gradients AFTER clipping has been applied by Lightning
+            grad_norm_dict = {}
+            
+            # Per-parameter gradients
+            for name, param in self.named_parameters():
+                if param.grad is not None:
+                    grad_norm_dict[f"grad_norm/{name}"] = param.grad.norm().item()
+                else:
+                    # Explicitly log zeros (useful for debugging)
+                    grad_norm_dict[f"grad_norm/{name}"] = 0
+            
+            # Calculate global norm (this should be ≤ 1.0 after clipping)
+            total_norm = 0
+            for p in self.parameters():
+                if p.grad is not None:
+                    param_norm = p.grad.data.norm(2)
+                    total_norm += param_norm.item() ** 2
+            total_norm = total_norm ** 0.5
+            grad_norm_dict["grad_norm/total"] = total_norm
+
+            # Log with your existing method
+            self.log_dict(
+                grad_norm_dict,
+                add_dataloader_idx=False,
+                prog_bar=False,
+                sync_dist=False,
+            )
 
     def training_step(self, batch, batch_idx):
         """

@@ -1239,7 +1239,7 @@ class DiT_PointCloud_Cross(nn.Module):
         t_emb = self.t_embedder(t)
 
         # Project text embedding to the same dimension as x
-        text_emb = self.text_projector(text_embed)
+        text_emb = self.text_projector(text_embed) * 0.0
 
         if self.y_feat_embedder is not None:
             y_feat_emb = self.y_feat_embedder(y_feat)
