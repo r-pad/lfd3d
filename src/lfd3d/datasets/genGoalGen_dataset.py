@@ -83,7 +83,7 @@ class GenGoalGenDataset(data.Dataset):
 
     def get_normalize_mean_std(self, action_pcd, scene_pcd):
         if self.dataset_cfg.normalize is False:
-            mean, std = 0, np.array([1.0, 1.0, 1.0])
+            mean, std = np.zeros(3), np.ones(3)
         else:
             mean, std = action_pcd.mean(axis=0), scene_pcd.std(axis=0)
         return mean, std

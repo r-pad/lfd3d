@@ -315,7 +315,7 @@ class RpadFoxgloveDataset(td.Dataset):
 
     def get_normalize_mean_std(self, action_pcd, scene_pcd):
         if self.dataset_cfg.normalize is False:
-            mean, std = 0, np.array([1.0, 1.0, 1.0])
+            mean, std = np.zeros(3), np.ones(3)
         else:
             mean, std = action_pcd.mean(axis=0), scene_pcd.std(axis=0)
         return mean, std
@@ -435,14 +435,12 @@ class RpadFoxgloveDataModule(BaseDataModule):
 
         if self.train_dataset.cache_dir:
             self.train_dataset.cache(
-                td.cachers.Pickle(Path(self.train_dataset.cache_dir))
+                td.cachers.HDF5(Path(self.train_dataset.cache_dir))
             )
             for tag in self.val_tags:
                 self.val_datasets[tag].cache(
-                    td.cachers.Pickle(Path(self.train_dataset.cache_dir) / f"val_{tag}")
+                    td.cachers.HDF5(Path(self.train_dataset.cache_dir) / f"val_{tag}")
                 )
                 self.test_datasets[tag].cache(
-                    td.cachers.Pickle(
-                        Path(self.train_dataset.cache_dir) / f"test_{tag}"
-                    )
+                    td.cachers.HDF5(Path(self.train_dataset.cache_dir) / f"test_{tag}")
                 )
