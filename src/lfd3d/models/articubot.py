@@ -870,13 +870,40 @@ class GoalRegressionModule(pl.LightningModule):
         initial_gripper = batch["action_pcd"].points_padded()
         scene_pcd = batch["anchor_pcd"].points_padded()
         batch_size, pcd_size, _ = scene_pcd.shape
+
+        if self.model_cfg.add_action_pcd_masked:
+            # Concat action pcd and scene pcd and add a mask for the same
+            initial_gripper = torch.cat(
+                [
+                    initial_gripper,
+                    torch.ones(
+                        batch_size, initial_gripper.shape[1], 1, device=scene_pcd.device
+                    ),
+                ],
+                dim=2,
+            )  # [B, K, 4]
+            scene_pcd = torch.cat(
+                [
+                    scene_pcd,
+                    torch.zeros(
+                        batch_size, scene_pcd.shape[1], 1, device=scene_pcd.device
+                    ),
+                ],
+                dim=2,
+            )  # [B, N, 4]
+            scene_pcd = torch.cat([initial_gripper, scene_pcd], dim=1)
+            pcd_size += initial_gripper.shape[1]
+
         # Network currently doesn't see action pcd
         outputs = self.network(scene_pcd.permute(0, 2, 1))
 
         init, gt = self.extract_gt_4_points(batch)
         pred_points = self.get_weighted_displacement(outputs)
         pred_displacement = outputs[:, :, :-1].reshape(batch_size, pcd_size, 4, 3)
-        gt_displacement = scene_pcd[:, :, None, :] - gt[:, None, :, :]
+        if self.model_cfg.add_action_pcd_masked:
+            gt_displacement = scene_pcd[:, :, None, :-1] - gt[:, None, :, :]
+        else:
+            gt_displacement = scene_pcd[:, :, None, :] - gt[:, None, :, :]
         weights = outputs[:, :, -1]  # B, N
 
         if self.is_gmm:
@@ -926,7 +953,31 @@ class GoalRegressionModule(pl.LightningModule):
             batch: the input batch
             progress: whether to show progress bar
         """
+        initial_gripper = batch["action_pcd"].points_padded()
         scene_pcd = batch["anchor_pcd"].points_padded()
+        batch_size, pcd_size, _ = scene_pcd.shape  # Matches forward
+
+        if self.model_cfg.add_action_pcd_masked:
+            initial_gripper = torch.cat(
+                [
+                    initial_gripper,
+                    torch.ones(
+                        batch_size, initial_gripper.shape[1], 1, device=scene_pcd.device
+                    ),
+                ],
+                dim=2,
+            )  # [B, K, 4]
+            scene_pcd = torch.cat(
+                [
+                    scene_pcd,
+                    torch.zeros(
+                        batch_size, scene_pcd.shape[1], 1, device=scene_pcd.device
+                    ),
+                ],
+                dim=2,
+            )  # [B, N, 4]
+            scene_pcd = torch.cat([initial_gripper, scene_pcd], dim=1)
+
         outputs = self.network(scene_pcd.permute(0, 2, 1))
         init, gt = self.extract_gt_4_points(batch)
 
@@ -1061,7 +1112,6 @@ class GoalRegressionModule(pl.LightningModule):
         batch_size = batch[self.label_key].points_padded().shape[0]
 
         _, loss = self(batch)
-        action_pcd = batch["action_pcd"]
         #########################################################
         # logging training metrics
         #########################################################
