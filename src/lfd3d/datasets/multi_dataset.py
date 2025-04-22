@@ -31,8 +31,8 @@ class MultiDatasetDataModule(BaseDataModule):
             train_data = dataset_class(cfg.data_dir, cfg, "train")
             val_data = dataset_class(cfg.data_dir, cfg, "val")
             if train_data.cache_dir:
-                train_data.cache(td.cachers.Pickle(Path(train_data.cache_dir)))
-                val_data.cache(td.cachers.Pickle(Path(train_data.cache_dir) / "val"))
+                train_data.cache(td.cachers.HDF5(Path(train_data.cache_dir)))
+                val_data.cache(td.cachers.HDF5(Path(train_data.cache_dir) / "val"))
             self.train_datasets_.append(train_data)
             self.val_datasets_.append(val_data)
             self.test_datasets_.append(dataset_class(cfg.data_dir, cfg, "test"))

@@ -123,7 +123,6 @@ def main(cfg):
     trainer = pl.Trainer(
         accelerator="gpu",
         devices=cfg.resources.gpus,
-        precision="16-mixed",
         logger=False,
     )
 

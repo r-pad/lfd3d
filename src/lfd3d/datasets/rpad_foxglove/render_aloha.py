@@ -149,10 +149,10 @@ def process_demo(
     visualize,
     in_mm=False,
 ):
-    joint_positions = demo["_follower_right_joint_states"]["pos"][:]
-    joint_positions_ts = demo["_follower_right_joint_states"]["ts"][:]
-    rgb_imgs = demo["_rgb_image_rect"]["img"][:]
-    rgb_ts = demo["_rgb_image_rect"]["ts"][:]
+    joint_positions = demo["raw"]["follower_right"]["joint_states"]["pos"][:]
+    joint_positions_ts = demo["raw"]["follower_right"]["joint_states"]["ts"][:]
+    rgb_imgs = demo["raw"]["rgb"]["image_rect"]["img"][:]
+    rgb_ts = demo["raw"]["rgb"]["image_rect"]["ts"][:]
 
     rgb_idx, joint_idx, _ = align_timestamps(rgb_ts, joint_positions_ts)
     rgb_imgs = rgb_imgs[rgb_idx]
@@ -209,7 +209,7 @@ def main(args):
     data = mujoco.MjData(model)
     cam_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_CAMERA, "teleoperator_pov")
 
-    rgb_cam_info = dataset[list(dataset.keys())[0]]["_rgb_camera_info"]
+    rgb_cam_info = dataset[list(dataset.keys())[0]]["raw"]["rgb"]["camera_info"]
     width = rgb_cam_info["width"][0] // 4
     height = rgb_cam_info["height"][1] // 4
     K = rgb_cam_info["k"][0]
@@ -224,7 +224,7 @@ def main(args):
 
     for demo_name in tqdm(dataset):
         demo = dataset[demo_name]
-        if "_follower_right_joint_states" not in demo:
+        if "follower_right" not in demo["raw"]:
             print("Human demo. Skipping.")
             continue
 

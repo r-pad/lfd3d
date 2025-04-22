@@ -20,7 +20,7 @@ defaults:
 seed: 42
 
 resources:
-  num_workers: 4
+  num_workers: 16
   gpus:
     - 0
 

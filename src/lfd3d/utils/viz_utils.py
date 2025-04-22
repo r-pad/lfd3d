@@ -1,6 +1,10 @@
+from datetime import datetime
+
 import cv2
 import numpy as np
 import torch
+import trimesh
+from matplotlib import cm
 from pytorch3d.ops import sample_farthest_points
 
 
@@ -25,7 +29,7 @@ def project_pcd_on_image(pcd, mask, image, K, color):
     return viz_image
 
 
-def get_img_pcd(image, depth, K, max_depth):
+def get_img_pcd(image, depth, K, max_depth, num_points):
     height, width = depth.shape
     # Create pixel coordinate grid
     x = np.arange(width)
@@ -58,7 +62,7 @@ def get_img_pcd(image, depth, K, max_depth):
 
     image_pcd_pt3d = torch.from_numpy(image_pcd[None])
     image_pcd_downsample, image_points_idx = sample_farthest_points(
-        image_pcd_pt3d, K=4096, random_start_point=False
+        image_pcd_pt3d, K=num_points, random_start_point=False
     )
     image_pcd = image_pcd_downsample.squeeze().numpy()
 
@@ -79,6 +83,7 @@ def get_img_and_track_pcd(
     gt_color,
     all_pred_color,
     max_depth,
+    num_points,
 ):
     init_pcd_color, all_pred_color, gt_color = (
         np.array(init_pcd_color),
@@ -86,7 +91,9 @@ def get_img_and_track_pcd(
         np.array(gt_color),
     )
 
-    image_pcd_pts, image_pcd_colors = get_img_pcd(image, depth, K, max_depth)
+    image_pcd_pts, image_pcd_colors = get_img_pcd(
+        image, depth, K, max_depth, num_points
+    )
 
     init_pcd_pts = init_pcd[mask]
     init_pcd_color = np.repeat(init_pcd_color[None, :], init_pcd_pts.shape[0], axis=0)
@@ -149,3 +156,65 @@ def get_action_anchor_pcd(
 
     viz_pcd = np.concatenate([transformed_pts_3d, viz_pcd_colors], axis=-1)
     return viz_pcd
+
+
+def save_weighted_displacement_pcd_viz(pcd, weighted_displacement):
+    """
+    Save a glTF binary (.glb) file visualizing a colored point cloud along with sampled 3D vector lines
+    derived from a weighted displacement prediction.
+
+    While wandb apparently supports .glb files, the UI shows a blank screen
+
+    Parameters
+    ----------
+    pcd : numpy.ndarray
+        Array of shape (N, 3) representing the 3D point cloud.
+    weighted_displacement : numpy.ndarray
+        Array of shape (N, 13), where the last column is contains weights
+        and the preceding 12 values represent 4 vectors per point (reshaped as (-1, 4, 3)),
+
+    Returns
+    -------
+    str
+        Filename of the exported glTF binary file (.glb).
+    """
+    N = pcd.shape[0]
+    sample_lines = 100
+
+    def softmax(x, T=10.0):
+        exp_x = np.exp(x / T)
+        return exp_x / np.sum(exp_x)
+
+    weights = weighted_displacement[:, -1]
+    weights_ = softmax(weights)
+    cmap = cm.get_cmap("viridis")
+    colors = (cmap(weights_)[:, :3] * 255).astype(np.uint8)
+
+    point_cloud = trimesh.points.PointCloud(pcd, colors=colors)
+
+    # Only consider the first point to avoid clutter in viz
+    vectors = weighted_displacement[:, :-1].reshape(-1, 4, 3)[:, 0]
+    # Create line segments for vectors.
+    # Each line segment goes from a point to the point plus its vector.
+
+    sample_idx = np.random.choice(N, sample_lines, replace=False)
+    sampled_pcd = pcd[sample_idx]
+    sampled_vectors = vectors[sample_idx]
+    sampled_endpoints = sampled_pcd - sampled_vectors
+    # The vertices for the paths include all starting points followed by endpoints.
+    line_vertices = np.vstack([sampled_pcd, sampled_endpoints])
+
+    # Build one line (entity) per point.
+    entities = [
+        trimesh.path.entities.Line(np.array([i, i + sample_lines]))
+        for i in range(sample_lines)
+    ]
+    line_path = trimesh.path.Path3D(entities=entities, vertices=line_vertices)
+
+    scene = trimesh.Scene()
+    scene.add_geometry(point_cloud, node_name="point_cloud")
+    scene.add_geometry(line_path, node_name="vectors")
+
+    fname = f"{datetime.now().timestamp()}.glb"
+    scene.export(fname)
+    return fname

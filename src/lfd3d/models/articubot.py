@@ -24,6 +24,7 @@ from lfd3d.utils.viz_utils import (
     get_action_anchor_pcd,
     get_img_and_track_pcd,
     project_pcd_on_image,
+    save_weighted_displacement_pcd_viz,
 )
 
 
@@ -696,6 +697,74 @@ class ArticubotNetwork(nn.Module):
         return x  # x shape: B, N, num_classes
 
 
+class ArticubotSmallNetwork(nn.Module):
+    def __init__(self, model_cfg):
+        super(ArticubotSmallNetwork, self).__init__()
+
+        num_classes = model_cfg.num_classes
+        input_channel = model_cfg.in_channels
+        keep_gripper_in_fps = model_cfg.keep_gripper_in_fps
+
+        # Reduced SA layers: Only sa1, sa2, sa3 with smaller MLPs
+        self.sa1 = PointNetSetAbstractionMsg(
+            npoint=512,  # Reduced from 1024
+            radius_list=[0.025, 0.05],
+            nsample_list=[16, 32],
+            in_channel=input_channel - 3,
+            mlp_list=[[16, 16], [32, 32]],  # Smaller MLP
+            keep_gripper_in_fps=keep_gripper_in_fps,
+        )
+        self.sa2 = PointNetSetAbstractionMsg(
+            npoint=256,  # Reduced from 512
+            radius_list=[0.05, 0.1],
+            nsample_list=[16, 32],
+            in_channel=48,  # Adjusted based on sa1 output
+            mlp_list=[[32, 32, 64], [64, 64]],  # Smaller MLP
+            keep_gripper_in_fps=keep_gripper_in_fps,
+        )
+        self.sa3 = PointNetSetAbstractionMsg(
+            npoint=128,  # Reduced from 256
+            radius_list=[0.1, 0.2],
+            nsample_list=[16, 32],
+            in_channel=128,  # Adjusted based on sa2 output
+            mlp_list=[[64, 64, 128], [128, 128]],  # Smaller MLP
+            keep_gripper_in_fps=keep_gripper_in_fps,
+        )
+
+        # Reduced FP layers: Only fp3, fp2, fp1
+        self.fp3 = PointNetFeaturePropagation(
+            128 + 128 + 128, [128, 128]
+        )  # Adjusted input channels
+        self.fp2 = PointNetFeaturePropagation(
+            48 + 128, [128, 64]
+        )  # Adjusted input channels
+        self.fp1 = PointNetFeaturePropagation(64, [64, 64, 64])
+
+        self.conv1 = nn.Conv1d(64, 64, 1)  # Reduced channels
+        self.bn1 = nn.BatchNorm1d(64)
+        self.conv2 = nn.Conv1d(64, num_classes, 1)
+
+    def forward(self, xyz):
+        l0_points = xyz
+        l0_xyz = xyz[:, :3, :]
+
+        if xyz.shape[1] > 3:
+            l1_xyz, l1_points = self.sa1(l0_xyz, xyz[:, 3:, :])
+        else:
+            l1_xyz, l1_points = self.sa1(l0_xyz, None)
+
+        l2_xyz, l2_points = self.sa2(l1_xyz, l1_points)
+        l3_xyz, l3_points = self.sa3(l2_xyz, l2_points)
+
+        l2_points = self.fp3(l2_xyz, l3_xyz, l2_points, l3_points)
+        l1_points = self.fp2(l1_xyz, l2_xyz, l1_points, l2_points)
+        l0_points = self.fp1(l0_xyz, l1_xyz, None, l1_points)
+
+        x = nn.functional.relu(self.bn1(self.conv1(l0_points)))
+        x = self.conv2(x)  # [B, num_classes, N]
+        return x.permute(0, 2, 1)  # [B, N, num_classes]
+
+
 class GoalRegressionModule(pl.LightningModule):
     """
     A goal generation module that handles model training, inference, evaluation and visualization.
@@ -711,6 +780,11 @@ class GoalRegressionModule(pl.LightningModule):
         self.val_outputs: defaultdict[str, List[Dict]] = defaultdict(list)
         self.train_outputs: List[Dict] = []
         self.predict_outputs: defaultdict[str, List[Dict]] = defaultdict(list)
+        self.predict_weighted_displacements: defaultdict[str, List[Dict]] = defaultdict(
+            list
+        )
+        self.fixed_variance = cfg.model.fixed_variance
+        self.is_gmm = cfg.model.is_gmm
 
         if self.prediction_type != "cross_displacement":
             raise ValueError(f"Invalid prediction type: {self.prediction_type}")
@@ -796,16 +870,73 @@ class GoalRegressionModule(pl.LightningModule):
         initial_gripper = batch["action_pcd"].points_padded()
         scene_pcd = batch["anchor_pcd"].points_padded()
         batch_size, pcd_size, _ = scene_pcd.shape
+
+        if self.model_cfg.add_action_pcd_masked:
+            # Concat action pcd and scene pcd and add a mask for the same
+            initial_gripper = torch.cat(
+                [
+                    initial_gripper,
+                    torch.ones(
+                        batch_size, initial_gripper.shape[1], 1, device=scene_pcd.device
+                    ),
+                ],
+                dim=2,
+            )  # [B, K, 4]
+            scene_pcd = torch.cat(
+                [
+                    scene_pcd,
+                    torch.zeros(
+                        batch_size, scene_pcd.shape[1], 1, device=scene_pcd.device
+                    ),
+                ],
+                dim=2,
+            )  # [B, N, 4]
+            scene_pcd = torch.cat([initial_gripper, scene_pcd], dim=1)
+            pcd_size += initial_gripper.shape[1]
+
         # Network currently doesn't see action pcd
         outputs = self.network(scene_pcd.permute(0, 2, 1))
+
         init, gt = self.extract_gt_4_points(batch)
         pred_points = self.get_weighted_displacement(outputs)
-
         pred_displacement = outputs[:, :, :-1].reshape(batch_size, pcd_size, 4, 3)
-        gt_displacement = scene_pcd[:, :, None, :] - gt[:, None, :, :]
+        if self.model_cfg.add_action_pcd_masked:
+            gt_displacement = scene_pcd[:, :, None, :-1] - gt[:, None, :, :]
+        else:
+            gt_displacement = scene_pcd[:, :, None, :] - gt[:, None, :, :]
+        weights = outputs[:, :, -1]  # B, N
+
+        if self.is_gmm:
+            diff = (pred_displacement - gt_displacement).reshape(
+                batch_size, pcd_size, -1
+            )  # Shape: (B, N, 12)
+            exponent = -0.5 * torch.sum(
+                (diff**2) / self.fixed_variance, dim=2
+            )  # Shape: (B, N), sum over the guassian dimension
+            log_gaussians = exponent
+
+            # Compute log mixing coefficients
+            log_mixing_coeffs = torch.log_softmax(
+                weights, dim=1
+            )  # softmax the weight along the per-point dimension, shape B, N
+            log_mixing_coeffs = torch.clamp(
+                log_mixing_coeffs, min=-10
+            )  # Prevent extreme values
+
+            max_log = torch.max(
+                log_gaussians + log_mixing_coeffs, dim=1, keepdim=True
+            ).values  # get the per-batch max log along all the points, B, 1
+            log_probs = max_log.squeeze(1) + torch.logsumexp(
+                log_gaussians + log_mixing_coeffs - max_log, dim=1
+            )  # B,
+
+            per_point_displacement_loss = -torch.mean(
+                log_probs
+            )  # mean of the negative log likelihood
+        else:
+            per_point_displacement_loss = F.mse_loss(pred_displacement, gt_displacement)
 
         weighted_avg_loss = F.mse_loss(pred_points, gt)
-        per_point_displacement_loss = F.mse_loss(pred_displacement, gt_displacement)
         loss = per_point_displacement_loss + self.weight_loss_weight * weighted_avg_loss
 
         return None, loss
@@ -822,21 +953,46 @@ class GoalRegressionModule(pl.LightningModule):
             batch: the input batch
             progress: whether to show progress bar
         """
+        initial_gripper = batch["action_pcd"].points_padded()
         scene_pcd = batch["anchor_pcd"].points_padded()
+        batch_size, pcd_size, _ = scene_pcd.shape  # Matches forward
+
+        if self.model_cfg.add_action_pcd_masked:
+            initial_gripper = torch.cat(
+                [
+                    initial_gripper,
+                    torch.ones(
+                        batch_size, initial_gripper.shape[1], 1, device=scene_pcd.device
+                    ),
+                ],
+                dim=2,
+            )  # [B, K, 4]
+            scene_pcd = torch.cat(
+                [
+                    scene_pcd,
+                    torch.zeros(
+                        batch_size, scene_pcd.shape[1], 1, device=scene_pcd.device
+                    ),
+                ],
+                dim=2,
+            )  # [B, N, 4]
+            scene_pcd = torch.cat([initial_gripper, scene_pcd], dim=1)
+
         outputs = self.network(scene_pcd.permute(0, 2, 1))
         init, gt = self.extract_gt_4_points(batch)
 
         pred = self.get_weighted_displacement(outputs)
         pred_displacement = pred - init
-        return {self.prediction_type: {"pred": pred_displacement}}
+        return {self.prediction_type: {"pred": pred_displacement}}, outputs
 
-    def log_viz_to_wandb(self, batch, pred_dict, tag):
+    def log_viz_to_wandb(self, batch, pred_dict, weighted_displacement, tag):
         """
         Log visualizations to wandb.
 
         Args:
             batch: the input batch
             pred_dict: the prediction dictionary
+            weighted_displacement: the output of the articubot model
             tag: the tag to use for logging
         """
         batch_size = batch[self.label_key].points_padded().shape[0]
@@ -854,6 +1010,7 @@ class GoalRegressionModule(pl.LightningModule):
         vid_name = batch["vid_name"][viz_idx]
         rmse = pred_dict["rmse"][viz_idx]
         anchor_pcd = batch["anchor_pcd"].points_padded()[viz_idx].cpu().numpy()
+        weighted_displacement = weighted_displacement[viz_idx].cpu().numpy()
 
         pcd, gt = self.extract_gt_4_points(batch)
         pcd, gt = pcd.cpu().numpy()[viz_idx], gt.cpu().numpy()[viz_idx]
@@ -923,6 +1080,7 @@ class GoalRegressionModule(pl.LightningModule):
             RED,
             BLUES,
             max_depth,
+            anchor_pcd.shape[0],
         )
         ###
 
@@ -934,6 +1092,8 @@ class GoalRegressionModule(pl.LightningModule):
             RED,
         )
         ###
+
+        _ = save_weighted_displacement_pcd_viz(anchor_pcd, weighted_displacement)
 
         viz_dict = {
             f"{tag}/track_projected_to_rgb": wandb_proj_img,
@@ -952,7 +1112,6 @@ class GoalRegressionModule(pl.LightningModule):
         batch_size = batch[self.label_key].points_padded().shape[0]
 
         _, loss = self(batch)
-        action_pcd = batch["action_pcd"]
         #########################################################
         # logging training metrics
         #########################################################
@@ -969,12 +1128,11 @@ class GoalRegressionModule(pl.LightningModule):
             self.eval()
             with torch.no_grad():
                 all_pred_dict = [self.predict(batch)]
-                pred_dict = all_pred_dict[
-                    0
-                ]  # Use one sample for computing other metrics
+                # Use one sample for computing other metrics
+                pred_dict, weighted_displacement = all_pred_dict[0]
                 # Store all sample preds for viz
                 pred_dict[self.prediction_type]["all_pred"] = [
-                    i[self.prediction_type]["pred"] for i in all_pred_dict
+                    i[0][self.prediction_type]["pred"] for i in all_pred_dict
                 ]
                 pred_dict[self.prediction_type]["all_pred"] = torch.stack(
                     pred_dict[self.prediction_type]["all_pred"]
@@ -1001,7 +1159,7 @@ class GoalRegressionModule(pl.LightningModule):
                 ####################################################
                 # logging visualizations
                 ####################################################
-                self.log_viz_to_wandb(batch, pred_dict, "train")
+                self.log_viz_to_wandb(batch, pred_dict, weighted_displacement, "train")
 
         self.train_outputs.append(train_metrics)
         return loss
@@ -1051,10 +1209,11 @@ class GoalRegressionModule(pl.LightningModule):
         self.eval()
         with torch.no_grad():
             all_pred_dict = [self.predict(batch)]
-            pred_dict = all_pred_dict[0]  # Use one sample for computing other metrics
+            pred_dict, weighted_displacement = all_pred_dict[0]
+
             # Store all sample preds for viz
             pred_dict[self.prediction_type]["all_pred"] = [
-                i[self.prediction_type]["pred"] for i in all_pred_dict
+                i[0][self.prediction_type]["pred"] for i in all_pred_dict
             ]
             pred_dict[self.prediction_type]["all_pred"] = torch.stack(
                 pred_dict[self.prediction_type]["all_pred"]
@@ -1080,7 +1239,9 @@ class GoalRegressionModule(pl.LightningModule):
         # logging visualizations
         ####################################################
         if batch_idx == self.random_val_viz_idx and self.trainer.is_global_zero:
-            self.log_viz_to_wandb(batch, pred_dict, f"val_{val_tag}")
+            self.log_viz_to_wandb(
+                batch, pred_dict, weighted_displacement, f"val_{val_tag}"
+            )
         return pred_dict
 
     def on_validation_epoch_end(self):
@@ -1111,7 +1272,7 @@ class GoalRegressionModule(pl.LightningModule):
 
         # Avg over all datasets
         for metric, values in all_metrics.items():
-            log_dict[f"val/{metric}"] = torch.tensor(values).mean()
+            log_dict[f"val/{metric}"] = torch.stack(values).mean()
 
         # Minimize the linear combination of RMSE (reconstruction error) and -std (i.e. maximize diversity)
         # TODO: Find a better metric, and dynamically configure this....
@@ -1137,10 +1298,10 @@ class GoalRegressionModule(pl.LightningModule):
         eval_tag = self.trainer.datamodule.eval_tags[dataloader_idx]
         all_pred_dict = [self.predict(batch)]
 
-        pred_dict = all_pred_dict[0]  # Use one sample for computing other metrics
+        pred_dict, weighted_displacement = all_pred_dict[0]
         # Store all sample preds for viz
         pred_dict[self.prediction_type]["all_pred"] = [
-            i[self.prediction_type]["pred"] for i in all_pred_dict
+            i[0][self.prediction_type]["pred"] for i in all_pred_dict
         ]
         pred_dict[self.prediction_type]["all_pred"] = torch.stack(
             pred_dict[self.prediction_type]["all_pred"]
@@ -1161,6 +1322,7 @@ class GoalRegressionModule(pl.LightningModule):
             padding_mask,
         )
         self.predict_outputs[eval_tag].append(pred_dict)
+        self.predict_weighted_displacements[eval_tag].append(weighted_displacement)
 
         return {
             "rmse": pred_dict["rmse"],
@@ -1184,12 +1346,17 @@ class GoalRegressionModule(pl.LightningModule):
             rmse = torch.cat([x["rmse"] for x in pred_outputs])
             chamfer_dist = torch.cat([x["chamfer_dist"] for x in pred_outputs])
             cross_displacement, all_cross_displacement = [], []
-            for i in pred_outputs:
-                cross_displacement.extend(i["cross_displacement"]["pred"])
-                all_cross_displacement.extend(i["cross_displacement"]["all_pred"])
+            weighted_displacements = []
+            for i, pred in enumerate(pred_outputs):
+                cross_displacement.extend(pred["cross_displacement"]["pred"])
+                all_cross_displacement.extend(pred["cross_displacement"]["all_pred"])
+                weighted_displacements.append(
+                    self.predict_weighted_displacements[eval_tag][i]
+                )
 
             for i, batch in enumerate(self.trainer.predict_dataloaders[dataloader_idx]):
                 batch_len = len(batch["caption"])
+                weighted_displacement_batch = weighted_displacements[i]
                 for idx in range(batch_len):
                     pred_dict = self.compose_pred_dict_for_viz(
                         rmse,
@@ -1199,7 +1366,12 @@ class GoalRegressionModule(pl.LightningModule):
                         idx,
                     )
                     viz_batch = self.compose_batch_for_viz(batch, idx)
-                    self.log_viz_to_wandb(viz_batch, pred_dict, eval_tag)
+                    self.log_viz_to_wandb(
+                        viz_batch,
+                        pred_dict,
+                        weighted_displacement_batch[idx][None],
+                        eval_tag,
+                    )
                 if i == 5:
                     break
         self.predict_outputs.clear()
@@ -1222,7 +1394,7 @@ class GoalRegressionModule(pl.LightningModule):
             if type(batch[key]) == Pointclouds:
                 pcd = batch[key].points_padded()[idx]
                 viz_batch[key] = Pointclouds(points=pcd[None])
-            elif key in ["rgbs", "depths"]:
+            elif key in ["rgbs", "depths", "gripper_idx"]:
                 viz_batch[key] = batch[key][idx][None]
             else:
                 viz_batch[key] = [batch[key][idx]]

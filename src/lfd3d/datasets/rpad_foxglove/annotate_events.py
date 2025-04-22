@@ -9,9 +9,8 @@ import numpy as np
 import zarr
 from google import genai
 from google.genai import types
-from tqdm import tqdm
-
 from lfd3d.utils.gemini_utils import save_video, setup_client, upload_video
+from tqdm import tqdm
 
 TASK_SPEC = {
     "place_mug_on_table": (
@@ -175,11 +174,11 @@ def main(args):
         os.makedirs(f"{args.output_dir}/{demo_name}", exist_ok=True)
         video_path = f"{args.output_dir}/{demo_name}/video.mp4"
 
-        ts = np.asarray(demo["_rgb_image_rect"]["publish_ts"])
-        images = demo["_rgb_image_rect"]["img"]
+        ts = np.asarray(demo["raw"]["rgb"]["image_rect"]["publish_ts"])
+        images = demo["raw"]["rgb"]["image_rect"]["img"]
 
-        if "_follower_right_joint_states" in demo and not args.disable_gripper_pos:
-            joint_states = demo["_follower_right_joint_states"]
+        if "follower_right" in demo["raw"] and not args.disable_gripper_pos:
+            joint_states = demo["raw"]["follower_right"]["joint_states"]
             ends, events = extract_events_with_gripper_pos(joint_states, subgoals)
         else:
             ends, events = extract_events_with_gemini(
