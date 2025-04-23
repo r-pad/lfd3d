@@ -147,6 +147,7 @@ def process_demo(
     world_to_cam,
     sample_n_points,
     visualize,
+    in_mm=False,
 ):
     joint_positions = demo["raw"]["follower_right"]["joint_states"]["pos"][:]
     joint_positions_ts = demo["raw"]["follower_right"]["joint_states"]["ts"][:]
@@ -193,6 +194,12 @@ def process_demo(
             plt.imsave(f"mujoco_renders/{demo.name}/{str(t).zfill(5)}.png", rgb)
 
     POINTS = np.array(POINTS)
+    if in_mm:
+        POINTS *= 1000  # Convert from meters to millimeters
+    
+    # Delete existing gripper_pos dataset if it exists
+    if 'gripper_pos' in demo:
+        del demo['gripper_pos']
     demo.create_dataset("gripper_pos", data=POINTS)
 
 
@@ -232,6 +239,7 @@ def main(args):
             np.linalg.inv(cam_to_world),
             args.sample_n_points,
             args.visualize,
+            args.in_mm,
         )
 
 
@@ -250,6 +258,12 @@ if __name__ == "__main__":
         "--visualize",
         action="store_true",
         help="Flag to enable visualization",
+        default=False,
+    )
+    parser.add_argument(
+        "--in_mm",
+        action="store_true",
+        help="Save point coordinates in millimeters instead of meters",
         default=False,
     )
     args = parser.parse_args()
