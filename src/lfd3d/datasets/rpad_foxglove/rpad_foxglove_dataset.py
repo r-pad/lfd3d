@@ -23,6 +23,7 @@ class RpadFoxgloveDataset(td.Dataset):
     def __init__(self, root, dataset_cfg, split):
         super().__init__()
         self.root = root
+        self.additional_img_dir = dataset_cfg.additional_img_dir
         self.split = split
 
         self.cache_dir = dataset_cfg.cache_dir
@@ -80,10 +81,14 @@ class RpadFoxgloveDataset(td.Dataset):
     def __len__(self):
         return self.size
 
-    def source_of_data(self, demo):
+    def source_of_data(self, demo_name):
         """
         Return the source of the current demo i.e. method of collection
         """
+        if demo_name not in self.dataset:
+            return "human"
+
+        demo = self.dataset[demo_name]
         # Currently identifying demo type by checking number of vertices
         # For human data, we have 778 vertices from the MANO mesh
         # For robot data, we're sampling 500 points from the mesh.
@@ -131,9 +136,39 @@ class RpadFoxgloveDataset(td.Dataset):
                 }
                 expanded_index.extend(expanded_event_idx)
                 self.captions.update(expanded_event_caption)
+
+        if self.additional_img_dir is not None and self.split == "train":
+            # A different format for the additional image only data
+            dirs = os.listdir(self.additional_img_dir)
+            dirs = [d for d in dirs if os.path.isdir(f"{self.additional_img_dir}/{d}")]
+            for dir in dirs:
+                hand_pose = np.load(f"{self.additional_img_dir}/{dir}/hand_pose.npy")
+                hand_pose_mean = hand_pose.mean(axis=(1, 2))
+                idxs = np.array(hand_pose_mean.nonzero()).flatten().tolist()
+                events = json.load(open(f"{self.additional_img_dir}/{dir}/events.json"))
+                for i in range(len(events) - 1):
+                    if i in idxs and (i + 1) in idxs:
+                        expanded_index.append(
+                            (
+                                dir,
+                                i,
+                                {
+                                    "rgb_start": i,
+                                    "rgb_end": i + 1,
+                                    "depth_start": i,
+                                    "depth_end": i + 1,
+                                },
+                            )
+                        )
+                        self.captions[(dir, i)] = events[i]
         return expanded_index
 
     def load_camera_params(self, demo_name):
+        if demo_name not in self.dataset:
+            metadata = np.load(f"{self.additional_img_dir}/metadata.npz")
+            K = metadata["K"]
+            height, width = metadata["height"], metadata["width"]
+            return K, (height, width)
         demo = self.dataset[demo_name]
         cam_info = demo["raw"]["rgb"]["camera_info"]
         K = cam_info["k"][0]
@@ -229,7 +264,45 @@ class RpadFoxgloveDataset(td.Dataset):
             ]
         return event_data
 
+    def load_rgbd_for_img(self, demo_name, subgoal_idx, event_indexes, K):
+        """An alternate function for loading the RGBD data for the additional images.
+        Kind of ugly tbh, alternate way is to record the image data in zarr as well instead of
+        this bespoke format."""
+        start_idx = subgoal_idx  # Generalize start index
+        end_idx = start_idx + 1
+
+        # Load RGB images
+        rgb_init_path = f"{self.additional_img_dir}/{demo_name}/rgb_{start_idx:03d}.png"
+        rgb_end_path = f"{self.additional_img_dir}/{demo_name}/rgb_{end_idx:03d}.png"
+        rgb_init = Image.open(rgb_init_path).convert("RGB")
+        rgb_end = Image.open(rgb_end_path).convert("RGB")
+
+        # Load depth images
+        depth_init_path = (
+            f"{self.additional_img_dir}/{demo_name}/depth_{start_idx:03d}.png"
+        )
+        depth_end_path = (
+            f"{self.additional_img_dir}/{demo_name}/depth_{end_idx:03d}.png"
+        )
+        depth_init = np.asarray(Image.open(depth_init_path)).astype(np.float32) / 1000.0
+        depth_end = np.asarray(Image.open(depth_end_path)).astype(np.float32) / 1000.0
+
+        # Preprocess and stack
+        rgb_init = np.asarray(self.rgb_preprocess(rgb_init))
+        rgb_end = np.asarray(self.rgb_preprocess(rgb_end))
+        rgbs = np.array([rgb_init, rgb_end])
+
+        depth_init = Image.fromarray(depth_init)
+        depth_init = np.asarray(self.depth_preprocess(depth_init))
+        depth_end = Image.fromarray(depth_end)
+        depth_end = np.asarray(self.depth_preprocess(depth_end))
+        depths = np.array([depth_init, depth_end])
+
+        return rgbs, depths
+
     def load_rgbd(self, demo_name, subgoal_idx, event_indexes, K):
+        if demo_name not in self.dataset:
+            return self.load_rgbd_for_img(demo_name, subgoal_idx, event_indexes, K)
         demo = self.dataset[demo_name]
 
         # Return rgb/depth at beginning and end of event
@@ -272,9 +345,14 @@ class RpadFoxgloveDataset(td.Dataset):
         return rgbs, depths
 
     def load_gripper_pcd(self, demo_name, event_start_idx, event_end_idx):
-        demo = self.dataset[demo_name]
-        start_tracks = demo["gripper_pos"][event_start_idx]
-        end_tracks = demo["gripper_pos"][event_end_idx]
+        if demo_name not in self.dataset:
+            handpose = np.load(f"{self.additional_img_dir}/{demo_name}/hand_pose.npy")
+            start_tracks = handpose[event_start_idx]
+            end_tracks = handpose[event_end_idx]
+        else:
+            demo = self.dataset[demo_name]
+            start_tracks = demo["gripper_pos"][event_start_idx]
+            end_tracks = demo["gripper_pos"][event_end_idx]
         return start_tracks, end_tracks
 
     def compute_rgb_text_feat(self, rgb, text):
@@ -378,7 +456,7 @@ class RpadFoxgloveDataset(td.Dataset):
             rgb_embed, depths[0], K_
         )
 
-        gripper_idx = self.GRIPPER_IDX[self.source_of_data(self.dataset[demo_name])]
+        gripper_idx = self.GRIPPER_IDX[self.source_of_data(demo_name)]
 
         action_pcd_mean, scene_pcd_std = self.get_normalize_mean_std(
             start_tracks, start_scene_pcd
