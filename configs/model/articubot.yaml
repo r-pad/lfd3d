@@ -6,6 +6,7 @@ in_channels: 3 # Number of input channels
 num_classes: 13 # xyz of 4 points and weight of points
 keep_gripper_in_fps: False
 add_action_pcd_masked: False # Add in action pcd with boolean mask (increment in_channels)
+use_text_embedding: False # If true, expects (siglip) text embedding to be provided as input
 
 is_gmm: False # Train a GMM and minimize negative log likelihood instead
 fixed_variance: 0.05 # for gmm

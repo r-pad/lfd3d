@@ -609,6 +609,23 @@ class ArticubotNetwork(nn.Module):
         input_channel = model_cfg.in_channels
         keep_gripper_in_fps = model_cfg.keep_gripper_in_fps
 
+        self.use_text_embedding = model_cfg.use_text_embedding
+        self.encoded_text_dim = 128  # Output dimension after encoding
+        if self.use_text_embedding:
+            self.text_encoder = nn.Linear(
+                1152, self.encoded_text_dim
+            )  # SIGLIP input dim
+            self.film_predictor = nn.Sequential(
+                nn.Linear(self.encoded_text_dim, 256),  # [B, 128] -> [B, 256]
+                nn.ReLU(),
+                nn.Linear(256, 1024 * 2),  # [B, 256] -> [B, 2048]
+            )
+            # Init as gamma=0 and beta=1
+            self.film_predictor[-1].weight.data.zero_()
+            self.film_predictor[-1].bias.data.copy_(
+                torch.cat([torch.ones(1024), torch.zeros(1024)])
+            )
+
         self.sa1 = PointNetSetAbstractionMsg(
             npoint=1024,
             radius_list=[0.025, 0.05],
@@ -668,7 +685,7 @@ class ArticubotNetwork(nn.Module):
         # self.drop1 = nn.Dropout(0.5)
         self.conv2 = nn.Conv1d(128, num_classes, 1)
 
-    def forward(self, xyz):
+    def forward(self, xyz, text_embedding=None):
         l0_points = xyz
         l0_xyz = xyz[:, :3, :]
 
@@ -682,6 +699,15 @@ class ArticubotNetwork(nn.Module):
         l4_xyz, l4_points = self.sa4(l3_xyz, l3_points)  # (B, 3, 128) (B, 1024, 16)
         l5_xyz, l5_points = self.sa5(l4_xyz, l4_points)  # (B, 3, 64) (B , 1024, 64)
         l6_xyz, l6_points = self.sa6(l5_xyz, l5_points)  # (B, 3, 16) (B, 1024, 16)
+
+        # Apply FiLM conditioning at bottleneck
+        if self.use_text_embedding:
+            encoded_text = self.text_encoder(text_embedding)  # [B, 128]
+            film_params = self.film_predictor(encoded_text)  # [B, 1024 * 2]
+            gamma, beta = film_params.chunk(2, dim=1)  # [B, 1024] each
+            gamma = gamma.unsqueeze(2)  # [B, 1024, 1] for broadcasting
+            beta = beta.unsqueeze(2)  # [B, 1024, 1] for broadcasting
+            l6_points = gamma * l6_points + beta  # FiLM modulation: [B, 1024, 16]
 
         l5_points = self.fp6(l5_xyz, l6_xyz, l5_points, l6_points)  # (B, 512, 64)
         l4_points = self.fp5(l4_xyz, l5_xyz, l4_points, l5_points)  # (B, 512, 128)
@@ -700,6 +726,7 @@ class ArticubotNetwork(nn.Module):
 class ArticubotSmallNetwork(nn.Module):
     def __init__(self, model_cfg):
         super(ArticubotSmallNetwork, self).__init__()
+        raise NotImplementedError("not up to date. refer articubotnetwork and update.")
 
         num_classes = model_cfg.num_classes
         input_channel = model_cfg.in_channels
@@ -869,6 +896,7 @@ class GoalRegressionModule(pl.LightningModule):
     def forward(self, batch):
         initial_gripper = batch["action_pcd"].points_padded()
         scene_pcd = batch["anchor_pcd"].points_padded()
+        text_embedding = batch["text_embed"]
         batch_size, pcd_size, _ = scene_pcd.shape
 
         if self.model_cfg.add_action_pcd_masked:
@@ -895,7 +923,9 @@ class GoalRegressionModule(pl.LightningModule):
             pcd_size += initial_gripper.shape[1]
 
         # Network currently doesn't see action pcd
-        outputs = self.network(scene_pcd.permute(0, 2, 1))
+        outputs = self.network(
+            scene_pcd.permute(0, 2, 1), text_embedding=text_embedding
+        )
 
         init, gt = self.extract_gt_4_points(batch)
         pred_points = self.get_weighted_displacement(outputs)
@@ -955,6 +985,7 @@ class GoalRegressionModule(pl.LightningModule):
         """
         initial_gripper = batch["action_pcd"].points_padded()
         scene_pcd = batch["anchor_pcd"].points_padded()
+        text_embedding = batch["text_embed"]
         batch_size, pcd_size, _ = scene_pcd.shape  # Matches forward
 
         if self.model_cfg.add_action_pcd_masked:
@@ -978,7 +1009,9 @@ class GoalRegressionModule(pl.LightningModule):
             )  # [B, N, 4]
             scene_pcd = torch.cat([initial_gripper, scene_pcd], dim=1)
 
-        outputs = self.network(scene_pcd.permute(0, 2, 1))
+        outputs = self.network(
+            scene_pcd.permute(0, 2, 1), text_embedding=text_embedding
+        )
         init, gt = self.extract_gt_4_points(batch)
 
         pred = self.get_weighted_displacement(outputs)
