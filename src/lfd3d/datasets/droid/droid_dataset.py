@@ -66,6 +66,8 @@ class DroidDataset(td.Dataset):
             self.camera_intrinsics = json.load(f)
 
         self.size = len(self.droid_index)
+        # indexes of selected gripper points -> handpicked
+        self.GRIPPER_IDX = np.array([356, 232, 16])
 
     def __len__(self):
         return self.size
@@ -322,6 +324,7 @@ class DroidDataset(td.Dataset):
             "vid_name": fname,
             "pcd_mean": action_pcd_mean,
             "pcd_std": scene_pcd_std,
+            "gripper_idx": self.GRIPPER_IDX,
         }
         return item
 
