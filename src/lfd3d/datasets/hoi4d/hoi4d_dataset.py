@@ -351,27 +351,6 @@ class HOI4DDataset(BaseDataset):
         print("Number of events after filtering:", len(filtered_data_files))
         return filtered_data_files, filtered_tracks
 
-    def get_scaled_intrinsics(self, K):
-        # Getting scale factor from torchvision.transforms.Resize behaviour
-        K_ = K.copy()
-
-        scale_factor = self.target_shape / min(self.orig_shape)
-
-        # Apply the scale factor to the intrinsics
-        K_[0, 0] *= scale_factor  # fx
-        K_[1, 1] *= scale_factor  # fy
-        K_[0, 2] *= scale_factor  # cx
-        K_[1, 2] *= scale_factor  # cy
-
-        # Adjust the principal point (cx, cy) for the center crop
-        crop_offset_x = (self.orig_shape[1] * scale_factor - self.target_shape) / 2
-        crop_offset_y = (self.orig_shape[0] * scale_factor - self.target_shape) / 2
-
-        # Adjust the principal point (cx, cy) for the center crop
-        K_[0, 2] -= crop_offset_x  # Adjust cx for crop
-        K_[1, 2] -= crop_offset_y  # Adjust cy for crop
-        return K_
-
     def get_start2end_transform(self, cam2world, event_start_idx, event_end_idx):
         start2world = cam2world[event_start_idx]
         end2world = cam2world[event_end_idx]
@@ -386,7 +365,7 @@ class HOI4DDataset(BaseDataset):
         Unproject the tracks to 3D point clouds, register the point cloud
         `end_tracks` to the `start_tracks` coordinate frame.
         """
-        K_ = self.get_scaled_intrinsics(K)
+        K_ = self.get_scaled_intrinsics(K, self.orig_shape, self.target_shape)
         tracks = np.load(f"{dir_name}/spatracker_3d_tracks.npz")
         event_tracks = tracks[f"tracks_{event_idx}"]
 
@@ -434,13 +413,6 @@ class HOI4DDataset(BaseDataset):
 
         return start_tracks, end_tracks
 
-    def get_normalize_mean_std(self, action_pcd, scene_pcd):
-        if self.dataset_cfg.normalize is False:
-            mean, std = np.zeros(3), np.ones(3)
-        else:
-            mean, std = action_pcd.mean(axis=0), scene_pcd.std(axis=0)
-        return mean, std
-
     def compose_caption(self, dir_name, event):
         """Compose the caption from the event name and the object."""
         event_name = event["event"]
@@ -480,7 +452,7 @@ class HOI4DDataset(BaseDataset):
         dir_name = os.path.dirname(os.path.dirname(vid_name))
 
         K, cam2world = self.load_camera_params(dir_name)
-        K_ = self.get_scaled_intrinsics(K)
+        K_ = self.get_scaled_intrinsics(K, self.orig_shape, self.target_shape)
         event, event_start_idx, event_end_idx = self.load_event(dir_name, event_idx)
         start2end = self.get_start2end_transform(
             cam2world, event_start_idx, event_end_idx
@@ -496,7 +468,7 @@ class HOI4DDataset(BaseDataset):
         )
 
         action_pcd_mean, scene_pcd_std = self.get_normalize_mean_std(
-            start_tracks, start_scene_pcd
+            start_tracks, start_scene_pcd, self.dataset_cfg
         )
         # Center on action_pcd
         start_tracks = start_tracks - action_pcd_mean

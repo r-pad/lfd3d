@@ -175,27 +175,6 @@ class RpadFoxgloveDataset(BaseDataset):
         width = cam_info["width"][0]
         return K, (height, width)
 
-    def get_scaled_intrinsics(self, K, orig_shape):
-        # Getting scale factor from torchvision.transforms.Resize behaviour
-        K_ = K.copy()
-
-        scale_factor = self.target_shape / min(orig_shape)
-
-        # Apply the scale factor to the intrinsics
-        K_[0, 0] *= scale_factor  # fx
-        K_[1, 1] *= scale_factor  # fy
-        K_[0, 2] *= scale_factor  # cx
-        K_[1, 2] *= scale_factor  # cy
-
-        # Adjust the principal point (cx, cy) for the center crop
-        crop_offset_x = (orig_shape[1] * scale_factor - self.target_shape) / 2
-        crop_offset_y = (orig_shape[0] * scale_factor - self.target_shape) / 2
-
-        # Adjust the principal point (cx, cy) for the center crop
-        K_[0, 2] -= crop_offset_x  # Adjust cx for crop
-        K_[1, 2] -= crop_offset_y  # Adjust cy for crop
-        return K_
-
     def get_event_start_end_indexes(self, demo_name, subgoal_idx):
         demo = self.dataset[demo_name]
 
@@ -390,17 +369,11 @@ class RpadFoxgloveDataset(BaseDataset):
 
         return rgb_embed, text_embed
 
-    def get_normalize_mean_std(self, action_pcd, scene_pcd):
-        if self.dataset_cfg.normalize is False:
-            mean, std = np.zeros(3), np.ones(3)
-        else:
-            mean, std = action_pcd.mean(axis=0), scene_pcd.std(axis=0)
-        return mean, std
-
     def __getitem__(self, idx):
         demo_name, subgoal_idx, event_indexes = self.dataset_index[idx]
 
-        K_ = self.get_scaled_intrinsics(*self.load_camera_params(demo_name))
+        K, orig_shape = self.load_camera_params(demo_name)
+        K_ = self.get_scaled_intrinsics(K, orig_shape, self.target_shape)
 
         caption = self.captions[(demo_name, subgoal_idx)]
         start2end = torch.eye(4)  # Static camera
@@ -419,7 +392,7 @@ class RpadFoxgloveDataset(BaseDataset):
         gripper_idx = self.GRIPPER_IDX[self.source_of_data(demo_name)]
 
         action_pcd_mean, scene_pcd_std = self.get_normalize_mean_std(
-            start_tracks, start_scene_pcd
+            start_tracks, start_scene_pcd, self.dataset_cfg
         )
         # Center on action_pcd
         start_tracks = start_tracks - action_pcd_mean

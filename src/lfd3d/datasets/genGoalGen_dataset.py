@@ -79,13 +79,6 @@ class GenGoalGenDataset(BaseDataset):
 
         return rgbs, depths, segmask
 
-    def get_normalize_mean_std(self, action_pcd, scene_pcd):
-        if self.dataset_cfg.normalize is False:
-            mean, std = np.zeros(3), np.ones(3)
-        else:
-            mean, std = action_pcd.mean(axis=0), scene_pcd.std(axis=0)
-        return mean, std
-
     def get_action_pcd(self, depth, segmask, K):
         segmask = segmask.astype(bool)
         height, width = depth.shape
@@ -168,7 +161,7 @@ class GenGoalGenDataset(BaseDataset):
         action_pcd = self.get_action_pcd(depths[0], segmask, self.K)
 
         action_pcd_mean, scene_pcd_std = self.get_normalize_mean_std(
-            action_pcd, anchor_pcd
+            action_pcd, anchor_pcd, self.dataset_cfg
         )
         # Center on action_pcd
         action_pcd = action_pcd - action_pcd_mean

@@ -131,27 +131,6 @@ class DroidDataset(BaseDataset):
             self.captions.update(expanded_event_caption)
         return expanded_droid_index
 
-    def get_scaled_intrinsics(self, K):
-        # Getting scale factor from torchvision.transforms.Resize behaviour
-        K_ = K.copy()
-
-        scale_factor = self.target_shape / min(self.orig_shape)
-
-        # Apply the scale factor to the intrinsics
-        K_[0, 0] *= scale_factor  # fx
-        K_[1, 1] *= scale_factor  # fy
-        K_[0, 2] *= scale_factor  # cx
-        K_[1, 2] *= scale_factor  # cy
-
-        # Adjust the principal point (cx, cy) for the center crop
-        crop_offset_x = (self.orig_shape[1] * scale_factor - self.target_shape) / 2
-        crop_offset_y = (self.orig_shape[0] * scale_factor - self.target_shape) / 2
-
-        # Adjust the principal point (cx, cy) for the center crop
-        K_[0, 2] -= crop_offset_x  # Adjust cx for crop
-        K_[1, 2] -= crop_offset_y  # Adjust cy for crop
-        return K_
-
     def load_rgbd(self, droid_idx, subgoal_idx, K, baseline):
         # Some pattern matching and string manipulation to get the image patch and its frame idx
         init_image_path = glob(f"{self.event_dir}/{droid_idx}/{subgoal_idx}*png")[0]
@@ -225,18 +204,11 @@ class DroidDataset(BaseDataset):
         )
         return rgb_embed, text_embed
 
-    def get_normalize_mean_std(self, action_pcd, scene_pcd):
-        if self.dataset_cfg.normalize is False:
-            mean, std = np.zeros(3), np.ones(3)
-        else:
-            mean, std = action_pcd.mean(axis=0), scene_pcd.std(axis=0)
-        return mean, std
-
     def __getitem__(self, idx):
         index, subgoal_idx = self.droid_index[idx]
 
         K, baseline = self.load_camera_params(index)
-        K_ = self.get_scaled_intrinsics(K)
+        K_ = self.get_scaled_intrinsics(K, self.orig_shape, self.target_shape)
 
         subgoal = self.captions[(index, subgoal_idx)]
         caption = subgoal["subgoal"]
@@ -258,7 +230,7 @@ class DroidDataset(BaseDataset):
         )
 
         action_pcd_mean, scene_pcd_std = self.get_normalize_mean_std(
-            start_tracks, start_scene_pcd
+            start_tracks, start_scene_pcd, self.dataset_cfg
         )
         # Center on action_pcd
         start_tracks = start_tracks - action_pcd_mean

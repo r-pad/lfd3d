@@ -155,13 +155,6 @@ class RT1Dataset(BaseDataset):
 
         return start_tracks, end_tracks
 
-    def get_normalize_mean_std(self, action_pcd, scene_pcd):
-        if self.dataset_cfg.normalize is False:
-            mean, std = np.zeros(3), np.ones(3)
-        else:
-            mean, std = action_pcd.mean(axis=0), scene_pcd.std(axis=0)
-        return mean, std
-
     def load_rgb_text_feat(self, event_idx, chunk_idx, height, width):
         """
         Load RGB/text features generated with SIGLIP using ConceptFusion.
@@ -215,7 +208,7 @@ class RT1Dataset(BaseDataset):
         )
 
         action_pcd_mean, scene_pcd_std = self.get_normalize_mean_std(
-            start_tracks, start_scene_pcd
+            start_tracks, start_scene_pcd, self.dataset_cfg
         )
         # Center on action_pcd
         start_tracks = start_tracks - action_pcd_mean

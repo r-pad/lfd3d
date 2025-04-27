@@ -46,10 +46,15 @@ class BaseDataset(td.Dataset):
         return action_pcd.mean(axis=0), scene_pcd.std(axis=0)
 
     def get_scaled_intrinsics(self, K, orig_shape, target_shape=224):
+        # Getting scale factor from torchvision.transforms.Resize behaviour
         K_ = K.copy()
         scale_factor = target_shape / min(orig_shape)
+
+        # Apply the scale factor to the intrinsics
         K_[[0, 1], [0, 1]] *= scale_factor  # fx, fy
         K_[[0, 1], 2] *= scale_factor  # cx, cy
+
+        # Adjust the principal point (cx, cy) for the center crop
         crop_offset_x = (orig_shape[1] * scale_factor - target_shape) / 2
         crop_offset_y = (orig_shape[0] * scale_factor - target_shape) / 2
         K_[0, 2] -= crop_offset_x
