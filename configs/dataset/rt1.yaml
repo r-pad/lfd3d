@@ -1,10 +1,3 @@
+defaults:
+  - base_dataset # Inherit from base
 name: rt1
-data_dir: ""
-cache_dir: null
-cache_invalidation_rate: 0.05 # invalidate cached items with some probability (only needed if we're augmenting)
-
-train_size: null # (int, null) Length of the train dataset
-val_size: null # (int, null) Length of the validation dataset
-num_points: 8192 # points in pcd
-max_depth: 1 # filter out pcd beyond this depth
-normalize: False # If false, leave in original scale (could be metric or relative depth), if true, normalize to 0 mean and unit std
