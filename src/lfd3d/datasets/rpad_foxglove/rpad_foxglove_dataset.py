@@ -7,19 +7,18 @@ import numpy as np
 import torch
 import torchdatasets as td
 import zarr
-from lfd3d.datasets.base_data import BaseDataModule
+from lfd3d.datasets.base_data import BaseDataModule, BaseDataset
 from lfd3d.datasets.rgb_text_feature_gen import (
     get_dinov2_image_embedding,
     get_siglip_text_embedding,
 )
 from PIL import Image
-from pytorch3d.ops import sample_farthest_points
 from sklearn.decomposition import PCA
 from torchvision import transforms
 from transformers import AutoModel, AutoProcessor
 
 
-class RpadFoxgloveDataset(td.Dataset):
+class RpadFoxgloveDataset(BaseDataset):
     def __init__(self, root, dataset_cfg, split):
         super().__init__()
         self.root = root
@@ -398,45 +397,6 @@ class RpadFoxgloveDataset(td.Dataset):
             mean, std = action_pcd.mean(axis=0), scene_pcd.std(axis=0)
         return mean, std
 
-    def get_scene_pcd(self, rgb_embed, depth, K):
-        height, width = depth.shape
-        # Create pixel coordinate grid
-        x = np.arange(width)
-        y = np.arange(height)
-        x_grid, y_grid = np.meshgrid(x, y)
-
-        # Flatten grid coordinates and depth
-        x_flat = x_grid.flatten()
-        y_flat = y_grid.flatten()
-        z_flat = depth.flatten()
-        feat_flat = rgb_embed.reshape(-1, rgb_embed.shape[-1])
-
-        # Remove points with invalid depth
-        valid_depth = np.logical_and(z_flat > 0, z_flat < self.max_depth)
-        x_flat = x_flat[valid_depth]
-        y_flat = y_flat[valid_depth]
-        z_flat = z_flat[valid_depth]
-        feat_flat = feat_flat[valid_depth]
-
-        # Create homogeneous pixel coordinates
-        pixels = np.stack([x_flat, y_flat, np.ones_like(x_flat)], axis=0)
-
-        # Unproject points using K inverse
-        K_inv = np.linalg.inv(K)
-        points = K_inv @ pixels
-        points = points * z_flat
-        points = points.T  # Shape: (N, 3)
-
-        scene_pcd_pt3d = torch.from_numpy(points[None])
-        scene_pcd_downsample, scene_points_idx = sample_farthest_points(
-            scene_pcd_pt3d, K=self.num_points, random_start_point=False
-        )
-        scene_pcd = scene_pcd_downsample.squeeze().numpy()
-
-        # Get corresponding features at the indices
-        scene_feat_pcd = feat_flat[scene_points_idx.squeeze().numpy()]
-        return scene_pcd, scene_feat_pcd
-
     def __getitem__(self, idx):
         demo_name, subgoal_idx, event_indexes = self.dataset_index[idx]
 
@@ -453,7 +413,7 @@ class RpadFoxgloveDataset(td.Dataset):
 
         rgb_embed, text_embed = self.compute_rgb_text_feat(rgbs[0], caption)
         start_scene_pcd, start_scene_feat_pcd = self.get_scene_pcd(
-            rgb_embed, depths[0], K_
+            rgb_embed, depths[0], K_, self.num_points, self.max_depth
         )
 
         gripper_idx = self.GRIPPER_IDX[self.source_of_data(demo_name)]

@@ -1,10 +1,60 @@
 import os
 
+import numpy as np
 import pytorch_lightning as pl
 import torch
+import torchdatasets as td
+from pytorch3d.ops import sample_farthest_points
 from torch.utils import data
 
 from lfd3d.utils.data_utils import collate_pcd_fn
+
+
+class BaseDataset(td.Dataset):
+    def get_scene_pcd(self, rgb_embed, depth, K, num_points, max_depth):
+        height, width = depth.shape
+        # Create pixel coordinate grid
+        x_grid, y_grid = np.meshgrid(np.arange(width), np.arange(height))
+        x_flat, y_flat, z_flat = x_grid.flatten(), y_grid.flatten(), depth.flatten()
+        feat_flat = rgb_embed.reshape(-1, rgb_embed.shape[-1])
+
+        # Remove points with invalid depth
+        valid_depth = np.logical_and(z_flat > 0, z_flat < max_depth)
+        x_flat, y_flat, z_flat, feat_flat = (
+            arr[valid_depth] for arr in (x_flat, y_flat, z_flat, feat_flat)
+        )
+
+        # Unproject points using K inverse
+        pixels = np.stack([x_flat, y_flat, np.ones_like(x_flat)], axis=0)
+        K_inv = np.linalg.inv(K)
+        points = (K_inv @ pixels) * z_flat  # Shape: (3, N)
+        points = points.T  # Shape: (N, 3)
+
+        scene_pcd_pt3d = torch.from_numpy(points[None])  # (1, N, 3)
+        scene_pcd_downsample, scene_points_idx = sample_farthest_points(
+            scene_pcd_pt3d, K=num_points, random_start_point=False
+        )
+        scene_pcd = scene_pcd_downsample.squeeze().numpy()  # (num_points, 3)
+        scene_feat_pcd = feat_flat[
+            scene_points_idx.squeeze().numpy()
+        ]  # (num_points, feat_dim)
+        return scene_pcd, scene_feat_pcd
+
+    def get_normalize_mean_std(self, action_pcd, scene_pcd, dataset_cfg):
+        if not dataset_cfg.get("normalize", True):
+            return np.zeros(3), np.ones(3)
+        return action_pcd.mean(axis=0), scene_pcd.std(axis=0)
+
+    def get_scaled_intrinsics(self, K, orig_shape, target_shape=224):
+        K_ = K.copy()
+        scale_factor = target_shape / min(orig_shape)
+        K_[[0, 1], [0, 1]] *= scale_factor  # fx, fy
+        K_[[0, 1], 2] *= scale_factor  # cx, cy
+        crop_offset_x = (orig_shape[1] * scale_factor - target_shape) / 2
+        crop_offset_y = (orig_shape[0] * scale_factor - target_shape) / 2
+        K_[0, 2] -= crop_offset_x
+        K_[1, 2] -= crop_offset_y
+        return K_
 
 
 class BaseDataModule(pl.LightningDataModule):

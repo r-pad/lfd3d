@@ -13,8 +13,8 @@ from lfd3d.datasets.rt1.rt1_dataset import RT1Dataset
 
 
 class MultiDatasetDataModule(BaseDataModule):
-    def __init__(self, batch_size, val_batch_size, num_workers, dataset_cfg):
-        super().__init__(batch_size, val_batch_size, num_workers, dataset_cfg)
+    def __init__(self, batch_size, val_batch_size, num_workers, dataset_cfg, seed):
+        super().__init__(batch_size, val_batch_size, num_workers, dataset_cfg, seed)
         self.val_tags = ["all"]
 
     def setup(self, stage: str = "fit"):

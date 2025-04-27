@@ -7,11 +7,10 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 import torchdatasets as td
-from lfd3d.datasets.base_data import BaseDataModule
-from pytorch3d.ops import sample_farthest_points
+from lfd3d.datasets.base_data import BaseDataModule, BaseDataset
 
 
-class RT1Dataset(td.Dataset):
+class RT1Dataset(BaseDataset):
     def __init__(self, root, dataset_cfg, split):
         super().__init__()
         self.root = root
@@ -163,45 +162,6 @@ class RT1Dataset(td.Dataset):
             mean, std = action_pcd.mean(axis=0), scene_pcd.std(axis=0)
         return mean, std
 
-    def get_scene_pcd(self, rgb_embed, depth, K):
-        height, width = depth.shape
-        # Create pixel coordinate grid
-        x = np.arange(width)
-        y = np.arange(height)
-        x_grid, y_grid = np.meshgrid(x, y)
-
-        # Flatten grid coordinates and depth
-        x_flat = x_grid.flatten()
-        y_flat = y_grid.flatten()
-        z_flat = depth.flatten()
-        feat_flat = rgb_embed.reshape(-1, rgb_embed.shape[-1])
-
-        # Remove points with invalid depth
-        valid_depth = np.logical_and(z_flat > 0, z_flat < self.max_depth)
-        x_flat = x_flat[valid_depth]
-        y_flat = y_flat[valid_depth]
-        z_flat = z_flat[valid_depth]
-        feat_flat = feat_flat[valid_depth]
-
-        # Create homogeneous pixel coordinates
-        pixels = np.stack([x_flat, y_flat, np.ones_like(x_flat)], axis=0)
-
-        # Unproject points using K inverse
-        K_inv = np.linalg.inv(K)
-        points = K_inv @ pixels
-        points = points * z_flat
-        points = points.T  # Shape: (N, 3)
-
-        scene_pcd_pt3d = torch.from_numpy(points[None])
-        scene_pcd_downsample, scene_points_idx = sample_farthest_points(
-            scene_pcd_pt3d, K=self.num_points, random_start_point=False
-        )
-        scene_pcd = scene_pcd_downsample.squeeze().numpy()
-
-        # Get corresponding features at the indices
-        scene_feat_pcd = feat_flat[scene_points_idx.squeeze().numpy()]
-        return scene_pcd, scene_feat_pcd
-
     def load_rgb_text_feat(self, event_idx, chunk_idx, height, width):
         """
         Load RGB/text features generated with SIGLIP using ConceptFusion.
@@ -251,7 +211,7 @@ class RT1Dataset(td.Dataset):
             index, chunk_idx, rgbs[0].shape[0], rgbs[0].shape[1]
         )
         start_scene_pcd, start_scene_feat_pcd = self.get_scene_pcd(
-            rgb_embed, depths[0], self.K
+            rgb_embed, depths[0], self.K, self.num_points, self.max_depth
         )
 
         action_pcd_mean, scene_pcd_std = self.get_normalize_mean_std(
