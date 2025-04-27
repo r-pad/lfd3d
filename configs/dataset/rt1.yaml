@@ -1,6 +1,7 @@
 name: rt1
 data_dir: ""
 cache_dir: null
+cache_invalidation_rate: 0.05 # invalidate cached items with some probability (only needed if we're augmenting)
 
 train_size: null # (int, null) Length of the train dataset
 val_size: null # (int, null) Length of the validation dataset

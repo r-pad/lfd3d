@@ -567,8 +567,8 @@ class HOI4DDataset(td.Dataset):
 
 
 class HOI4DDataModule(BaseDataModule):
-    def __init__(self, batch_size, val_batch_size, num_workers, dataset_cfg):
-        super().__init__(batch_size, val_batch_size, num_workers, dataset_cfg)
+    def __init__(self, batch_size, val_batch_size, num_workers, dataset_cfg, seed):
+        super().__init__(batch_size, val_batch_size, num_workers, dataset_cfg, seed)
         self.val_tags = ["human"]
 
     def setup(self, stage: str = "fit"):
@@ -581,9 +581,12 @@ class HOI4DDataModule(BaseDataModule):
             self.val_datasets[tag] = HOI4DDataset(self.root, self.dataset_cfg, "val")
             self.test_datasets[tag] = HOI4DDataset(self.root, self.dataset_cfg, "test")
         if self.train_dataset.cache_dir:
-            self.train_dataset.cache(
-                td.cachers.HDF5(Path(self.train_dataset.cache_dir))
+            invalidating_cacher = td.cachers.ProbabilisticCacherWrapper(
+                td.cachers.HDF5(Path(self.train_dataset.cache_dir)),
+                invalidation_rate=self.dataset_cfg.cache_invalidation_rate,
+                seed=self.seed,
             )
+            self.train_dataset.cache(invalidating_cacher)
             for tag in self.val_tags:
                 self.val_datasets[tag].cache(
                     td.cachers.HDF5(Path(self.train_dataset.cache_dir) / f"val_{tag}")

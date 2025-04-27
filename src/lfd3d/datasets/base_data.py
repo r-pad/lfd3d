@@ -8,13 +8,14 @@ from lfd3d.utils.data_utils import collate_pcd_fn
 
 
 class BaseDataModule(pl.LightningDataModule):
-    def __init__(self, batch_size, val_batch_size, num_workers, dataset_cfg):
+    def __init__(self, batch_size, val_batch_size, num_workers, dataset_cfg, seed):
         super().__init__()
         self.batch_size = batch_size
         self.val_batch_size = val_batch_size
         self.num_workers = num_workers
         self.stage = None
         self.dataset_cfg = dataset_cfg
+        self.seed = seed
 
         # setting root directory based on dataset type
         data_dir = os.path.expanduser(dataset_cfg.data_dir)

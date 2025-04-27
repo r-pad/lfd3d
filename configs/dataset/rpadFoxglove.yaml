@@ -2,6 +2,7 @@ name: rpadFoxglove
 data_dir: ""
 additional_img_dir: null
 cache_dir: null
+cache_invalidation_rate: 0.05 # invalidate cached items with some probability (only needed if we're augmenting)
 data_sources: # List of data sources
   - human
   - aloha
