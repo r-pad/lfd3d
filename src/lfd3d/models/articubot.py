@@ -881,13 +881,15 @@ class GoalRegressionModule(pl.LightningModule):
         init = torch.cat([init_primary_points, init_extra_point[:, None, :]], dim=1)
         return init, gt
 
-    def get_weighted_displacement(self, outputs):
+    def get_weighted_displacement(self, outputs, padding_mask):
         weights = outputs[:, :, -1]  # B, N
-        outputs = outputs[:, :, :-1]  # B, N, 12
-
+        weights = weights.masked_fill(
+            ~padding_mask, float("-inf")
+        )  # Set invalid to -inf
         # softmax the weights
         weights = torch.nn.functional.softmax(weights, dim=1)
 
+        outputs = outputs[:, :, :-1]  # B, N, 12
         # sum the displacement of the predicted gripper point cloud according to the weights
         outputs = outputs * weights.unsqueeze(-1)
         outputs = outputs.sum(dim=1)
@@ -895,7 +897,15 @@ class GoalRegressionModule(pl.LightningModule):
 
     def forward(self, batch):
         initial_gripper = batch["action_pcd"].points_padded()
+
         scene_pcd = batch["anchor_pcd"].points_padded()
+        batch_size, max_points, *_ = scene_pcd.shape
+        num_points = batch["anchor_pcd"].num_points_per_cloud()
+        scene_padding_mask = (
+            torch.arange(max_points, device=num_points.device)[None, :]
+            < num_points[:, None]
+        )
+
         text_embedding = batch["text_embed"]
         batch_size, pcd_size, _ = scene_pcd.shape
 
@@ -928,7 +938,7 @@ class GoalRegressionModule(pl.LightningModule):
         )
 
         init, gt = self.extract_gt_4_points(batch)
-        pred_points = self.get_weighted_displacement(outputs)
+        pred_points = self.get_weighted_displacement(outputs, scene_padding_mask)
         pred_displacement = outputs[:, :, :-1].reshape(batch_size, pcd_size, 4, 3)
         if self.model_cfg.add_action_pcd_masked:
             gt_displacement = scene_pcd[:, :, None, :-1] - gt[:, None, :, :]
@@ -953,18 +963,26 @@ class GoalRegressionModule(pl.LightningModule):
                 log_mixing_coeffs, min=-10
             )  # Prevent extreme values
 
+            masked_sum = log_gaussians + log_mixing_coeffs  # [B, N]
+            masked_sum = masked_sum.masked_fill(
+                ~scene_padding_mask, -1e9
+            )  # In-place masking
+
             max_log = torch.max(
-                log_gaussians + log_mixing_coeffs, dim=1, keepdim=True
+                masked_sum, dim=1, keepdim=True
             ).values  # get the per-batch max log along all the points, B, 1
             log_probs = max_log.squeeze(1) + torch.logsumexp(
-                log_gaussians + log_mixing_coeffs - max_log, dim=1
+                masked_sum - max_log, dim=1
             )  # B,
 
             per_point_displacement_loss = -torch.mean(
                 log_probs
             )  # mean of the negative log likelihood
         else:
-            per_point_displacement_loss = F.mse_loss(pred_displacement, gt_displacement)
+            per_point_displacement_loss = F.mse_loss(
+                pred_displacement[scene_padding_mask],
+                gt_displacement[scene_padding_mask],
+            )
 
         weighted_avg_loss = F.mse_loss(pred_points, gt)
         loss = per_point_displacement_loss + self.weight_loss_weight * weighted_avg_loss
@@ -985,6 +1003,13 @@ class GoalRegressionModule(pl.LightningModule):
         """
         initial_gripper = batch["action_pcd"].points_padded()
         scene_pcd = batch["anchor_pcd"].points_padded()
+        batch_size, max_points, *_ = scene_pcd.shape
+        num_points = batch["anchor_pcd"].num_points_per_cloud()
+        scene_padding_mask = (
+            torch.arange(max_points, device=num_points.device)[None, :]
+            < num_points[:, None]
+        )
+
         text_embedding = batch["text_embed"]
         batch_size, pcd_size, _ = scene_pcd.shape  # Matches forward
 
@@ -1014,7 +1039,7 @@ class GoalRegressionModule(pl.LightningModule):
         )
         init, gt = self.extract_gt_4_points(batch)
 
-        pred = self.get_weighted_displacement(outputs)
+        pred = self.get_weighted_displacement(outputs, scene_padding_mask)
         pred_displacement = pred - init
         return {self.prediction_type: {"pred": pred_displacement}}, outputs
 

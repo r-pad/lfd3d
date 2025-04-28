@@ -14,4 +14,4 @@ augment_cfg:
   augment_prob: 0.75 # Probability of augmentation (the actual augmentation prob also depends on cache_invalidation_rate)
   pcd_sample: ["voxel", "fps"]
   fps_num_points: [4096, 16384]
-  voxel_size: [0.01, 0.03]
+  voxel_size: [0.01, 0.02]
