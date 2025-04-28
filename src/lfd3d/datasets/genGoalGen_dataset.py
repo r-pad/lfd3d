@@ -155,7 +155,7 @@ class GenGoalGenDataset(BaseDataset):
         )
         start2end = np.eye(4)
 
-        anchor_pcd, anchor_feat_pcd = self.get_scene_pcd(
+        anchor_pcd, anchor_feat_pcd, augment_tf = self.get_scene_pcd(
             rgb_embed, depths[0], self.K, self.num_points, self.max_depth
         )
         action_pcd = self.get_action_pcd(depths[0], segmask, self.K)
@@ -186,6 +186,8 @@ class GenGoalGenDataset(BaseDataset):
             "vid_name": image_path,
             "pcd_mean": action_pcd_mean,
             "pcd_std": scene_pcd_std,
+            "augment_R": augment_tf["R"],
+            "augment_t": augment_tf["t"],
         }
         return item
 

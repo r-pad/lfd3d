@@ -1,4 +1,5 @@
 import os
+import random
 
 import numpy as np
 import pytorch_lightning as pl
@@ -6,6 +7,8 @@ import torch
 import torchdatasets as td
 from pytorch3d.ops import sample_farthest_points
 from torch.utils import data
+from torch_cluster import grid_cluster
+from torch_scatter import scatter_mean
 
 from lfd3d.utils.data_utils import collate_pcd_fn
 
@@ -45,9 +48,84 @@ class BaseDataset(td.Dataset):
         points = (K_inv @ pixels) * z_flat  # Shape: (3, N)
         points = points.T  # Shape: (N, 3)
 
-        scene_pcd_pt3d = torch.from_numpy(points[None])  # (1, N, 3)
+        scene_pcd = torch.from_numpy(points[None])  # (1, N, 3)
+
+        if (
+            self.split == "train"
+            and self.dataset_cfg.augment_train
+            and random.random() < self.dataset_cfg.augment_cfg.augment_prob
+        ):
+            scene_pcd, scene_feat_pcd, augment_tf = self.augment_scene_pcd(
+                scene_pcd, feat_flat, self.dataset_cfg.augment_cfg
+            )
+        else:  # Just FPS
+            scene_pcd, scene_feat_pcd = self.get_fps_pcd(
+                scene_pcd, feat_flat, num_points
+            )
+            augment_tf = {"R": np.eye(3), "t": np.zeros(3)}
+
+        return scene_pcd, scene_feat_pcd, augment_tf
+
+    def augment_scene_pcd(self, scene_pcd, feat_flat, augment_cfg):
+        """
+        Augment the scene point cloud by applying a random sampling method (e.g., FPS or voxel)
+        followed by a random SO(2) rotation around the Z-axis and translation (-0.2 to 0.2 per axis).
+
+        Args:
+            scene_pcd (torch.Tensor): Input point cloud of shape (1, N, 3).
+            feat_flat (np.ndarray): Flattened features of shape (M, feat_dim).
+            augment_cfg (dict): Configuration for augmentation, including 'pcd_sample', 'fps_num_points', and 'voxel_size'.
+
+        Returns:
+            tuple: (scene_pcd, scene_feat_pcd) where:
+                - scene_pcd (np.ndarray): Augmented point cloud of shape (num_points, 3).
+                - scene_feat_pcd (np.ndarray): Corresponding features of shape (num_points, feat_dim).
+        """
+
+        pcd_methods = augment_cfg["pcd_sample"]
+        selected_method = random.choice(pcd_methods)
+        if selected_method == "fps":
+            fps_num_points_options = augment_cfg["fps_num_points"]
+            num_points = random.randint(
+                fps_num_points_options[0], fps_num_points_options[1]
+            )
+            scene_pcd, scene_feat_pcd = self.get_fps_pcd(
+                scene_pcd, feat_flat, num_points
+            )
+        elif selected_method == "voxel":
+            voxel_sizes = augment_cfg["voxel_size"]
+            voxel_size = random.uniform(voxel_sizes[0], voxel_sizes[1])
+            size_tensor = torch.tensor([voxel_size] * 3)
+            pos = scene_pcd.squeeze(0)  # (N, 3)
+            indices = grid_cluster(pos, size=size_tensor)  # Subsampled indices
+            _, cluster_ids = torch.unique(indices, return_inverse=True)
+            scene_pcd = scatter_mean(pos, cluster_ids, dim=0).numpy()
+            scene_feat_pcd = scatter_mean(
+                torch.from_numpy(feat_flat), cluster_ids, dim=0
+            ).numpy()
+        else:
+            raise NotImplementedError
+
+        centroid = scene_pcd.mean(0)
+        scene_pcd_centered = scene_pcd - centroid
+        # Apply random SO(2) rotation (around Y-axis as pcd is in camera frame) and translation
+        theta = np.random.uniform(0, 2 * np.pi)  # Random angle
+        R = np.array(
+            [
+                [np.cos(theta), 0, np.sin(theta)],
+                [0, 1, 0],
+                [-np.sin(theta), 0, np.cos(theta)],
+            ]
+        )  # Rotation matrix around Y-axis
+        scene_pcd = np.dot(scene_pcd_centered, R.T) + centroid  # Apply rotation
+        translation = np.random.uniform(-0.2, 0.2, size=3)  # Random translation vector
+        scene_pcd += translation  # Apply translation
+
+        return scene_pcd, scene_feat_pcd, {"R": R, "t": translation}
+
+    def get_fps_pcd(self, scene_pcd, feat_flat, num_points):
         scene_pcd_downsample, scene_points_idx = sample_farthest_points(
-            scene_pcd_pt3d, K=num_points, random_start_point=False
+            scene_pcd, K=num_points, random_start_point=False
         )
         scene_pcd = scene_pcd_downsample.squeeze().numpy()  # (num_points, 3)
         scene_feat_pcd = feat_flat[

@@ -385,7 +385,7 @@ class RpadFoxgloveDataset(BaseDataset):
         )
 
         rgb_embed, text_embed = self.compute_rgb_text_feat(rgbs[0], caption)
-        start_scene_pcd, start_scene_feat_pcd = self.get_scene_pcd(
+        start_scene_pcd, start_scene_feat_pcd, augment_tf = self.get_scene_pcd(
             rgb_embed, depths[0], K_, self.num_points, self.max_depth
         )
 
@@ -419,6 +419,8 @@ class RpadFoxgloveDataset(BaseDataset):
             "pcd_mean": action_pcd_mean,
             "pcd_std": scene_pcd_std,
             "gripper_idx": gripper_idx,
+            "augment_R": augment_tf["R"],
+            "augment_t": augment_tf["t"],
         }
         return item
 

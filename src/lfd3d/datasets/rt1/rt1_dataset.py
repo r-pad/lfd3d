@@ -203,7 +203,7 @@ class RT1Dataset(BaseDataset):
         rgb_embed, text_embed = self.load_rgb_text_feat(
             index, chunk_idx, rgbs[0].shape[0], rgbs[0].shape[1]
         )
-        start_scene_pcd, start_scene_feat_pcd = self.get_scene_pcd(
+        start_scene_pcd, start_scene_feat_pcd, augment_tf = self.get_scene_pcd(
             rgb_embed, depths[0], self.K, self.num_points, self.max_depth
         )
 
@@ -234,6 +234,8 @@ class RT1Dataset(BaseDataset):
             "vid_name": index,  # no name in RT-1, just return idx in dataset
             "pcd_mean": action_pcd_mean,
             "pcd_std": scene_pcd_std,
+            "augment_R": augment_tf["R"],
+            "augment_t": augment_tf["t"],
         }
         return item
 
