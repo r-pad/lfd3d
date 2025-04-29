@@ -23,6 +23,7 @@ from lfd3d.models.tax3d import calc_pcd_metrics
 from lfd3d.utils.viz_utils import (
     get_action_anchor_pcd,
     get_img_and_track_pcd,
+    invert_augmentation_and_normalization,
     project_pcd_on_image,
     save_weighted_displacement_pcd_viz,
 )
@@ -931,6 +932,18 @@ class GoalRegressionModule(pl.LightningModule):
             )  # [B, N, 4]
             scene_pcd = torch.cat([initial_gripper, scene_pcd], dim=1)
             pcd_size += initial_gripper.shape[1]
+            scene_padding_mask = torch.cat(
+                [
+                    scene_padding_mask,
+                    torch.ones(
+                        batch_size,
+                        initial_gripper.shape[1],
+                        device=scene_pcd.device,
+                        dtype=bool,
+                    ),
+                ],
+                dim=1,
+            )
 
         # Network currently doesn't see action pcd
         outputs = self.network(
@@ -1033,6 +1046,18 @@ class GoalRegressionModule(pl.LightningModule):
                 dim=2,
             )  # [B, N, 4]
             scene_pcd = torch.cat([initial_gripper, scene_pcd], dim=1)
+            scene_padding_mask = torch.cat(
+                [
+                    scene_padding_mask,
+                    torch.ones(
+                        batch_size,
+                        initial_gripper.shape[1],
+                        device=scene_pcd.device,
+                        dtype=bool,
+                    ),
+                ],
+                dim=1,
+            )
 
         outputs = self.network(
             scene_pcd.permute(0, 2, 1), text_embedding=text_embedding
@@ -1076,13 +1101,26 @@ class GoalRegressionModule(pl.LightningModule):
         gt_pcd = gt
         padding_mask = torch.ones(gt.shape[0]).bool().numpy()
 
-        # Move center back from action_pcd to the camera frame before viz
+        # Move center back from action_pcd to the camera frame
+        # and invert augmentation transforms before viz
         pcd_mean = batch["pcd_mean"][viz_idx].cpu().numpy()
         pcd_std = batch["pcd_std"][viz_idx].cpu().numpy()
-        pcd = (pcd * pcd_std) + pcd_mean
-        anchor_pcd = (anchor_pcd * pcd_std) + pcd_mean
-        all_pred_pcd = (all_pred_pcd * pcd_std) + pcd_mean
-        gt_pcd = (gt_pcd * pcd_std) + pcd_mean
+        R = batch["augment_R"][viz_idx].cpu().numpy()
+        t = batch["augment_t"][viz_idx].cpu().numpy()
+        scene_centroid = batch["augment_C"][viz_idx].cpu().numpy()
+
+        pcd = invert_augmentation_and_normalization(
+            pcd, pcd_mean, pcd_std, R, t, scene_centroid
+        )
+        anchor_pcd = invert_augmentation_and_normalization(
+            anchor_pcd, pcd_mean, pcd_std, R, t, scene_centroid
+        )
+        all_pred_pcd = invert_augmentation_and_normalization(
+            all_pred_pcd, pcd_mean, pcd_std, R, t, scene_centroid
+        )
+        gt_pcd = invert_augmentation_and_normalization(
+            gt_pcd, pcd_mean, pcd_std, R, t, scene_centroid
+        )
 
         # All points cloud are in the start image's coordinate frame
         # We need to visualize the end image, therefore need to apply transform

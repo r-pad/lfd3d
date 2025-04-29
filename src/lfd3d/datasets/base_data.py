@@ -62,14 +62,14 @@ class BaseDataset(td.Dataset):
             scene_pcd, scene_feat_pcd = self.get_fps_pcd(
                 scene_pcd, feat_flat, num_points
             )
-            augment_tf = {"R": np.eye(3), "t": np.zeros(3)}
+            augment_tf = {"R": np.eye(3), "t": np.zeros(3), "C": scene_pcd.mean(0)}
 
         return scene_pcd, scene_feat_pcd, augment_tf
 
     def augment_scene_pcd(self, scene_pcd, feat_flat, augment_cfg):
         """
         Augment the scene point cloud by applying a random sampling method (e.g., FPS or voxel)
-        followed by a random SO(2) rotation around the Z-axis and translation (-0.2 to 0.2 per axis).
+        Also return a random SO(2) rotation around Y-axis and translation for downstream transform
 
         Args:
             scene_pcd (torch.Tensor): Input point cloud of shape (1, N, 3).
@@ -106,8 +106,6 @@ class BaseDataset(td.Dataset):
         else:
             raise NotImplementedError
 
-        centroid = scene_pcd.mean(0)
-        scene_pcd_centered = scene_pcd - centroid
         # Apply random SO(2) rotation (around Y-axis as pcd is in camera frame) and translation
         theta = np.random.uniform(0, 2 * np.pi)  # Random angle
         R = np.array(
@@ -117,11 +115,10 @@ class BaseDataset(td.Dataset):
                 [-np.sin(theta), 0, np.cos(theta)],
             ]
         )  # Rotation matrix around Y-axis
-        scene_pcd = np.dot(scene_pcd_centered, R.T) + centroid  # Apply rotation
         translation = np.random.uniform(-0.2, 0.2, size=3)  # Random translation vector
-        scene_pcd += translation  # Apply translation
+        centroid = scene_pcd.mean(0)
 
-        return scene_pcd, scene_feat_pcd, {"R": R, "t": translation}
+        return scene_pcd, scene_feat_pcd, {"R": R, "t": translation, "C": centroid}
 
     def get_fps_pcd(self, scene_pcd, feat_flat, num_points):
         scene_pcd_downsample, scene_points_idx = sample_farthest_points(
@@ -150,6 +147,54 @@ class BaseDataset(td.Dataset):
         if not dataset_cfg.get("normalize", True):
             return np.zeros(3), np.ones(3)
         return action_pcd.mean(axis=0), scene_pcd.std(axis=0)
+
+    def transform_pcds(
+        self,
+        start_tracks,
+        end_tracks,
+        start_scene_pcd,
+        action_pcd_mean,
+        scene_pcd_std,
+        augment_tf,
+    ):
+        """
+        Apply augmentation and normalization to tracks and normalization to scene PCD.
+        Scene PCD has already been augmented.
+
+        Args:
+            start_tracks (np.ndarray): Initial action PCD (N, 3).
+            end_tracks (np.ndarray): Goal action PCD (N, 3).
+            start_scene_pcd (np.ndarray): Augmented scene PCD (M, 3).
+            action_pcd_mean (np.ndarray): Mean of action PCD (3,).
+            scene_pcd_std (np.ndarray): Standard deviation of scene PCD (3,).
+            augment_tf (dict): Augmentation parameters {'R': rotation matrix (3x3), 't': translation vector (3,)}.
+
+        Returns:
+            tuple: (normalized_start_tracks, normalized_end_tracks, normalized_start_scene_pcd, cross_displacement)
+                - normalized_start_tracks (np.ndarray): Normalized initial action PCD.
+                - normalized_end_tracks (np.ndarray): Normalized goal action PCD (for reference, though cross_displacement is used).
+                - normalized_start_scene_pcd (np.ndarray): Normalized scene PCD.
+        """
+        R = augment_tf["R"]  # Rotation matrix (3x3)
+        t = augment_tf["t"]  # Translation vector (3,)
+        scene_centroid = augment_tf["C"]
+
+        # Apply augmentation
+        # If augmentation is disabled or for val/test set. augment_tf will have R=I and t=0
+        start_tracks_aug = np.dot(start_tracks - scene_centroid, R) + scene_centroid + t
+        end_tracks_aug = np.dot(end_tracks - scene_centroid, R) + scene_centroid + t
+        scene_pcd = np.dot(start_scene_pcd - scene_centroid, R) + scene_centroid + t
+
+        # Normalize: Center on action_pcd_mean and scale by scene_pcd_std
+        normalized_start_tracks = (start_tracks_aug - action_pcd_mean) / scene_pcd_std
+        normalized_end_tracks = (end_tracks_aug - action_pcd_mean) / scene_pcd_std
+        normalized_start_scene_pcd = (start_scene_pcd - action_pcd_mean) / scene_pcd_std
+
+        return (
+            normalized_start_tracks,
+            normalized_end_tracks,
+            normalized_start_scene_pcd,
+        )
 
     def get_scaled_intrinsics(self, K, orig_shape, target_shape=224):
         """

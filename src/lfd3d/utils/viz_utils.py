@@ -218,3 +218,12 @@ def save_weighted_displacement_pcd_viz(pcd, weighted_displacement):
     fname = f"{datetime.now().timestamp()}.glb"
     scene.export(fname)
     return fname
+
+
+def invert_augmentation_and_normalization(pcd, pcd_mean, pcd_std, R, t, C):
+    pcd = (pcd * pcd_std) + pcd_mean
+    pcd = pcd - t  # Subtract translation
+    pcd = (
+        np.dot(pcd - C, R.T) + C
+    )  # Inverse rotation (subtract centroid, rotate, add back)
+    return pcd

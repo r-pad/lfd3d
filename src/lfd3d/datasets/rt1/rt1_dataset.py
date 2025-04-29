@@ -210,14 +210,14 @@ class RT1Dataset(BaseDataset):
         action_pcd_mean, scene_pcd_std = self.get_normalize_mean_std(
             start_tracks, start_scene_pcd, self.dataset_cfg
         )
-        # Center on action_pcd
-        start_tracks = start_tracks - action_pcd_mean
-        end_tracks = end_tracks - action_pcd_mean
-        start_scene_pcd = start_scene_pcd - action_pcd_mean
-        # Standardize on scene_pcd
-        start_tracks = start_tracks / scene_pcd_std
-        end_tracks = end_tracks / scene_pcd_std
-        start_scene_pcd = start_scene_pcd / scene_pcd_std
+        start_tracks, end_tracks, start_scene_pcd = self.transform_pcds(
+            start_tracks,
+            end_tracks,
+            start_scene_pcd,
+            action_pcd_mean,
+            scene_pcd_std,
+            augment_tf,
+        )
 
         # collate_pcd_fn handles batching of the point clouds
         item = {
@@ -236,6 +236,7 @@ class RT1Dataset(BaseDataset):
             "pcd_std": scene_pcd_std,
             "augment_R": augment_tf["R"],
             "augment_t": augment_tf["t"],
+            "augment_C": augment_tf["C"],
         }
         return item
 

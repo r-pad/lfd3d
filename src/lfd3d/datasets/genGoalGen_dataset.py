@@ -163,13 +163,11 @@ class GenGoalGenDataset(BaseDataset):
         action_pcd_mean, scene_pcd_std = self.get_normalize_mean_std(
             action_pcd, anchor_pcd, self.dataset_cfg
         )
-        # Center on action_pcd
-        action_pcd = action_pcd - action_pcd_mean
-        anchor_pcd = anchor_pcd - action_pcd_mean
-        # Standardize on scene_pcd
-        action_pcd = action_pcd / scene_pcd_std
-        anchor_pcd = anchor_pcd / scene_pcd_std
-        cross_displacement = np.zeros_like(action_pcd)
+
+        end_pcd = np.zeros_like(action_pcd)  # Dummy value, no GT available
+        action_pcd, end_pcd, anchor_pcd = self.transform_pcds(
+            action_pcd, end_pcd, anchor_pcd, action_pcd_mean, scene_pcd_std, augment_tf
+        )
 
         # collate_pcd_fn handles batching of the point clouds
         item = {
@@ -178,7 +176,7 @@ class GenGoalGenDataset(BaseDataset):
             "anchor_feat_pcd": anchor_feat_pcd,
             "caption": caption,
             "text_embed": text_embed,
-            "cross_displacement": cross_displacement,
+            "cross_displacement": end_pcd - action_pcd,
             "intrinsics": self.K,
             "rgbs": rgbs,
             "depths": depths,
@@ -188,6 +186,7 @@ class GenGoalGenDataset(BaseDataset):
             "pcd_std": scene_pcd_std,
             "augment_R": augment_tf["R"],
             "augment_t": augment_tf["t"],
+            "augment_C": augment_tf["C"],
         }
         return item
 

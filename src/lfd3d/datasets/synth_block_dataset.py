@@ -55,7 +55,7 @@ class SynthBlockDataset(data.Dataset):
 
     def __getitem__(self, index):
         raise NotImplementedError(
-            "switch to gripper-only prediction + dino features. not yet implemented for this dataset."
+            "many missing features in this dataset. not yet up-to-date."
         )
         pcd_name = self.data_files[index]
         dir_name = os.path.dirname(pcd_name)
