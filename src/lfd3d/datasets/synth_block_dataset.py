@@ -53,16 +53,9 @@ class SynthBlockDataset(data.Dataset):
         depths = np.array([depth_init, depth_end])
         return rgbs, depths
 
-    def get_normalize_mean_std(self, action_pcd, scene_pcd):
-        if self.dataset_cfg.normalize is False:
-            mean, std = np.zeros(3), np.ones(3)
-        else:
-            mean, std = action_pcd.mean(axis=0), scene_pcd.std(axis=0)
-        return mean, std
-
     def __getitem__(self, index):
         raise NotImplementedError(
-            "switch to gripper-only prediction + dino features. not yet implemented for this dataset."
+            "many missing features in this dataset. not yet up-to-date."
         )
         pcd_name = self.data_files[index]
         dir_name = os.path.dirname(pcd_name)
@@ -83,7 +76,7 @@ class SynthBlockDataset(data.Dataset):
         start2end = np.eye(4)
 
         action_pcd_mean, scene_pcd_std = self.get_normalize_mean_std(
-            action_pcd, anchor_pcd
+            action_pcd, anchor_pcd, self.dataset_cfg
         )
         # Center on action_pcd
         action_pcd = action_pcd - action_pcd_mean
@@ -115,8 +108,8 @@ class SynthBlockDataset(data.Dataset):
 
 
 class SynthBlockDataModule(BaseDataModule):
-    def __init__(self, batch_size, val_batch_size, num_workers, dataset_cfg):
-        super().__init__(batch_size, val_batch_size, num_workers, dataset_cfg)
+    def __init__(self, batch_size, val_batch_size, num_workers, dataset_cfg, seed):
+        super().__init__(batch_size, val_batch_size, num_workers, dataset_cfg, seed)
         self.val_tags = ["block"]
 
     def setup(self, stage: str = "fit"):

@@ -1,0 +1,17 @@
+name: null # Optional; override in child configs
+data_dir: ""
+cache_dir: null
+cache_invalidation_rate: 0.05 # invalidate cached items with some probability (only needed if we're augmenting)
+
+train_size: null # (int, null) Length of the train dataset
+val_size: null # (int, null) Length of the validation dataset
+num_points: 8192 # Points in PCD
+max_depth: 1 # Filter out PCD beyond this depth
+normalize: False # If false, leave in original scale (could be metric or relative depth), if true, normalize to 0 mean and unit std
+
+augment_train: True # augment when training
+augment_cfg:
+  augment_prob: 0.75 # Probability of augmentation (the actual augmentation prob also depends on cache_invalidation_rate)
+  pcd_sample: ["voxel", "fps"]
+  fps_num_points: [4096, 8192]
+  voxel_size: [0.01, 0.02]

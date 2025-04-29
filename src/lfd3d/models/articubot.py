@@ -23,6 +23,7 @@ from lfd3d.models.tax3d import calc_pcd_metrics
 from lfd3d.utils.viz_utils import (
     get_action_anchor_pcd,
     get_img_and_track_pcd,
+    invert_augmentation_and_normalization,
     project_pcd_on_image,
     save_weighted_displacement_pcd_viz,
 )
@@ -881,13 +882,15 @@ class GoalRegressionModule(pl.LightningModule):
         init = torch.cat([init_primary_points, init_extra_point[:, None, :]], dim=1)
         return init, gt
 
-    def get_weighted_displacement(self, outputs):
+    def get_weighted_displacement(self, outputs, padding_mask):
         weights = outputs[:, :, -1]  # B, N
-        outputs = outputs[:, :, :-1]  # B, N, 12
-
+        weights = weights.masked_fill(
+            ~padding_mask, float("-inf")
+        )  # Set invalid to -inf
         # softmax the weights
         weights = torch.nn.functional.softmax(weights, dim=1)
 
+        outputs = outputs[:, :, :-1]  # B, N, 12
         # sum the displacement of the predicted gripper point cloud according to the weights
         outputs = outputs * weights.unsqueeze(-1)
         outputs = outputs.sum(dim=1)
@@ -895,7 +898,15 @@ class GoalRegressionModule(pl.LightningModule):
 
     def forward(self, batch):
         initial_gripper = batch["action_pcd"].points_padded()
+
         scene_pcd = batch["anchor_pcd"].points_padded()
+        batch_size, max_points, *_ = scene_pcd.shape
+        num_points = batch["anchor_pcd"].num_points_per_cloud()
+        scene_padding_mask = (
+            torch.arange(max_points, device=num_points.device)[None, :]
+            < num_points[:, None]
+        )
+
         text_embedding = batch["text_embed"]
         batch_size, pcd_size, _ = scene_pcd.shape
 
@@ -921,6 +932,18 @@ class GoalRegressionModule(pl.LightningModule):
             )  # [B, N, 4]
             scene_pcd = torch.cat([initial_gripper, scene_pcd], dim=1)
             pcd_size += initial_gripper.shape[1]
+            scene_padding_mask = torch.cat(
+                [
+                    scene_padding_mask,
+                    torch.ones(
+                        batch_size,
+                        initial_gripper.shape[1],
+                        device=scene_pcd.device,
+                        dtype=bool,
+                    ),
+                ],
+                dim=1,
+            )
 
         # Network currently doesn't see action pcd
         outputs = self.network(
@@ -928,7 +951,7 @@ class GoalRegressionModule(pl.LightningModule):
         )
 
         init, gt = self.extract_gt_4_points(batch)
-        pred_points = self.get_weighted_displacement(outputs)
+        pred_points = self.get_weighted_displacement(outputs, scene_padding_mask)
         pred_displacement = outputs[:, :, :-1].reshape(batch_size, pcd_size, 4, 3)
         if self.model_cfg.add_action_pcd_masked:
             gt_displacement = scene_pcd[:, :, None, :-1] - gt[:, None, :, :]
@@ -953,18 +976,26 @@ class GoalRegressionModule(pl.LightningModule):
                 log_mixing_coeffs, min=-10
             )  # Prevent extreme values
 
+            masked_sum = log_gaussians + log_mixing_coeffs  # [B, N]
+            masked_sum = masked_sum.masked_fill(
+                ~scene_padding_mask, -1e9
+            )  # In-place masking
+
             max_log = torch.max(
-                log_gaussians + log_mixing_coeffs, dim=1, keepdim=True
+                masked_sum, dim=1, keepdim=True
             ).values  # get the per-batch max log along all the points, B, 1
             log_probs = max_log.squeeze(1) + torch.logsumexp(
-                log_gaussians + log_mixing_coeffs - max_log, dim=1
+                masked_sum - max_log, dim=1
             )  # B,
 
             per_point_displacement_loss = -torch.mean(
                 log_probs
             )  # mean of the negative log likelihood
         else:
-            per_point_displacement_loss = F.mse_loss(pred_displacement, gt_displacement)
+            per_point_displacement_loss = F.mse_loss(
+                pred_displacement[scene_padding_mask],
+                gt_displacement[scene_padding_mask],
+            )
 
         weighted_avg_loss = F.mse_loss(pred_points, gt)
         loss = per_point_displacement_loss + self.weight_loss_weight * weighted_avg_loss
@@ -985,6 +1016,13 @@ class GoalRegressionModule(pl.LightningModule):
         """
         initial_gripper = batch["action_pcd"].points_padded()
         scene_pcd = batch["anchor_pcd"].points_padded()
+        batch_size, max_points, *_ = scene_pcd.shape
+        num_points = batch["anchor_pcd"].num_points_per_cloud()
+        scene_padding_mask = (
+            torch.arange(max_points, device=num_points.device)[None, :]
+            < num_points[:, None]
+        )
+
         text_embedding = batch["text_embed"]
         batch_size, pcd_size, _ = scene_pcd.shape  # Matches forward
 
@@ -1008,13 +1046,25 @@ class GoalRegressionModule(pl.LightningModule):
                 dim=2,
             )  # [B, N, 4]
             scene_pcd = torch.cat([initial_gripper, scene_pcd], dim=1)
+            scene_padding_mask = torch.cat(
+                [
+                    scene_padding_mask,
+                    torch.ones(
+                        batch_size,
+                        initial_gripper.shape[1],
+                        device=scene_pcd.device,
+                        dtype=bool,
+                    ),
+                ],
+                dim=1,
+            )
 
         outputs = self.network(
             scene_pcd.permute(0, 2, 1), text_embedding=text_embedding
         )
         init, gt = self.extract_gt_4_points(batch)
 
-        pred = self.get_weighted_displacement(outputs)
+        pred = self.get_weighted_displacement(outputs, scene_padding_mask)
         pred_displacement = pred - init
         return {self.prediction_type: {"pred": pred_displacement}}, outputs
 
@@ -1051,13 +1101,26 @@ class GoalRegressionModule(pl.LightningModule):
         gt_pcd = gt
         padding_mask = torch.ones(gt.shape[0]).bool().numpy()
 
-        # Move center back from action_pcd to the camera frame before viz
+        # Move center back from action_pcd to the camera frame
+        # and invert augmentation transforms before viz
         pcd_mean = batch["pcd_mean"][viz_idx].cpu().numpy()
         pcd_std = batch["pcd_std"][viz_idx].cpu().numpy()
-        pcd = (pcd * pcd_std) + pcd_mean
-        anchor_pcd = (anchor_pcd * pcd_std) + pcd_mean
-        all_pred_pcd = (all_pred_pcd * pcd_std) + pcd_mean
-        gt_pcd = (gt_pcd * pcd_std) + pcd_mean
+        R = batch["augment_R"][viz_idx].cpu().numpy()
+        t = batch["augment_t"][viz_idx].cpu().numpy()
+        scene_centroid = batch["augment_C"][viz_idx].cpu().numpy()
+
+        pcd = invert_augmentation_and_normalization(
+            pcd, pcd_mean, pcd_std, R, t, scene_centroid
+        )
+        anchor_pcd = invert_augmentation_and_normalization(
+            anchor_pcd, pcd_mean, pcd_std, R, t, scene_centroid
+        )
+        all_pred_pcd = invert_augmentation_and_normalization(
+            all_pred_pcd, pcd_mean, pcd_std, R, t, scene_centroid
+        )
+        gt_pcd = invert_augmentation_and_normalization(
+            gt_pcd, pcd_mean, pcd_std, R, t, scene_centroid
+        )
 
         # All points cloud are in the start image's coordinate frame
         # We need to visualize the end image, therefore need to apply transform

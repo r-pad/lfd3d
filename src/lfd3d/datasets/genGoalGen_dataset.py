@@ -4,13 +4,11 @@ import cv2
 import numpy as np
 import torch
 import torch.nn.functional as F
-from pytorch3d.ops import sample_farthest_points
-from torch.utils import data
 
-from lfd3d.datasets.base_data import BaseDataModule
+from lfd3d.datasets.base_data import BaseDataModule, BaseDataset
 
 
-class GenGoalGenDataset(data.Dataset):
+class GenGoalGenDataset(BaseDataset):
     def __init__(self, root, dataset_cfg, split):
         super().__init__()
         assert split == "test"
@@ -80,52 +78,6 @@ class GenGoalGenDataset(data.Dataset):
         )
 
         return rgbs, depths, segmask
-
-    def get_normalize_mean_std(self, action_pcd, scene_pcd):
-        if self.dataset_cfg.normalize is False:
-            mean, std = np.zeros(3), np.ones(3)
-        else:
-            mean, std = action_pcd.mean(axis=0), scene_pcd.std(axis=0)
-        return mean, std
-
-    def get_scene_pcd(self, rgb_embed, depth, K):
-        height, width = depth.shape
-        # Create pixel coordinate grid
-        x = np.arange(width)
-        y = np.arange(height)
-        x_grid, y_grid = np.meshgrid(x, y)
-
-        # Flatten grid coordinates and depth
-        x_flat = x_grid.flatten()
-        y_flat = y_grid.flatten()
-        z_flat = depth.flatten()
-        feat_flat = rgb_embed.reshape(-1, rgb_embed.shape[-1])
-
-        # Remove points with invalid depth
-        valid_depth = np.logical_and(z_flat > 0, z_flat < self.max_depth)
-        x_flat = x_flat[valid_depth]
-        y_flat = y_flat[valid_depth]
-        z_flat = z_flat[valid_depth]
-        feat_flat = feat_flat[valid_depth]
-
-        # Create homogeneous pixel coordinates
-        pixels = np.stack([x_flat, y_flat, np.ones_like(x_flat)], axis=0)
-
-        # Unproject points using K inverse
-        K_inv = np.linalg.inv(K)
-        points = K_inv @ pixels
-        points = points * z_flat
-        points = points.T  # Shape: (N, 3)
-
-        scene_pcd_pt3d = torch.from_numpy(points[None])
-        scene_pcd_downsample, scene_points_idx = sample_farthest_points(
-            scene_pcd_pt3d, K=self.num_points, random_start_point=False
-        )
-        scene_pcd = scene_pcd_downsample.squeeze().numpy()
-
-        # Get corresponding features at the indices
-        scene_feat_pcd = feat_flat[scene_points_idx.squeeze().numpy()]
-        return scene_pcd, scene_feat_pcd
 
     def get_action_pcd(self, depth, segmask, K):
         segmask = segmask.astype(bool)
@@ -203,19 +155,19 @@ class GenGoalGenDataset(data.Dataset):
         )
         start2end = np.eye(4)
 
-        anchor_pcd, anchor_feat_pcd = self.get_scene_pcd(rgb_embed, depths[0], self.K)
+        anchor_pcd, anchor_feat_pcd, augment_tf = self.get_scene_pcd(
+            rgb_embed, depths[0], self.K, self.num_points, self.max_depth
+        )
         action_pcd = self.get_action_pcd(depths[0], segmask, self.K)
 
         action_pcd_mean, scene_pcd_std = self.get_normalize_mean_std(
-            action_pcd, anchor_pcd
+            action_pcd, anchor_pcd, self.dataset_cfg
         )
-        # Center on action_pcd
-        action_pcd = action_pcd - action_pcd_mean
-        anchor_pcd = anchor_pcd - action_pcd_mean
-        # Standardize on scene_pcd
-        action_pcd = action_pcd / scene_pcd_std
-        anchor_pcd = anchor_pcd / scene_pcd_std
-        cross_displacement = np.zeros_like(action_pcd)
+
+        end_pcd = np.zeros_like(action_pcd)  # Dummy value, no GT available
+        action_pcd, end_pcd, anchor_pcd = self.transform_pcds(
+            action_pcd, end_pcd, anchor_pcd, action_pcd_mean, scene_pcd_std, augment_tf
+        )
 
         # collate_pcd_fn handles batching of the point clouds
         item = {
@@ -224,7 +176,7 @@ class GenGoalGenDataset(data.Dataset):
             "anchor_feat_pcd": anchor_feat_pcd,
             "caption": caption,
             "text_embed": text_embed,
-            "cross_displacement": cross_displacement,
+            "cross_displacement": end_pcd - action_pcd,
             "intrinsics": self.K,
             "rgbs": rgbs,
             "depths": depths,
@@ -232,6 +184,9 @@ class GenGoalGenDataset(data.Dataset):
             "vid_name": image_path,
             "pcd_mean": action_pcd_mean,
             "pcd_std": scene_pcd_std,
+            "augment_R": augment_tf["R"],
+            "augment_t": augment_tf["t"],
+            "augment_C": augment_tf["C"],
         }
         return item
 

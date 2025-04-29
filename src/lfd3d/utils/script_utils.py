@@ -104,6 +104,7 @@ def create_datamodule(cfg):
         val_batch_size=job_cfg.val_batch_size,
         num_workers=cfg.resources.num_workers,
         dataset_cfg=cfg.dataset,
+        seed=cfg.seed,
     )
     datamodule.setup(stage)
 
