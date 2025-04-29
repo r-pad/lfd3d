@@ -117,11 +117,10 @@ class RpadFoxgloveDataset(BaseDataset):
             if demo_name not in self.split_names:
                 continue
 
-            demo = self.dataset[demo_name]
-
-            if self.source_of_data(demo) not in self.data_sources:
+            if self.source_of_data(demo_name) not in self.data_sources:
                 continue
 
+            demo = self.dataset[demo_name]
             events = demo["events"]
             num_events = len(events["event"])
 
