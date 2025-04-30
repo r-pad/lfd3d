@@ -147,8 +147,23 @@ def flatten_outputs(outputs: List[TorchTree]) -> TorchTree:
 
 
 def load_checkpoint_config_from_wandb(
-    current_cfg, task_overrides, entity, project, run_id
+    current_cfg,
+    task_overrides,
+    entity,
+    project,
+    run_id,
+    keys_to_preserve=[
+        "dataset.data_dir",
+        "dataset.cache_dir",
+        "dataset.name",
+        "dataset.additional_img_dir",
+        "dataset.use_intermediate_frames",
+    ],
 ):
+    """
+    Load and merge config from WandB, with controlled updates and overrides.
+    A bit hacky, since we need to override some keys but not others :/
+    """
     # grab run config from wandb
     api = wandb.Api()
     run_cfg = OmegaConf.create(api.run(f"{entity}/{project}/{run_id}").config)
@@ -166,10 +181,10 @@ def load_checkpoint_config_from_wandb(
             UserWarning,
         )
 
-    # Keep some overrides
-    current_data_dir = current_cfg.dataset.data_dir
-    current_cache_dir = current_cfg.dataset.cache_dir
-    current_dataset_name = current_cfg.dataset.name
+    # Store values to preserve before merging
+    preserve_values = {
+        key: OmegaConf.select(current_cfg, key) for key in keys_to_preserve
+    }
 
     # update run config with dataset and model configs from original run config
     for key in ["dataset", "model", "name"]:
@@ -181,11 +196,12 @@ def load_checkpoint_config_from_wandb(
             force_add=True,
         )
 
+    # Restore preserved values
+    for key, value in preserve_values.items():
+        OmegaConf.update(current_cfg, key, value, force_add=True)
+
     # small edge case - if 'eval', ignore 'train_size'/'val_size'
     if current_cfg.mode == "eval":
         current_cfg.dataset.train_size = None
         current_cfg.dataset.val_size = None
-    current_cfg.dataset.data_dir = current_data_dir
-    current_cfg.dataset.cache_dir = current_cache_dir
-    current_cfg.dataset.name = current_dataset_name
     return current_cfg
