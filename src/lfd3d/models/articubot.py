@@ -882,7 +882,13 @@ class GoalRegressionModule(pl.LightningModule):
         init = torch.cat([init_primary_points, init_extra_point[:, None, :]], dim=1)
         return init, gt
 
-    def get_weighted_displacement(self, outputs, padding_mask):
+    def get_weighted_displacement(self, scene_pcd, outputs, padding_mask):
+        batch_size, num_points, _ = scene_pcd.shape
+        if self.model_cfg.add_action_pcd_masked:
+            scene_pcd = scene_pcd[:, :, None, :-1]
+        else:
+            scene_pcd = scene_pcd[:, :, None, :]
+
         weights = outputs[:, :, -1]  # B, N
         weights = weights.masked_fill(
             ~padding_mask, float("-inf")
@@ -892,9 +898,11 @@ class GoalRegressionModule(pl.LightningModule):
 
         outputs = outputs[:, :, :-1]  # B, N, 12
         # sum the displacement of the predicted gripper point cloud according to the weights
-        outputs = outputs * weights.unsqueeze(-1)
-        outputs = outputs.sum(dim=1)
-        return outputs.reshape(-1, 4, 3)
+        pred_points = weights[:, :, None, None] * (
+            scene_pcd + outputs.reshape(batch_size, num_points, 4, 3)
+        )
+        pred_points = pred_points.sum(dim=1)
+        return pred_points
 
     def forward(self, batch):
         initial_gripper = batch["action_pcd"].points_padded()
@@ -951,7 +959,9 @@ class GoalRegressionModule(pl.LightningModule):
         )
 
         init, gt = self.extract_gt_4_points(batch)
-        pred_points = self.get_weighted_displacement(outputs, scene_padding_mask)
+        pred_points = self.get_weighted_displacement(
+            scene_pcd, outputs, scene_padding_mask
+        )
         pred_displacement = outputs[:, :, :-1].reshape(batch_size, pcd_size, 4, 3)
         if self.model_cfg.add_action_pcd_masked:
             gt_displacement = scene_pcd[:, :, None, :-1] - gt[:, None, :, :]
@@ -1064,9 +1074,53 @@ class GoalRegressionModule(pl.LightningModule):
         )
         init, gt = self.extract_gt_4_points(batch)
 
-        pred = self.get_weighted_displacement(outputs, scene_padding_mask)
+        if self.is_gmm:
+            pred = self.sample_from_gmm(scene_pcd, outputs, scene_padding_mask)
+        else:
+            pred = self.get_weighted_displacement(
+                scene_pcd, outputs, scene_padding_mask
+            )
         pred_displacement = pred - init
         return {self.prediction_type: {"pred": pred_displacement}}, outputs
+
+    def sample_from_gmm(self, scene_pcd, outputs, padding_mask):
+        batch_size, num_points, _ = scene_pcd.shape
+        weights = outputs[:, :, -1]  # B, N
+        weights = weights.masked_fill(
+            ~padding_mask, float("-inf")
+        )  # Set invalid to -inf
+        weights = torch.nn.functional.softmax(weights, dim=1)
+
+        # Sample point indices based on weights for each batch element
+        sampled_indices = torch.multinomial(weights, num_samples=1)  # B, 1
+        batch_indices = torch.arange(batch_size, device=outputs.device).unsqueeze(
+            1
+        )  # B, 1
+
+        # Extract displacement predictions
+        displacements = outputs[:, :, :-1].reshape(
+            batch_size, num_points, 4, 3
+        )  # B, N, 4, 3
+
+        # Prepare scene points
+        if self.model_cfg.add_action_pcd_masked:
+            scene_points = scene_pcd[:, :, None, :-1]  # B, N, 1, 3
+        else:
+            scene_points = scene_pcd[:, :, None, :]
+
+        # Get the Gaussian means: scene_point + displacement
+        # Broadcasting will expand scene_points from [B, N, 1, 3] to [B, N, 4, 3]
+        means = scene_points + displacements  # B, N, 4, 3
+
+        # Get sampled means
+        sampled_means = means[batch_indices, sampled_indices].squeeze(1)  # B, 4, 3
+
+        # Sample from Gaussian with fixed variance
+        noise = torch.randn_like(sampled_means) * (self.fixed_variance**0.5)
+        # Add noise to means
+        pred_points = sampled_means + noise
+
+        return pred_points
 
     def log_viz_to_wandb(self, batch, pred_dict, weighted_displacement, tag):
         """
@@ -1082,12 +1136,20 @@ class GoalRegressionModule(pl.LightningModule):
         # pick a random sample in the batch to visualize
         viz_idx = np.random.randint(0, batch_size)
         RED, GREEN, BLUE = (255, 0, 0), (0, 255, 0), (0, 0, 255)
-        BLUES = [BLUE]
         max_depth = self.max_depth
 
         all_pred = pred_dict[self.prediction_type]["all_pred"][viz_idx].cpu().numpy()
         N = all_pred.shape[0]
         end2start = np.linalg.inv(batch["start2end"][viz_idx].cpu().numpy())
+
+        if N == 1:
+            BLUES = [BLUE]
+        else:
+            # Multiple shades of blue for different samples
+            BLUES = [
+                (int(200 * (1 - i / (N - 1))), int(220 * (1 - i / (N - 1))), 255)
+                for i in range(N)
+            ]
 
         goal_text = batch["caption"][viz_idx]
         vid_name = batch["vid_name"][viz_idx]
@@ -1221,9 +1283,15 @@ class GoalRegressionModule(pl.LightningModule):
 
         # additional logging
         if do_additional_logging:
+            n_samples_wta = self.run_cfg.n_samples_wta
             self.eval()
             with torch.no_grad():
-                all_pred_dict = [self.predict(batch)]
+                all_pred_dict = []
+                if self.is_gmm:
+                    for i in range(n_samples_wta):
+                        all_pred_dict.append(self.predict(batch))
+                else:
+                    all_pred_dict = [self.predict(batch)]
                 # Use one sample for computing other metrics
                 pred_dict, weighted_displacement = all_pred_dict[0]
                 # Store all sample preds for viz
@@ -1302,9 +1370,15 @@ class GoalRegressionModule(pl.LightningModule):
         Validation step for the module. Logs validation metrics and visualizations to wandb.
         """
         val_tag = self.trainer.datamodule.val_tags[dataloader_idx]
+        n_samples_wta = self.run_cfg.n_samples_wta
         self.eval()
         with torch.no_grad():
-            all_pred_dict = [self.predict(batch)]
+            all_pred_dict = []
+            if self.is_gmm:
+                for i in range(n_samples_wta):
+                    all_pred_dict.append(self.predict(batch))
+            else:
+                all_pred_dict = [self.predict(batch)]
             pred_dict, weighted_displacement = all_pred_dict[0]
 
             # Store all sample preds for viz
@@ -1392,7 +1466,14 @@ class GoalRegressionModule(pl.LightningModule):
         Visualizations are logged with dataloader_idx=0
         """
         eval_tag = self.trainer.datamodule.eval_tags[dataloader_idx]
-        all_pred_dict = [self.predict(batch)]
+        n_samples_wta = self.trainer.datamodule.n_samples_wta
+
+        all_pred_dict = []
+        if self.is_gmm:
+            for i in range(n_samples_wta):
+                all_pred_dict.append(self.predict(batch))
+        else:
+            all_pred_dict = [self.predict(batch)]
 
         pred_dict, weighted_displacement = all_pred_dict[0]
         # Store all sample preds for viz

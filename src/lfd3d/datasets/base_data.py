@@ -106,16 +106,22 @@ class BaseDataset(td.Dataset):
         else:
             raise NotImplementedError
 
-        # Apply random SO(2) rotation (around Y-axis as pcd is in camera frame) and translation
-        theta = np.random.uniform(0, 2 * np.pi)  # Random angle
-        R = np.array(
-            [
-                [np.cos(theta), 0, np.sin(theta)],
-                [0, 1, 0],
-                [-np.sin(theta), 0, np.cos(theta)],
-            ]
-        )  # Rotation matrix around Y-axis
-        translation = np.random.uniform(-0.2, 0.2, size=3)  # Random translation vector
+        if augment_cfg["augment_transform"]:
+            # Apply random SO(2) rotation (around Y-axis as pcd is in camera frame) and translation
+            theta = np.random.uniform(0, 2 * np.pi)  # Random angle
+            R = np.array(
+                [
+                    [np.cos(theta), 0, np.sin(theta)],
+                    [0, 1, 0],
+                    [-np.sin(theta), 0, np.cos(theta)],
+                ]
+            )  # Rotation matrix around Y-axis
+            translation = np.random.uniform(
+                -0.2, 0.2, size=3
+            )  # Random translation vector
+        else:
+            R, translation = np.eye(3), np.zeros(3)
+
         centroid = scene_pcd.mean(0)
 
         return scene_pcd, scene_feat_pcd, {"R": R, "t": translation, "C": centroid}

@@ -12,6 +12,7 @@ normalize: False # If false, leave in original scale (could be metric or relativ
 augment_train: True # augment when training
 augment_cfg:
   augment_prob: 0.75 # Probability of augmentation (the actual augmentation prob also depends on cache_invalidation_rate)
+  augment_transform: True
   pcd_sample: ["voxel", "fps"]
   fps_num_points: [4096, 8192]
   voxel_size: [0.01, 0.02]
