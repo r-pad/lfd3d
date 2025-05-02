@@ -1136,12 +1136,20 @@ class GoalRegressionModule(pl.LightningModule):
         # pick a random sample in the batch to visualize
         viz_idx = np.random.randint(0, batch_size)
         RED, GREEN, BLUE = (255, 0, 0), (0, 255, 0), (0, 0, 255)
-        BLUES = [BLUE]
         max_depth = self.max_depth
 
         all_pred = pred_dict[self.prediction_type]["all_pred"][viz_idx].cpu().numpy()
         N = all_pred.shape[0]
         end2start = np.linalg.inv(batch["start2end"][viz_idx].cpu().numpy())
+
+        if N == 1:
+            BLUES = [BLUE]
+        else:
+            # Multiple shades of blue for different samples
+            BLUES = [
+                (int(200 * (1 - i / (N - 1))), int(220 * (1 - i / (N - 1))), 255)
+                for i in range(N)
+            ]
 
         goal_text = batch["caption"][viz_idx]
         vid_name = batch["vid_name"][viz_idx]
@@ -1275,9 +1283,15 @@ class GoalRegressionModule(pl.LightningModule):
 
         # additional logging
         if do_additional_logging:
+            n_samples_wta = self.run_cfg.n_samples_wta
             self.eval()
             with torch.no_grad():
-                all_pred_dict = [self.predict(batch)]
+                all_pred_dict = []
+                if self.is_gmm:
+                    for i in range(n_samples_wta):
+                        all_pred_dict.append(self.predict(batch))
+                else:
+                    all_pred_dict = [self.predict(batch)]
                 # Use one sample for computing other metrics
                 pred_dict, weighted_displacement = all_pred_dict[0]
                 # Store all sample preds for viz
@@ -1356,9 +1370,15 @@ class GoalRegressionModule(pl.LightningModule):
         Validation step for the module. Logs validation metrics and visualizations to wandb.
         """
         val_tag = self.trainer.datamodule.val_tags[dataloader_idx]
+        n_samples_wta = self.run_cfg.n_samples_wta
         self.eval()
         with torch.no_grad():
-            all_pred_dict = [self.predict(batch)]
+            all_pred_dict = []
+            if self.is_gmm:
+                for i in range(n_samples_wta):
+                    all_pred_dict.append(self.predict(batch))
+            else:
+                all_pred_dict = [self.predict(batch)]
             pred_dict, weighted_displacement = all_pred_dict[0]
 
             # Store all sample preds for viz
