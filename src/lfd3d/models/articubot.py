@@ -959,9 +959,6 @@ class GoalRegressionModule(pl.LightningModule):
         )
 
         init, gt = self.extract_gt_4_points(batch)
-        pred_points = self.get_weighted_displacement(
-            scene_pcd, outputs, scene_padding_mask
-        )
         pred_displacement = outputs[:, :, :-1].reshape(batch_size, pcd_size, 4, 3)
         if self.model_cfg.add_action_pcd_masked:
             gt_displacement = scene_pcd[:, :, None, :-1] - gt[:, None, :, :]
@@ -970,6 +967,7 @@ class GoalRegressionModule(pl.LightningModule):
         weights = outputs[:, :, -1]  # B, N
 
         if self.is_gmm:
+            pred_points = self.sample_from_gmm(scene_pcd, outputs, scene_padding_mask)
             diff = (pred_displacement - gt_displacement).reshape(
                 batch_size, pcd_size, -1
             )  # Shape: (B, N, 12)
@@ -1002,6 +1000,9 @@ class GoalRegressionModule(pl.LightningModule):
                 log_probs
             )  # mean of the negative log likelihood
         else:
+            pred_points = self.get_weighted_displacement(
+                scene_pcd, outputs, scene_padding_mask
+            )
             per_point_displacement_loss = F.mse_loss(
                 pred_displacement[scene_padding_mask],
                 gt_displacement[scene_padding_mask],
