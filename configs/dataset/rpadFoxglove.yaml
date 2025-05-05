@@ -6,5 +6,5 @@ additional_img_dir: null
 data_sources: # List of data sources
   - human
   - aloha
-rgb_text_feat: False # Enable/disable computation of rgb/text features
+rgb_feat: False # If true, compute DINOv2 features, else just return RGB
 use_intermediate_frames: True # Use all intermediate frames in [start, end] as input to the model instead of only the start frame.
