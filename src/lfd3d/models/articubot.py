@@ -990,6 +990,9 @@ class GoalRegressionModule(pl.LightningModule):
 
         if self.is_gmm:
             pred_points = self.sample_from_gmm(scene_pcd, outputs, scene_padding_mask)
+            weights = weights.masked_fill(
+                ~scene_padding_mask, float("-inf")
+            )  # Set invalid to -inf
             diff = (pred_displacement - gt_displacement).reshape(
                 batch_size, pcd_size, -1
             )  # Shape: (B, N, 12)
@@ -1103,10 +1106,7 @@ class GoalRegressionModule(pl.LightningModule):
         )  # B, N, 4, 3
 
         # Prepare scene points
-        if self.model_cfg.add_action_pcd_masked:
-            scene_points = scene_pcd[:, :, None, :-1]  # B, N, 1, 3
-        else:
-            scene_points = scene_pcd[:, :, None, :]
+        scene_points = scene_pcd[:, :, None, :3]  # B, N, 1, 3
 
         # Get the Gaussian means: scene_point + displacement
         # Broadcasting will expand scene_points from [B, N, 1, 3] to [B, N, 4, 3]
@@ -1115,10 +1115,11 @@ class GoalRegressionModule(pl.LightningModule):
         # Get sampled means
         sampled_means = means[batch_indices, sampled_indices].squeeze(1)  # B, 4, 3
 
-        # Sample from Gaussian with fixed variance
-        noise = torch.randn_like(sampled_means) * (self.fixed_variance**0.5)
-        # Add noise to means
-        pred_points = sampled_means + noise
+        # NOTE: We can sample from these gaussians as well, but just using the mean for now.
+        # noise = torch.randn_like(sampled_means) * (self.fixed_variance**0.5)
+        # pred_points = sampled_means + noise
+
+        pred_points = sampled_means
 
         return pred_points
 
