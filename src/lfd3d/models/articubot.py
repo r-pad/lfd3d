@@ -884,10 +884,7 @@ class GoalRegressionModule(pl.LightningModule):
 
     def get_weighted_displacement(self, scene_pcd, outputs, padding_mask):
         batch_size, num_points, _ = scene_pcd.shape
-        if self.model_cfg.add_action_pcd_masked:
-            scene_pcd = scene_pcd[:, :, None, :-1]
-        else:
-            scene_pcd = scene_pcd[:, :, None, :]
+        scene_pcd = scene_pcd[:, :, None, :3]
 
         weights = outputs[:, :, -1]  # B, N
         weights = weights.masked_fill(
@@ -904,27 +901,23 @@ class GoalRegressionModule(pl.LightningModule):
         pred_points = pred_points.sum(dim=1)
         return pred_points
 
-    def forward(self, batch):
-        initial_gripper = batch["action_pcd"].points_padded()
-
-        scene_pcd = batch["anchor_pcd"].points_padded()
-        batch_size, max_points, *_ = scene_pcd.shape
-        num_points = batch["anchor_pcd"].num_points_per_cloud()
-        scene_padding_mask = (
-            torch.arange(max_points, device=num_points.device)[None, :]
-            < num_points[:, None]
-        )
-
-        text_embedding = batch["text_embed"]
-        batch_size, pcd_size, _ = scene_pcd.shape
-
-        if self.model_cfg.add_action_pcd_masked:
+    def prepare_scene_pcd(
+        self,
+        gripper_pcd,
+        scene_pcd,
+        scene_feat_pcd,
+        scene_padding_mask,
+        add_action_pcd_masked,
+        use_rgb,
+    ):
+        batch_size, pcd_size, feat_dim = scene_feat_pcd.shape
+        if add_action_pcd_masked:
             # Concat action pcd and scene pcd and add a mask for the same
-            initial_gripper = torch.cat(
+            gripper_pcd = torch.cat(
                 [
-                    initial_gripper,
+                    gripper_pcd,
                     torch.ones(
-                        batch_size, initial_gripper.shape[1], 1, device=scene_pcd.device
+                        batch_size, gripper_pcd.shape[1], 1, device=scene_pcd.device
                     ),
                 ],
                 dim=2,
@@ -938,20 +931,52 @@ class GoalRegressionModule(pl.LightningModule):
                 ],
                 dim=2,
             )  # [B, N, 4]
-            scene_pcd = torch.cat([initial_gripper, scene_pcd], dim=1)
-            pcd_size += initial_gripper.shape[1]
+            scene_pcd = torch.cat([gripper_pcd, scene_pcd], dim=1)
+            pcd_size += gripper_pcd.shape[1]
             scene_padding_mask = torch.cat(
                 [
                     scene_padding_mask,
                     torch.ones(
                         batch_size,
-                        initial_gripper.shape[1],
+                        gripper_pcd.shape[1],
                         device=scene_pcd.device,
                         dtype=bool,
                     ),
                 ],
                 dim=1,
             )
+
+        if use_rgb:
+            gripper_feat = torch.zeros(
+                batch_size, gripper_pcd.shape[1], feat_dim, device=scene_pcd.device
+            )
+            scene_feat_pcd = torch.cat([gripper_feat, scene_feat_pcd], dim=1)
+            scene_pcd = torch.cat([scene_pcd, scene_feat_pcd], dim=2)
+        return scene_pcd, pcd_size, scene_padding_mask
+
+    def forward(self, batch):
+        initial_gripper = batch["action_pcd"].points_padded()
+
+        scene_pcd = batch["anchor_pcd"].points_padded()
+        scene_feat_pcd = batch["anchor_pcd"].features_padded()
+        batch_size, max_points, *_ = scene_pcd.shape
+        num_points = batch["anchor_pcd"].num_points_per_cloud()
+        scene_padding_mask = (
+            torch.arange(max_points, device=num_points.device)[None, :]
+            < num_points[:, None]
+        )
+
+        text_embedding = batch["text_embed"]
+        batch_size, pcd_size, _ = scene_pcd.shape
+
+        scene_pcd, pcd_size, scene_padding_mask = self.prepare_scene_pcd(
+            initial_gripper,
+            scene_pcd,
+            scene_feat_pcd,
+            scene_padding_mask,
+            self.model_cfg.add_action_pcd_masked,
+            self.model_cfg.use_rgb,
+        )
 
         # Network currently doesn't see action pcd
         outputs = self.network(
@@ -960,14 +985,14 @@ class GoalRegressionModule(pl.LightningModule):
 
         init, gt = self.extract_gt_4_points(batch)
         pred_displacement = outputs[:, :, :-1].reshape(batch_size, pcd_size, 4, 3)
-        if self.model_cfg.add_action_pcd_masked:
-            gt_displacement = scene_pcd[:, :, None, :-1] - gt[:, None, :, :]
-        else:
-            gt_displacement = scene_pcd[:, :, None, :] - gt[:, None, :, :]
+        gt_displacement = scene_pcd[:, :, None, :3] - gt[:, None, :, :]
         weights = outputs[:, :, -1]  # B, N
 
         if self.is_gmm:
             pred_points = self.sample_from_gmm(scene_pcd, outputs, scene_padding_mask)
+            weights = weights.masked_fill(
+                ~scene_padding_mask, float("-inf")
+            )  # Set invalid to -inf
             diff = (pred_displacement - gt_displacement).reshape(
                 batch_size, pcd_size, -1
             )  # Shape: (B, N, 12)
@@ -1027,6 +1052,7 @@ class GoalRegressionModule(pl.LightningModule):
         """
         initial_gripper = batch["action_pcd"].points_padded()
         scene_pcd = batch["anchor_pcd"].points_padded()
+        scene_feat_pcd = batch["anchor_pcd"].features_padded()
         batch_size, max_points, *_ = scene_pcd.shape
         num_points = batch["anchor_pcd"].num_points_per_cloud()
         scene_padding_mask = (
@@ -1037,38 +1063,14 @@ class GoalRegressionModule(pl.LightningModule):
         text_embedding = batch["text_embed"]
         batch_size, pcd_size, _ = scene_pcd.shape  # Matches forward
 
-        if self.model_cfg.add_action_pcd_masked:
-            initial_gripper = torch.cat(
-                [
-                    initial_gripper,
-                    torch.ones(
-                        batch_size, initial_gripper.shape[1], 1, device=scene_pcd.device
-                    ),
-                ],
-                dim=2,
-            )  # [B, K, 4]
-            scene_pcd = torch.cat(
-                [
-                    scene_pcd,
-                    torch.zeros(
-                        batch_size, scene_pcd.shape[1], 1, device=scene_pcd.device
-                    ),
-                ],
-                dim=2,
-            )  # [B, N, 4]
-            scene_pcd = torch.cat([initial_gripper, scene_pcd], dim=1)
-            scene_padding_mask = torch.cat(
-                [
-                    scene_padding_mask,
-                    torch.ones(
-                        batch_size,
-                        initial_gripper.shape[1],
-                        device=scene_pcd.device,
-                        dtype=bool,
-                    ),
-                ],
-                dim=1,
-            )
+        scene_pcd, pcd_size, scene_padding_mask = self.prepare_scene_pcd(
+            initial_gripper,
+            scene_pcd,
+            scene_feat_pcd,
+            scene_padding_mask,
+            self.model_cfg.add_action_pcd_masked,
+            self.model_cfg.use_rgb,
+        )
 
         outputs = self.network(
             scene_pcd.permute(0, 2, 1), text_embedding=text_embedding
@@ -1104,10 +1106,7 @@ class GoalRegressionModule(pl.LightningModule):
         )  # B, N, 4, 3
 
         # Prepare scene points
-        if self.model_cfg.add_action_pcd_masked:
-            scene_points = scene_pcd[:, :, None, :-1]  # B, N, 1, 3
-        else:
-            scene_points = scene_pcd[:, :, None, :]
+        scene_points = scene_pcd[:, :, None, :3]  # B, N, 1, 3
 
         # Get the Gaussian means: scene_point + displacement
         # Broadcasting will expand scene_points from [B, N, 1, 3] to [B, N, 4, 3]
@@ -1116,10 +1115,11 @@ class GoalRegressionModule(pl.LightningModule):
         # Get sampled means
         sampled_means = means[batch_indices, sampled_indices].squeeze(1)  # B, 4, 3
 
-        # Sample from Gaussian with fixed variance
-        noise = torch.randn_like(sampled_means) * (self.fixed_variance**0.5)
-        # Add noise to means
-        pred_points = sampled_means + noise
+        # NOTE: We can sample from these gaussians as well, but just using the mean for now.
+        # noise = torch.randn_like(sampled_means) * (self.fixed_variance**0.5)
+        # pred_points = sampled_means + noise
+
+        pred_points = sampled_means
 
         return pred_points
 

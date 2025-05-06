@@ -58,6 +58,7 @@ class RpadFoxgloveDataset(BaseDataset):
         )
 
         self.captions = {}
+        self.text_embeddings = {}
         self.dataset = zarr.group(root)
         self.dataset_index = self.expand_all_events()
         self.size = len(self.dataset_index)
@@ -336,35 +337,35 @@ class RpadFoxgloveDataset(BaseDataset):
         """
         Compute RGB/text features generated with DINOv2 and SIGLIP
         """
-        # Compress RGB features
-        pca_n_components = 256
         siglip_dim = 1152
-
-        if not self.dataset_cfg.rgb_text_feat:
-            text_embed = np.zeros(siglip_dim, dtype=np.float32)
-            rgb_embed = np.zeros(
-                (self.target_shape, self.target_shape, pca_n_components),
-                dtype=np.float32,
+        if text not in self.text_embeddings:
+            # Compute features on CPU to avoid CUDA multiprocessing issues
+            # We're only computing the features once and caching so its okay.
+            self.text_embeddings[text] = get_siglip_text_embedding(
+                text,
+                siglip=self.siglip,
+                siglip_processor=self.siglip_processor,
+                device="cpu",
             )
-            return rgb_embed, text_embed
+        text_embed = self.text_embeddings[text]
 
-        # Compute features on CPU to avoid CUDA multiprocessing issues
-        # We're only computing the features once and caching so its okay.
-        text_embed = get_siglip_text_embedding(
-            text,
-            siglip=self.siglip,
-            siglip_processor=self.siglip_processor,
-            device="cpu",
-        )
-        rgb_embed = get_dinov2_image_embedding(
-            Image.fromarray(rgb), dinov2=self.dinov2, device="cpu"
-        )
+        if self.dataset_cfg.rgb_feat:
+            # Compress RGB features
+            pca_n_components = 256
+            rgb_embed = get_dinov2_image_embedding(
+                Image.fromarray(rgb), dinov2=self.dinov2, device="cpu"
+            )
 
-        pca_model = PCA(n_components=pca_n_components)
-        rgb_embed = pca_model.fit_transform(rgb_embed.reshape(-1, rgb_embed.shape[2]))
-        rgb_embed = rgb_embed.reshape(
-            self.target_shape, self.target_shape, pca_n_components
-        )
+            pca_model = PCA(n_components=pca_n_components)
+            rgb_embed = pca_model.fit_transform(
+                rgb_embed.reshape(-1, rgb_embed.shape[2])
+            )
+            rgb_embed = rgb_embed.reshape(
+                self.target_shape, self.target_shape, pca_n_components
+            )
+        else:
+            # Just return the (normalized) RGB values if features are not required.
+            rgb_embed = (((rgb / 255.0) * 2) - 1).astype(np.float32)
 
         return rgb_embed, text_embed
 

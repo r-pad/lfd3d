@@ -2,11 +2,12 @@ name: articubot
 
 # Model settings
 type: cross_displacement # (flow, point) Type of model
-in_channels: 3 # Number of input channels
+in_channels: 7 # Number of input channels (7 - xyz + one-hot mask for action_pcd + rgb)
 num_classes: 13 # xyz of 4 points and weight of points
 keep_gripper_in_fps: False
-add_action_pcd_masked: False # Add in action pcd with boolean mask (increment in_channels)
-use_text_embedding: False # If true, expects (siglip) text embedding to be provided as input
+add_action_pcd_masked: True # Add in action pcd with boolean mask (increment in_channels)
+use_text_embedding: True # If true, expects (siglip) text embedding to be provided as input
+use_rgb: True # If true, expects +3 in_chanels
 
 is_gmm: False # Train a GMM and minimize negative log likelihood instead
 fixed_variance: 0.05 # for gmm
