@@ -812,6 +812,7 @@ class GoalRegressionModule(pl.LightningModule):
             list
         )
         self.fixed_variance = cfg.model.fixed_variance
+        self.uniform_weights_coeff = cfg.model.uniform_weights_coeff
         self.is_gmm = cfg.model.is_gmm
 
         if self.prediction_type != "cross_displacement":
@@ -954,6 +955,54 @@ class GoalRegressionModule(pl.LightningModule):
             scene_pcd = torch.cat([scene_pcd, scene_feat_pcd], dim=2)
         return scene_pcd, pcd_size, scene_padding_mask
 
+    def nll_loss(
+        self,
+        pred_displacement,
+        gt_displacement,
+        weights,
+        scene_padding_mask,
+        variance,
+        use_weights=True,
+    ):
+        batch_size, pcd_size = pred_displacement.shape[:2]
+        weights = weights.masked_fill(
+            ~scene_padding_mask, float("-inf")
+        )  # Set invalid to -inf
+        if use_weights is False:
+            # We overwrite with uniform weights
+            weights = weights.masked_fill(scene_padding_mask, 1)
+
+        diff = (pred_displacement - gt_displacement).reshape(
+            batch_size, pcd_size, -1
+        )  # Shape: (B, N, 12)
+        exponent = -0.5 * torch.sum(
+            (diff**2) / variance, dim=2
+        )  # Shape: (B, N), sum over the guassian dimension
+        log_gaussians = exponent
+
+        # Compute log mixing coefficients
+        log_mixing_coeffs = torch.log_softmax(
+            weights, dim=1
+        )  # softmax the weight along the per-point dimension, shape B, N
+        log_mixing_coeffs = torch.clamp(
+            log_mixing_coeffs, min=-10
+        )  # Prevent extreme values
+
+        masked_sum = log_gaussians + log_mixing_coeffs  # [B, N]
+        masked_sum = masked_sum.masked_fill(
+            ~scene_padding_mask, -1e9
+        )  # In-place masking
+
+        max_log = torch.max(
+            masked_sum, dim=1, keepdim=True
+        ).values  # get the per-batch max log along all the points, B, 1
+        log_probs = max_log.squeeze(1) + torch.logsumexp(
+            masked_sum - max_log, dim=1
+        )  # B,
+
+        nll_loss = -torch.mean(log_probs)  # mean of the negative log likelihood
+        return nll_loss
+
     def forward(self, batch):
         initial_gripper = batch["action_pcd"].points_padded()
 
@@ -989,41 +1038,24 @@ class GoalRegressionModule(pl.LightningModule):
         weights = outputs[:, :, -1]  # B, N
 
         if self.is_gmm:
-            pred_points = self.sample_from_gmm(scene_pcd, outputs, scene_padding_mask)
-            weights = weights.masked_fill(
-                ~scene_padding_mask, float("-inf")
-            )  # Set invalid to -inf
-            diff = (pred_displacement - gt_displacement).reshape(
-                batch_size, pcd_size, -1
-            )  # Shape: (B, N, 12)
-            exponent = -0.5 * torch.sum(
-                (diff**2) / self.fixed_variance, dim=2
-            )  # Shape: (B, N), sum over the guassian dimension
-            log_gaussians = exponent
-
-            # Compute log mixing coefficients
-            log_mixing_coeffs = torch.log_softmax(
-                weights, dim=1
-            )  # softmax the weight along the per-point dimension, shape B, N
-            log_mixing_coeffs = torch.clamp(
-                log_mixing_coeffs, min=-10
-            )  # Prevent extreme values
-
-            masked_sum = log_gaussians + log_mixing_coeffs  # [B, N]
-            masked_sum = masked_sum.masked_fill(
-                ~scene_padding_mask, -1e9
-            )  # In-place masking
-
-            max_log = torch.max(
-                masked_sum, dim=1, keepdim=True
-            ).values  # get the per-batch max log along all the points, B, 1
-            log_probs = max_log.squeeze(1) + torch.logsumexp(
-                masked_sum - max_log, dim=1
-            )  # B,
-
-            per_point_displacement_loss = -torch.mean(
-                log_probs
-            )  # mean of the negative log likelihood
+            loss = 0
+            for var in self.fixed_variance:
+                loss += self.nll_loss(
+                    pred_displacement,
+                    gt_displacement,
+                    weights,
+                    scene_padding_mask,
+                    var,
+                    use_weights=True,
+                )
+                loss += self.uniform_weights_coeff * self.nll_loss(
+                    pred_displacement,
+                    gt_displacement,
+                    weights,
+                    scene_padding_mask,
+                    var,
+                    use_weights=False,
+                )
         else:
             pred_points = self.get_weighted_displacement(
                 scene_pcd, outputs, scene_padding_mask
@@ -1033,8 +1065,11 @@ class GoalRegressionModule(pl.LightningModule):
                 gt_displacement[scene_padding_mask],
             )
 
-        weighted_avg_loss = F.mse_loss(pred_points, gt)
-        loss = per_point_displacement_loss + self.weight_loss_weight * weighted_avg_loss
+            weighted_avg_loss = F.mse_loss(pred_points, gt)
+            loss = (
+                per_point_displacement_loss
+                + self.weight_loss_weight * weighted_avg_loss
+            )
 
         return None, loss
 
