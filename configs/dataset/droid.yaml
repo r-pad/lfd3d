@@ -2,3 +2,4 @@ defaults:
   - base_dataset # Inherit from base
 name: droid
 max_depth: 2
+rgb_feat: False # If true, return DINOv2 features, else just return RGB
