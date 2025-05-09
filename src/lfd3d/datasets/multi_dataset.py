@@ -131,7 +131,7 @@ class ChunkDatasetBatchSampler(torch.utils.data.BatchSampler):
     from each as the smallest dataset.
     """
 
-    def __init__(self, dataset_indices, batch_size, shuffle=True, drop_last=False):
+    def __init__(self, dataset_indices, batch_size, shuffle=True, drop_last=True):
         """
         Args:
             dataset_indices (List[List[int]]): List of index lists, one per dataset.
@@ -190,7 +190,7 @@ class DistributedChunkSampler(DistributedSampler):
         dataset_indices,
         num_replicas=None,
         rank=None,
-        drop_last=False,
+        drop_last=True,
         shuffle=True,
         seed=0,
     ):
