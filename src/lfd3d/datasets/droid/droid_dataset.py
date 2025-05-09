@@ -121,6 +121,13 @@ class DroidDataset(BaseDataset):
             with open(f"{self.event_dir}/{idx}/subgoal.json") as f:
                 subgoals = json.load(f)
 
+            # Overwrite with a concatenation of all the subgoals
+            if self.dataset_cfg.use_full_text:
+                subgoals = [
+                    {**item, "subgoal": " and ".join(d["subgoal"] for d in subgoals)}
+                    for item in subgoals
+                ]
+
             fname = self.idx_to_fname_mapping[idx]
             expanded_event_idx = [(idx, i) for i in range(len(subgoals))]
             expanded_event_caption = {

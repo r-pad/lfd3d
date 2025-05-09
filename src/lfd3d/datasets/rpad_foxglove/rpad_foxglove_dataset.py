@@ -128,6 +128,12 @@ class RpadFoxgloveDataset(BaseDataset):
             idx = np.argsort(events["event"])
             sorted_event = np.asarray(events["event"])[idx]
 
+            # Overwrite with a concatenation of all the subgoals
+            if self.dataset_cfg.use_full_text:
+                sorted_event = np.array(
+                    [" and ".join(sorted_event)] * len(sorted_event)
+                )
+
             for i in range(num_events):
                 expanded_event_idx = self.get_event_start_end_indexes(demo_name, i)
                 expanded_event_caption = {
