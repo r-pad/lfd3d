@@ -3,6 +3,7 @@ import random
 from pathlib import Path
 
 import torch
+import torch.distributed as dist
 import torchdatasets as td
 from torch.utils import data
 from torch.utils.data.distributed import DistributedSampler
@@ -95,8 +96,22 @@ class MultiDatasetDataModule(BaseDataModule):
             train_dist_sampler = DistributedChunkSampler(
                 train_dataset_indices,
             )
+            # Use default batch sampler for val
+            # Lightning automatically injects the sampler but we disable that
+            # for multi dataset training in train.py since we want custom
+            # behaviour for train.
+            self.val_samplers = {
+                tag: DistributedSampler(
+                    dataset,
+                    num_replicas=dist.get_world_size(),
+                    rank=dist.get_rank(),
+                    shuffle=False,
+                )
+                for tag, dataset in self.val_datasets.items()
+            }
         except ValueError:
             train_dist_sampler = train_dataset_indices
+            self.val_samplers = {tag: None for tag in self.val_datasets}  # No samplers
 
         # Use custom batch sampler to prevent batches mixing items from datasets
         self.train_batch_sampler = ChunkDatasetBatchSampler(
@@ -113,6 +128,7 @@ class MultiDatasetDataModule(BaseDataModule):
         raise NotImplementedError("Eval on each dataset separately for now.")
 
     def train_dataloader(self):
+        """Overrride to use custom batch sampler."""
         if not hasattr(self, "train_dataset"):
             raise AttributeError(
                 "train_dataset has not been set. Make sure to call setup() first."
@@ -123,6 +139,25 @@ class MultiDatasetDataModule(BaseDataModule):
             collate_fn=collate_pcd_fn,
             batch_sampler=self.train_batch_sampler,
         )
+
+    def val_dataloader(self):
+        """Overrride to use default batch sampler since its disabled for
+        multi-dataset training."""
+        if not hasattr(self, "val_datasets"):
+            raise AttributeError(
+                "val_datasets has not been set. Make sure to call setup() first."
+            )
+        return {
+            tag: data.DataLoader(
+                dataset,
+                batch_size=self.val_batch_size,
+                shuffle=False,
+                num_workers=self.num_workers,
+                collate_fn=collate_pcd_fn,
+                sampler=self.val_samplers[tag],
+            )
+            for tag, dataset in self.val_datasets.items()
+        }
 
 
 class ChunkDatasetBatchSampler(torch.utils.data.BatchSampler):
@@ -187,15 +222,15 @@ class DistributedChunkSampler(DistributedSampler):
 
     def __init__(
         self,
-        dataset_indices,
+        all_dataset_indices,
         num_replicas=None,
         rank=None,
         drop_last=True,
         shuffle=True,
         seed=0,
     ):
-        self.dataset_indices = dataset_indices
-        total_size = sum(len(indices) for indices in dataset_indices)
+        self.all_dataset_indices = all_dataset_indices
+        total_size = sum(len(indices) for indices in all_dataset_indices)
         # Initialize with total length (the params are not actually used though.)
         super().__init__(
             range(total_size), num_replicas, rank, shuffle, seed, drop_last
@@ -204,7 +239,7 @@ class DistributedChunkSampler(DistributedSampler):
     def __iter__(self):
         # split using rank / num replicas
         indices = [
-            dataset_idx[self.rank : self.total_size : self.num_replicas]
-            for dataset_idx in self.dataset_indices
+            dataset_idxs[self.rank : self.total_size : self.num_replicas]
+            for dataset_idxs in self.all_dataset_indices
         ]
         return iter(indices)
