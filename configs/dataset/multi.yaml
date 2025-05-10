@@ -1,5 +1,8 @@
 name: multi
 
 defaults:
-  - rt1@datasets.rt1
-  - hoi4d@datasets.hoi4d
+  - droid@datasets.droid
+  - rpadFoxglove@datasets.rpadFoxglove
+
+data_dir: null
+max_depth: 1

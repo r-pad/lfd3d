@@ -121,6 +121,13 @@ class DroidDataset(BaseDataset):
             with open(f"{self.event_dir}/{idx}/subgoal.json") as f:
                 subgoals = json.load(f)
 
+            # Overwrite with a concatenation of all the subgoals
+            if self.dataset_cfg.use_full_text:
+                subgoals = [
+                    {**item, "subgoal": " and ".join(d["subgoal"] for d in subgoals)}
+                    for item in subgoals
+                ]
+
             fname = self.idx_to_fname_mapping[idx]
             expanded_event_idx = [(idx, i) for i in range(len(subgoals))]
             expanded_event_caption = {
@@ -179,7 +186,7 @@ class DroidDataset(BaseDataset):
         end_tracks = gripper_pcds[event_end_idx]
         return start_tracks, end_tracks
 
-    def load_rgb_text_feat(self, droid_idx, event_idx):
+    def load_rgb_text_feat(self, rgb, droid_idx, event_idx):
         """
         Load RGB/text features generated with DINOv2 and SIGLIP
         """
@@ -189,19 +196,23 @@ class DroidDataset(BaseDataset):
             features["text_embed"].astype(np.float32),
         )
 
-        upscale_by = 4
-        rgb_embed = rgb_embed.transpose(2, 0, 1)[None].astype(np.float32)
-        rgb_embed = (
-            F.interpolate(
-                torch.from_numpy(rgb_embed),
-                scale_factor=upscale_by,
-                mode="bilinear",
-                align_corners=False,
+        if self.dataset_cfg.rgb_feat:
+            upscale_by = 4
+            rgb_embed = rgb_embed.transpose(2, 0, 1)[None].astype(np.float32)
+            rgb_embed = (
+                F.interpolate(
+                    torch.from_numpy(rgb_embed),
+                    scale_factor=upscale_by,
+                    mode="bilinear",
+                    align_corners=False,
+                )
+                .numpy()
+                .squeeze()
+                .transpose(1, 2, 0)
             )
-            .numpy()
-            .squeeze()
-            .transpose(1, 2, 0)
-        )
+        else:
+            # Just return the (normalized) RGB values if features are not required.
+            rgb_embed = (((rgb / 255.0) * 2) - 1).astype(np.float32)
         return rgb_embed, text_embed
 
     def __getitem__(self, idx):
@@ -224,7 +235,7 @@ class DroidDataset(BaseDataset):
             index, event_start_idx, event_end_idx
         )
 
-        rgb_embed, text_embed = self.load_rgb_text_feat(index, subgoal_idx)
+        rgb_embed, text_embed = self.load_rgb_text_feat(rgbs[0], index, subgoal_idx)
         start_scene_pcd, start_scene_feat_pcd, augment_tf = self.get_scene_pcd(
             rgb_embed, depths[0], K_, self.num_points, self.max_depth
         )

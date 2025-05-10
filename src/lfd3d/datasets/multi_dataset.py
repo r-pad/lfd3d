@@ -3,43 +3,71 @@ import random
 from pathlib import Path
 
 import torch
+import torch.distributed as dist
 import torchdatasets as td
 from torch.utils import data
 from torch.utils.data.distributed import DistributedSampler
 
 from lfd3d.datasets.base_data import BaseDataModule
+from lfd3d.datasets.droid.droid_dataset import DroidDataset
 from lfd3d.datasets.hoi4d.hoi4d_dataset import HOI4DDataset
+from lfd3d.datasets.rpad_foxglove.rpad_foxglove_dataset import RpadFoxgloveDataset
 from lfd3d.datasets.rt1.rt1_dataset import RT1Dataset
+from lfd3d.utils.data_utils import collate_pcd_fn
 
 
 class MultiDatasetDataModule(BaseDataModule):
     def __init__(self, batch_size, val_batch_size, num_workers, dataset_cfg, seed):
         super().__init__(batch_size, val_batch_size, num_workers, dataset_cfg, seed)
-        self.val_tags = ["all"]
 
     def setup(self, stage: str = "fit"):
         self.stage = stage
         self.val_datasets = {}
-        self.test_datasets = {}
+        self.val_tags = []
 
-        name_to_dataset_mapping = {"rt1": RT1Dataset, "hoi4d": HOI4DDataset}
-        self.train_datasets_, self.val_datasets_, self.test_datasets_ = [], [], []
+        name_to_dataset_mapping = {
+            "rt1": RT1Dataset,
+            "hoi4d": HOI4DDataset,
+            "droid": DroidDataset,
+            "rpadFoxglove": RpadFoxgloveDataset,
+        }
+        name_to_tag_mapping = {
+            "rt1": ["robot"],
+            "hoi4d": ["human"],
+            "droid": ["robot"],
+            "rpadFoxglove": ["human", "aloha"],
+        }
+        self.train_datasets_ = []
+        self.val_datasets = {}
 
         for key, cfg in self.dataset_cfg.datasets.items():
             dataset_class = name_to_dataset_mapping[key]
 
             train_data = dataset_class(cfg.data_dir, cfg, "train")
-            val_data = dataset_class(cfg.data_dir, cfg, "val")
+            for tag in name_to_tag_mapping[key]:
+                if key == "rpadFoxglove":  # HACK: Find a better way to do this.
+                    cfg = cfg.copy()
+                    cfg.data_sources = [tag]
+                self.val_datasets[f"{key}_{tag}"] = dataset_class(
+                    cfg.data_dir, cfg, "val"
+                )
+                self.val_tags.append(f"{key}_{tag}")
+
             if train_data.cache_dir:
-                train_data.cache(td.cachers.HDF5(Path(train_data.cache_dir)))
-                val_data.cache(td.cachers.HDF5(Path(train_data.cache_dir) / "val"))
+                invalidating_cacher = td.cachers.ProbabilisticCacherWrapper(
+                    td.cachers.HDF5(Path(train_data.cache_dir)),
+                    invalidation_rate=cfg.cache_invalidation_rate,
+                    seed=self.seed,
+                )
+                train_data.cache(invalidating_cacher)
+                for tag in name_to_tag_mapping[key]:
+                    self.val_datasets[f"{key}_{tag}"].cache(
+                        td.cachers.HDF5(Path(train_data.cache_dir) / f"val_{tag}")
+                    )
+
             self.train_datasets_.append(train_data)
-            self.val_datasets_.append(val_data)
-            self.test_datasets_.append(dataset_class(cfg.data_dir, cfg, "test"))
 
         self.train_dataset = data.ConcatDataset(self.train_datasets_)
-        self.val_datasets[self.val_tags[0]] = data.ConcatDataset(self.val_datasets_)
-        self.test_datasets[self.val_tags[0]] = data.ConcatDataset(self.test_datasets_)
 
         # For training with multiple datasets, we need a custom DistibutedSampler
         # and a custom BatchSampler. This is because the datasets items may have different
@@ -55,37 +83,35 @@ class MultiDatasetDataModule(BaseDataModule):
 
         # get the indices of elements in each dataset
         train_dataset_lengths = [0] + [len(i) for i in self.train_datasets_]
-        val_dataset_lengths = [0] + [len(i) for i in self.val_datasets_]
-        test_dataset_lengths = [0] + [len(i) for i in self.test_datasets_]
-        train_dataset_indices, val_dataset_indices, test_dataset_indices = [], [], []
+        train_dataset_indices = []
 
         for i in range(len(train_dataset_lengths) - 1):
             a_len, b_len = train_dataset_lengths[i], train_dataset_lengths[i + 1]
             train_dataset_indices.append(list(range(a_len, a_len + b_len)))
 
-            a_len, b_len = val_dataset_lengths[i], val_dataset_lengths[i + 1]
-            val_dataset_indices.append(list(range(a_len, a_len + b_len)))
-
-            a_len, b_len = test_dataset_lengths[i], test_dataset_lengths[i + 1]
-            test_dataset_indices.append(list(range(a_len, a_len + b_len)))
-
         # If distributed training, setup the distributed samplers
         # If not distributed training (or even with distributed training but
-        # before the world has ben created), this will throw a RuntimeError.
+        # before the world has been created), this will throw a ValueError.
         try:
             train_dist_sampler = DistributedChunkSampler(
                 train_dataset_indices,
             )
-            val_dist_sampler = DistributedChunkSampler(
-                val_dataset_indices,
-            )
-            test_dist_sampler = DistributedChunkSampler(
-                test_dataset_indices,
-            )
-        except RuntimeError:
+            # Use default batch sampler for val
+            # Lightning automatically injects the sampler but we disable that
+            # for multi dataset training in train.py since we want custom
+            # behaviour for train.
+            self.val_samplers = {
+                tag: DistributedSampler(
+                    dataset,
+                    num_replicas=dist.get_world_size(),
+                    rank=dist.get_rank(),
+                    shuffle=False,
+                )
+                for tag, dataset in self.val_datasets.items()
+            }
+        except ValueError:
             train_dist_sampler = train_dataset_indices
-            val_dist_sampler = val_dataset_indices
-            test_dist_sampler = test_dataset_indices
+            self.val_samplers = {tag: None for tag in self.val_datasets}  # No samplers
 
         # Use custom batch sampler to prevent batches mixing items from datasets
         self.train_batch_sampler = ChunkDatasetBatchSampler(
@@ -93,20 +119,45 @@ class MultiDatasetDataModule(BaseDataModule):
             self.batch_size,
             shuffle=True if self.stage == "fit" else False,
         )
-        self.val_batch_sampler = ChunkDatasetBatchSampler(
-            val_dist_sampler,
-            self.batch_size,
-            shuffle=False,
-        )
-        self.test_batch_sampler = ChunkDatasetBatchSampler(
-            test_dist_sampler,
-            self.batch_size,
-            shuffle=False,
-        )
 
     def train_subset_dataloader(self):
         """A subset of train used for eval."""
         raise NotImplementedError("Eval on each dataset separately for now.")
+
+    def test_dataloader(self):
+        raise NotImplementedError("Eval on each dataset separately for now.")
+
+    def train_dataloader(self):
+        """Overrride to use custom batch sampler."""
+        if not hasattr(self, "train_dataset"):
+            raise AttributeError(
+                "train_dataset has not been set. Make sure to call setup() first."
+            )
+        return data.DataLoader(
+            self.train_dataset,
+            num_workers=self.num_workers,
+            collate_fn=collate_pcd_fn,
+            batch_sampler=self.train_batch_sampler,
+        )
+
+    def val_dataloader(self):
+        """Overrride to use default batch sampler since its disabled for
+        multi-dataset training."""
+        if not hasattr(self, "val_datasets"):
+            raise AttributeError(
+                "val_datasets has not been set. Make sure to call setup() first."
+            )
+        return {
+            tag: data.DataLoader(
+                dataset,
+                batch_size=self.val_batch_size,
+                shuffle=False,
+                num_workers=self.num_workers,
+                collate_fn=collate_pcd_fn,
+                sampler=self.val_samplers[tag],
+            )
+            for tag, dataset in self.val_datasets.items()
+        }
 
 
 class ChunkDatasetBatchSampler(torch.utils.data.BatchSampler):
@@ -115,7 +166,7 @@ class ChunkDatasetBatchSampler(torch.utils.data.BatchSampler):
     from each as the smallest dataset.
     """
 
-    def __init__(self, dataset_indices, batch_size, shuffle=True, drop_last=False):
+    def __init__(self, dataset_indices, batch_size, shuffle=True, drop_last=True):
         """
         Args:
             dataset_indices (List[List[int]]): List of index lists, one per dataset.
@@ -171,15 +222,15 @@ class DistributedChunkSampler(DistributedSampler):
 
     def __init__(
         self,
-        dataset_indices,
+        all_dataset_indices,
         num_replicas=None,
         rank=None,
-        drop_last=False,
+        drop_last=True,
         shuffle=True,
         seed=0,
     ):
-        self.dataset_indices = dataset_indices
-        total_size = sum(len(indices) for indices in dataset_indices)
+        self.all_dataset_indices = all_dataset_indices
+        total_size = sum(len(indices) for indices in all_dataset_indices)
         # Initialize with total length (the params are not actually used though.)
         super().__init__(
             range(total_size), num_replicas, rank, shuffle, seed, drop_last
@@ -188,7 +239,7 @@ class DistributedChunkSampler(DistributedSampler):
     def __iter__(self):
         # split using rank / num replicas
         indices = [
-            dataset_idx[self.rank : self.total_size : self.num_replicas]
-            for dataset_idx in self.dataset_indices
+            dataset_idxs[self.rank : self.total_size : self.num_replicas]
+            for dataset_idxs in self.all_dataset_indices
         ]
         return iter(indices)

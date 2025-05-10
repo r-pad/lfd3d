@@ -242,8 +242,12 @@ class BaseDataModule(pl.LightningDataModule):
         self.seed = seed
 
         # setting root directory based on dataset type
-        data_dir = os.path.expanduser(dataset_cfg.data_dir)
-        self.root = data_dir
+        try:
+            data_dir = os.path.expanduser(dataset_cfg.data_dir)
+            self.root = data_dir
+        except:
+            print("data_dir not set.")
+            self.root = None
 
         # Subset of train to use for eval
         self.TRAIN_SUBSET_SIZE = 500
