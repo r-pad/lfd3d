@@ -5,6 +5,7 @@ import omegaconf
 import pytorch_lightning as pl
 import torch
 import wandb
+from lfd3d.utils.lora_utils import apply_lora
 from lfd3d.utils.script_utils import (
     PROJECT_ROOT,
     ModelCheckpointExplicit,
@@ -177,11 +178,20 @@ def main(cfg):
         artifact_dir = cfg.wandb.artifact_dir
         artifact = api.artifact(cfg.checkpoint.reference, type="model")
         ckpt_file = artifact.get_path("model.ckpt").download(root=artifact_dir)
+
+        ckpt = torch.load(ckpt_file)
+        model.load_state_dict(ckpt["state_dict"])
     else:
         print("Starting training from scratch.")
         ckpt_file = None
 
-    trainer.fit(model, datamodule=datamodule, ckpt_path=ckpt_file)
+    if cfg.lora.enable:
+        assert (
+            cfg.checkpoint.run_id is not None
+        ), "Doesn't make sense to enable LoRA without initializing from a pretrained model"
+        model = apply_lora(model, cfg.lora)
+
+    trainer.fit(model, datamodule=datamodule)
 
 
 if __name__ == "__main__":
