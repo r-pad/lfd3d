@@ -31,6 +31,12 @@ checkpoint:
   type: rmse
   reference: ${wandb.entity}/${wandb.project}/best_${checkpoint.type}_model-${checkpoint.run_id}:best
 
+lora:
+  enable: False
+  rank: 4
+  target_modules: "all"
+  dropout: 0.1
+
 wandb:
   # Assume no group provided, we will create a default one.
   group: Null
