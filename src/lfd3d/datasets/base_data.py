@@ -14,6 +14,11 @@ from lfd3d.utils.data_utils import collate_pcd_fn
 
 
 class BaseDataset(td.Dataset):
+    def add_gaussian_noise(self, points, noise_magnitude=0.03):
+        # points: (N, 3) array
+        noise = np.random.normal(0, noise_magnitude, points.shape)
+        return points + noise
+
     def get_scene_pcd(self, rgb_embed, depth, K, num_points, max_depth):
         """
         Generate a downsampled point cloud (PCD) from RGB embeddings and depth map.
@@ -123,6 +128,9 @@ class BaseDataset(td.Dataset):
             R, translation = np.eye(3), np.zeros(3)
 
         centroid = scene_pcd.mean(0)
+
+        # Add some gaussian noise
+        scene_pcd = self.add_gaussian_noise(scene_pcd)
 
         return scene_pcd, scene_feat_pcd, {"R": R, "t": translation, "C": centroid}
 
