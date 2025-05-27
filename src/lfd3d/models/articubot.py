@@ -985,7 +985,7 @@ class GoalRegressionModule(pl.LightningModule):
 
         init, gt = self.extract_gt_4_points(batch)
         pred_displacement = outputs[:, :, :-1].reshape(batch_size, pcd_size, 4, 3)
-        gt_displacement = scene_pcd[:, :, None, :3] - gt[:, None, :, :]
+        gt_displacement = gt[:, None, :, :] - scene_pcd[:, :, None, :3]
         weights = outputs[:, :, -1]  # B, N
 
         if self.is_gmm:
