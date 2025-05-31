@@ -32,6 +32,7 @@ dependencies = [
     "tensorflow-cpu>=2.19.0,<3",
     "google-genai>=1.11.0,<2",
     "peft>=0.15.2,<0.16",
+    "decord>=0.6.0,<0.7",
 ]
 
 [project.optional-dependencies]

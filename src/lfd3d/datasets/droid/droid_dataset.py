@@ -4,11 +4,11 @@ import random
 from glob import glob
 from pathlib import Path
 
-import imageio.v3 as iio
 import numpy as np
 import torch
 import torch.nn.functional as F
 import torchdatasets as td
+from decord import VideoReader
 from lfd3d.datasets.base_data import BaseDataModule, BaseDataset
 from PIL import Image
 from torchvision import transforms
@@ -143,8 +143,8 @@ class DroidDataset(BaseDataset):
 
     def load_rgbd(self, droid_idx, subgoals, subgoal_idx, K, baseline):
         video_path = f"{self.event_dir}/{droid_idx}/video.mp4"
-        meta = iio.immeta(video_path)
-        fps = meta["fps"]
+        vr = VideoReader(video_path)
+        fps = vr.get_avg_fps()
 
         if subgoal_idx == 0:
             start_time = "00:00"
@@ -162,9 +162,9 @@ class DroidDataset(BaseDataset):
             init_frame_idx = start_frame
 
         # Return rgb/depth at beginning and end of event
-        rgb_init = Image.fromarray(iio.imread(video_path, index=init_frame_idx))
+        rgb_init = Image.fromarray(vr[init_frame_idx].asnumpy())
         rgb_init = np.asarray(self.rgb_preprocess(rgb_init))
-        rgb_end = Image.fromarray(iio.imread(video_path, index=end_frame_idx))
+        rgb_end = Image.fromarray(vr[end_frame_idx].asnumpy())
         rgb_end = np.asarray(self.rgb_preprocess(rgb_end))
         rgbs = np.array([rgb_init, rgb_end])
 
