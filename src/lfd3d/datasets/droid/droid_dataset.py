@@ -1,8 +1,10 @@
 import json
 import os
+import random
 from glob import glob
 from pathlib import Path
 
+import imageio.v3 as iio
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -10,6 +12,12 @@ import torchdatasets as td
 from lfd3d.datasets.base_data import BaseDataModule, BaseDataset
 from PIL import Image
 from torchvision import transforms
+
+
+def parse_timestamp(timestamp):
+    """Convert MM:SS format to seconds"""
+    minutes, seconds = map(int, timestamp.split(":"))
+    return minutes * 60 + seconds
 
 
 class DroidDataset(BaseDataset):
@@ -128,31 +136,35 @@ class DroidDataset(BaseDataset):
                     for item in subgoals
                 ]
 
-            fname = self.idx_to_fname_mapping[idx]
             expanded_event_idx = [(idx, i) for i in range(len(subgoals))]
-            expanded_event_caption = {
-                (idx, i): subgoal for i, subgoal in enumerate(subgoals)
-            }
-
             expanded_droid_index.extend(expanded_event_idx)
-            self.captions.update(expanded_event_caption)
+            self.captions[idx] = subgoals
         return expanded_droid_index
 
-    def load_rgbd(self, droid_idx, subgoal_idx, K, baseline):
-        # Some pattern matching and string manipulation to get the image patch and its frame idx
-        init_image_path = glob(f"{self.event_dir}/{droid_idx}/{subgoal_idx}*png")[0]
-        init_frame_idx = int(
-            os.path.basename(init_image_path).split("_")[1].split(".")[0]
-        )
-        end_image_path = glob(f"{self.event_dir}/{droid_idx}/{subgoal_idx + 1}*png")[0]
-        end_frame_idx = int(
-            os.path.basename(end_image_path).split("_")[1].split(".")[0]
-        )
+    def load_rgbd(self, droid_idx, subgoals, subgoal_idx, K, baseline):
+        video_path = f"{self.event_dir}/{droid_idx}/video.mp4"
+        meta = iio.immeta(video_path)
+        fps = meta["fps"]
+
+        if subgoal_idx == 0:
+            start_time = "00:00"
+        else:
+            start_time = subgoals[subgoal_idx - 1]["timestamp"]
+        end_time = subgoals[subgoal_idx]["timestamp"]
+
+        # Convert timestamps to frame indices
+        start_frame = int(parse_timestamp(start_time) * fps)
+        end_frame_idx = int(parse_timestamp(end_time) * fps)
+
+        if self.split == "train":
+            init_frame_idx = random.randint(start_frame, end_frame_idx)
+        else:
+            init_frame_idx = start_frame
 
         # Return rgb/depth at beginning and end of event
-        rgb_init = Image.open(init_image_path).convert("RGB")
+        rgb_init = Image.fromarray(iio.imread(video_path, index=init_frame_idx))
         rgb_init = np.asarray(self.rgb_preprocess(rgb_init))
-        rgb_end = Image.open(end_image_path).convert("RGB")
+        rgb_end = Image.fromarray(iio.imread(video_path, index=end_frame_idx))
         rgb_end = np.asarray(self.rgb_preprocess(rgb_end))
         rgbs = np.array([rgb_init, rgb_end])
 
@@ -221,14 +233,14 @@ class DroidDataset(BaseDataset):
         K, baseline = self.load_camera_params(index)
         K_ = self.get_scaled_intrinsics(K, self.orig_shape, self.target_shape)
 
-        subgoal = self.captions[(index, subgoal_idx)]
-        caption = subgoal["subgoal"]
+        subgoals = self.captions[index]
+        caption = subgoals[subgoal_idx]["subgoal"]
         start2end = torch.eye(4)  # Static camera in DROID
         fname = self.idx_to_fname_mapping[int(index)]
 
         # Note the use of K, not K_ for disparity -> depth conversion
         rgbs, depths, event_start_idx, event_end_idx = self.load_rgbd(
-            index, subgoal_idx, K, baseline
+            index, subgoals, subgoal_idx, K, baseline
         )
 
         start_tracks, end_tracks = self.load_gripper_pcd(
