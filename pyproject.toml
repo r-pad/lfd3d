@@ -31,7 +31,7 @@ dependencies = [
     "tensorflow-datasets>=4.9.8,<5",
     "tensorflow-cpu>=2.19.0,<3",
     "google-genai>=1.11.0,<2",
-    "peft>=0.15.2,<0.16",
+    "peft>=0.15.2,<0.16", "zmq", "pyzmq>=26.4.0,<27",
 ]
 
 [project.optional-dependencies]

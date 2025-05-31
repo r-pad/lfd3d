@@ -15,6 +15,9 @@ from lfd3d.utils.script_utils import (
 )
 from pytorch_lightning.loggers import WandbLogger
 
+import threading
+from lfd3d.datasets.feat_server import FeatureServer
+
 
 @hydra.main(config_path="../configs", config_name="train", version_base="1.3")
 def main(cfg):
@@ -31,6 +34,13 @@ def main(cfg):
 
     # Global seed for reproducibility.
     pl.seed_everything(cfg.seed)
+
+    num_gpus = torch.cuda.device_count()
+    for gpu_id in range(num_gpus):
+        server = FeatureServer(gpu_id)
+        server_thread = threading.Thread(target=server.run, daemon=True)
+        server_thread.start()
+    print(f"Started feature servers on {num_gpus} GPUs, ports {5555}-{5555+num_gpus-1}")
 
     ######################################################################
     # Create the datamodule.

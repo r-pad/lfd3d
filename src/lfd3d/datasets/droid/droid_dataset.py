@@ -10,6 +10,7 @@ import torchdatasets as td
 from lfd3d.datasets.base_data import BaseDataModule, BaseDataset
 from PIL import Image
 from torchvision import transforms
+from lfd3d.datasets.feat_server import FeatureClient
 
 
 class DroidDataset(BaseDataset):
@@ -60,6 +61,10 @@ class DroidDataset(BaseDataset):
                 transforms.CenterCrop(self.target_shape),
             ]
         )
+        self.num_feature_servers = 2
+        self.feature_clients = []
+        for i in range(self.num_feature_servers):
+            self.feature_clients.append(FeatureClient(i))
 
         with open(f"{self.current_dir}/zed_intrinsics.json") as f:
             self.camera_intrinsics = json.load(f)
@@ -190,6 +195,13 @@ class DroidDataset(BaseDataset):
         """
         Load RGB/text features generated with DINOv2 and SIGLIP
         """
+
+        breakpoint()
+        server_idx = droid_idx % self.num_feature_servers
+        client = self.feature_clients[server_idx]
+        client.extract_text_features("grasp the mug")
+        client.extract_text_features(rgb)
+
         features = np.load(f"{self.feat_dir}/{droid_idx}/{event_idx}_compressed.npz")
         rgb_embed, text_embed = (
             features["rgb_embed"],
