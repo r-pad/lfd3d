@@ -14,7 +14,7 @@ from lfd3d.utils.data_utils import collate_pcd_fn
 
 
 class BaseDataset(td.Dataset):
-    def add_gaussian_noise(self, points, noise_magnitude=0.03):
+    def add_gaussian_noise(self, points, noise_magnitude=0.01):
         # points: (N, 3) array
         noise = np.random.normal(0, noise_magnitude, points.shape)
         return points + noise
