@@ -909,9 +909,16 @@ class GoalRegressionModule(pl.LightningModule):
         scene_padding_mask,
         add_action_pcd_masked,
         use_rgb,
+        gripper_idx,
     ):
         batch_size, pcd_size, feat_dim = scene_feat_pcd.shape
         if add_action_pcd_masked:
+            batch_indices = torch.arange(
+                gripper_pcd.shape[0], device=gripper_pcd.device
+            ).unsqueeze(1)
+            gripper_pcd = gripper_pcd[batch_indices, gripper_idx, :]
+            extra_point = (gripper_pcd[:, 0, :] + gripper_pcd[:, 1, :]) / 2
+            gripper_pcd = torch.cat([gripper_pcd, extra_point[:, None, :]], dim=1)
             # Concat action pcd and scene pcd and add a mask for the same
             gripper_pcd = torch.cat(
                 [
@@ -1024,6 +1031,7 @@ class GoalRegressionModule(pl.LightningModule):
             scene_padding_mask,
             self.model_cfg.add_action_pcd_masked,
             self.model_cfg.use_rgb,
+            batch["gripper_idx"],
         )
 
         # Network currently doesn't see action pcd
@@ -1104,6 +1112,7 @@ class GoalRegressionModule(pl.LightningModule):
             scene_padding_mask,
             self.model_cfg.add_action_pcd_masked,
             self.model_cfg.use_rgb,
+            batch["gripper_idx"],
         )
 
         outputs = self.network(
