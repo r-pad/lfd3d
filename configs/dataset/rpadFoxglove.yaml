@@ -12,3 +12,4 @@ use_intermediate_frames: True # Use all intermediate frames in [start, end] as i
 
 # Only meaningful to set to True if use_full_text=False
 use_gemini_subgoals: False
+with_mask: False # If enabled, mask out the human/robot arm from the point cloud. Masks were generated with SAM2
