@@ -1141,7 +1141,23 @@ class GoalRegressionModule(pl.LightningModule):
         init, gt = self.extract_gt_4_points(batch)
 
         if self.is_gmm:
-            pred = self.sample_from_gmm(scene_pcd, outputs, scene_padding_mask)
+            outputs = outputs.reshape(batch_size, pcd_size, self.gmm_components, -1)
+            mixing_weights = outputs[:, :, :, -1].mean(1)  # BxNxK -> BxK
+            outputs = outputs[:, :, :, :-1]  # remove mixing weights
+            pred_displacement = outputs[:, :, :, :-1].reshape(
+                batch_size, pcd_size, self.gmm_components, 4, 3
+            )
+            weights = outputs[:, :, :, -1]  # B, N, K
+            scene_padding_mask = scene_padding_mask[:, :, None].repeat(
+                1, 1, self.gmm_components
+            )
+            pred = self.sample_from_gmm(
+                pred_displacement,
+                weights,
+                scene_pcd,
+                mixing_weights,
+                scene_padding_mask,
+            )
         else:
             pred = self.get_weighted_displacement(
                 scene_pcd, outputs, scene_padding_mask
@@ -1149,41 +1165,29 @@ class GoalRegressionModule(pl.LightningModule):
         pred_displacement = pred - init
         return {self.prediction_type: {"pred": pred_displacement}}, outputs
 
-    def sample_from_gmm(self, scene_pcd, outputs, padding_mask):
+    def sample_from_gmm(
+        self, pred_displacement, weights, scene_pcd, mixing_weights, scene_padding_mask
+    ):
         batch_size, num_points, _ = scene_pcd.shape
-        weights = outputs[:, :, -1]  # B, N
         weights = weights.masked_fill(
-            ~padding_mask, float("-inf")
+            ~scene_padding_mask, float("-inf")
         )  # Set invalid to -inf
         weights = torch.nn.functional.softmax(weights, dim=1)
+        mixing_weights = torch.nn.functional.softmax(mixing_weights, dim=1)
+        scene_pcd = scene_pcd[:, :, None, None, :3]
+
+        # sum the displacement of the predicted gripper point cloud according to the weights
+        pred_points = weights[:, :, :, None, None] * (scene_pcd + pred_displacement)
+        pred_points = pred_points.sum(dim=1)
 
         # Sample point indices based on weights for each batch element
-        sampled_indices = torch.multinomial(weights, num_samples=1)  # B, 1
-        batch_indices = torch.arange(batch_size, device=outputs.device).unsqueeze(
+        sampled_indices = torch.multinomial(mixing_weights, num_samples=1)  # B, 1
+        batch_indices = torch.arange(batch_size, device=scene_pcd.device).unsqueeze(
             1
         )  # B, 1
 
-        # Extract displacement predictions
-        displacements = outputs[:, :, :-1].reshape(
-            batch_size, num_points, 4, 3
-        )  # B, N, 4, 3
-
-        # Prepare scene points
-        scene_points = scene_pcd[:, :, None, :3]  # B, N, 1, 3
-
-        # Get the Gaussian means: scene_point + displacement
-        # Broadcasting will expand scene_points from [B, N, 1, 3] to [B, N, 4, 3]
-        means = scene_points + displacements  # B, N, 4, 3
-
         # Get sampled means
-        sampled_means = means[batch_indices, sampled_indices].squeeze(1)  # B, 4, 3
-
-        # NOTE: We can sample from these gaussians as well, but just using the mean for now.
-        # noise = torch.randn_like(sampled_means) * (self.fixed_variance**0.5)
-        # pred_points = sampled_means + noise
-
-        pred_points = sampled_means
-
+        pred_points = pred_points[batch_indices, sampled_indices].squeeze(1)  # B, 4, 3
         return pred_points
 
     def log_viz_to_wandb(self, batch, pred_dict, weighted_displacement, tag):
@@ -1220,6 +1224,8 @@ class GoalRegressionModule(pl.LightningModule):
         rmse = pred_dict["rmse"][viz_idx]
         anchor_pcd = batch["anchor_pcd"].points_padded()[viz_idx].cpu().numpy()
         weighted_displacement = weighted_displacement[viz_idx].cpu().numpy()
+        # HACK: Only visualize from one component of the GMM
+        weighted_displacement = weighted_displacement[:, 0, :]
 
         pcd, gt = self.extract_gt_4_points(batch)
         pcd, gt = pcd.cpu().numpy()[viz_idx], gt.cpu().numpy()[viz_idx]
