@@ -238,6 +238,8 @@ class RpadFoxgloveDataset(BaseDataset):
         """An alternate function for loading the RGBD data for the additional images.
         Kind of ugly tbh, alternate way is to record the image data in zarr as well instead of
         this bespoke format."""
+        if self.dataset_cfg.with_mask:
+            raise NotImplementedError
         start_idx = subgoal_idx  # Generalize start index
         end_idx = start_idx + 1
 
@@ -286,6 +288,10 @@ class RpadFoxgloveDataset(BaseDataset):
         rgb_end = np.asarray(self.rgb_preprocess(rgb_end))
         rgbs = np.array([rgb_init, rgb_end])
 
+        if self.dataset_cfg.with_mask:
+            mask_init = np.asarray(demo["masks"][event_indexes["depth_start"]])
+            mask_end = np.asarray(demo["masks"][event_indexes["depth_end"]])
+
         depth_init = (
             (
                 demo["raw"]["depth_registered"]["image_rect"]["img"][
@@ -296,6 +302,8 @@ class RpadFoxgloveDataset(BaseDataset):
             .squeeze()
             .astype(np.float32)
         )
+        if self.dataset_cfg.with_mask:
+            depth_init[mask_init] = 0
         depth_init = Image.fromarray(depth_init)
         depth_init = np.asarray(self.depth_preprocess(depth_init))
         depth_end = (
@@ -308,6 +316,8 @@ class RpadFoxgloveDataset(BaseDataset):
             .squeeze()
             .astype(np.float32)
         )
+        if self.dataset_cfg.with_mask:
+            depth_end[mask_end] = 0
         depth_end = Image.fromarray(depth_end)
         depth_end = np.asarray(self.depth_preprocess(depth_end))
         depths = np.array([depth_init, depth_end])
