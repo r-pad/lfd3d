@@ -516,9 +516,10 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
 
     def on_validation_epoch_start(self):
         # Choose a random batch index for each validation epoch
-        self.random_val_viz_idx = random.randint(
-            0, len(self.trainer.val_dataloaders) - 1
-        )
+        self.random_val_viz_idx = {
+            k: random.randint(0, len(v) - 1)
+            for k, v in self.trainer.val_dataloaders.items()
+        }
 
     def validation_step(self, batch, batch_idx, dataloader_idx=0):
         """
@@ -558,7 +559,10 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
         ####################################################
         # logging visualizations
         ####################################################
-        if batch_idx == self.random_val_viz_idx and self.trainer.is_global_zero:
+        if (
+            batch_idx == self.random_val_viz_idx[val_tag]
+            and self.trainer.is_global_zero
+        ):
             self.log_viz_to_wandb(batch, pred_dict, f"val_{val_tag}")
         return pred_dict
 
@@ -609,9 +613,6 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
     def predict_step(self, batch, batch_idx, dataloader_idx=0):
         """
         Prediction step for model evaluation.
-
-        The test dataset is expected to be first dataloader_idx.
-        Visualizations are logged with dataloader_idx=0
         """
         eval_tag = self.trainer.datamodule.eval_tags[dataloader_idx]
         n_samples_wta = self.trainer.datamodule.n_samples_wta
@@ -655,7 +656,7 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
 
     def on_predict_epoch_end(self):
         """
-        Visualize first 5 batches in the test sets.
+        Visualize random 5 batches in the test sets.
         """
         save_wta_to_disk = self.trainer.datamodule.save_wta_to_disk
         for dataloader_idx, eval_tag in enumerate(self.trainer.datamodule.eval_tags):
@@ -670,7 +671,14 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
                 cross_displacement.extend(i["cross_displacement"]["pred"])
                 all_cross_displacement.extend(i["cross_displacement"]["all_pred"])
 
-            for i, batch in enumerate(self.trainer.predict_dataloaders[dataloader_idx]):
+            dataloader = self.trainer.predict_dataloaders[dataloader_idx]
+            total_batches = len(dataloader)
+            random_indices = random.sample(range(total_batches), min(5, total_batches))
+
+            for i, batch in enumerate(dataloader):
+                if i not in random_indices:
+                    continue
+
                 batch_len = len(batch["caption"])
                 for idx in range(batch_len):
                     pred_dict = self.compose_pred_dict_for_viz(
@@ -682,8 +690,6 @@ class DenseDisplacementDiffusionModule(pl.LightningModule):
                     )
                     viz_batch = self.compose_batch_for_viz(batch, idx)
                     self.log_viz_to_wandb(viz_batch, pred_dict, eval_tag)
-                if i == 5:
-                    break
         self.predict_outputs.clear()
 
     def compose_pred_dict_for_viz(
