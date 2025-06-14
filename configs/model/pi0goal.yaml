@@ -1,0 +1,4 @@
+name: pi0goal
+
+# Model settings
+type: cross_displacement # (flow, point) Type of model

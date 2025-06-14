@@ -18,6 +18,7 @@ from lfd3d.datasets import (
 )
 from lfd3d.models.articubot import ArticubotNetwork, GoalRegressionModule
 from lfd3d.models.diptv3 import DiPTv3, DiPTv3Adapter
+from lfd3d.models.pi0.pi0_goal import Pi0GoalModule, Pi0GoalNetwork
 from lfd3d.models.tax3d import (
     CrossDisplacementModule,
     DiffusionTransformerNetwork,
@@ -63,6 +64,9 @@ def create_model(cfg):
     elif cfg.model.name == "articubot":
         network_fn = ArticubotNetwork
         module_fn = GoalRegressionModule
+    elif cfg.model.name == "pi0goal":
+        network_fn = Pi0GoalNetwork
+        module_fn = Pi0GoalModule
     else:
         raise NotImplementedError(cfg.model.name)
 

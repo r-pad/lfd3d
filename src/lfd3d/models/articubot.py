@@ -869,7 +869,6 @@ class GoalRegressionModule(pl.LightningModule):
         ).unsqueeze(1)
 
         # Select specific idxs to compute the loss over
-        # TODO: Find a cleaner way to pass the idxs
         gt_primary_points = ground_truth_gripper[batch_indices, batch["gripper_idx"], :]
         # Assumes 0/1 are tips to be averaged
         gt_extra_point = (gt_primary_points[:, 0, :] + gt_primary_points[:, 1, :]) / 2
