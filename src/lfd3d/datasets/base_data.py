@@ -9,11 +9,35 @@ from pytorch3d.ops import sample_farthest_points
 from torch.utils import data
 from torch_cluster import grid_cluster
 from torch_scatter import scatter_mean
+from torchvision import transforms
 
 from lfd3d.utils.data_utils import collate_pcd_fn
 
 
 class BaseDataset(td.Dataset):
+    def __init__(self):
+        super().__init__()
+        # Target shape of images (same as DINOv2)
+        self.target_shape = 224
+        self.rgb_preprocess = transforms.Compose(
+            [
+                transforms.Resize(
+                    self.target_shape,
+                    interpolation=transforms.InterpolationMode.BICUBIC,
+                ),
+                transforms.CenterCrop(self.target_shape),
+            ]
+        )
+        self.depth_preprocess = transforms.Compose(
+            [
+                transforms.Resize(
+                    self.target_shape,
+                    interpolation=transforms.InterpolationMode.NEAREST,
+                ),
+                transforms.CenterCrop(self.target_shape),
+            ]
+        )
+
     def add_gaussian_noise(self, points, noise_magnitude=0.01):
         # points: (N, 3) array
         noise = np.random.normal(0, noise_magnitude, points.shape)
