@@ -422,7 +422,10 @@ class HOI4DDataset(BaseDataset):
         Load RGB/text features generated with DINOv2 and SIGLIP
         """
         features = np.load(f"{dir_name}/rgb_text_features/{event_idx}_compressed.npz")
-        rgb_embed, text_embed = features["rgb_embed"], features["text_embed"].astype(np.float32)
+        rgb_embed, text_embed = (
+            features["rgb_embed"],
+            features["text_embed"].astype(np.float32),
+        )
 
         if self.dataset_cfg.rgb_feat:
             upscale_by = 4
@@ -462,6 +465,12 @@ class HOI4DDataset(BaseDataset):
         start_scene_pcd, start_scene_feat_pcd, augment_tf = self.get_scene_pcd(
             rgb_embed, depths[0], K_, self.num_points, self.max_depth
         )
+        if self.dataset_cfg.render_multiview:
+            multiview_image_dict = self.render_multiview(
+                rgbs[0], depths[0], K_, self.max_depth
+            )
+        else:
+            multiview_image_dict = {}
 
         action_pcd_mean, scene_pcd_std = self.get_normalize_mean_std(
             start_tracks, start_scene_pcd, self.dataset_cfg
@@ -494,6 +503,7 @@ class HOI4DDataset(BaseDataset):
             "augment_R": augment_tf["R"],
             "augment_t": augment_tf["t"],
             "augment_C": augment_tf["C"],
+            **{name: cam for name, cam in multiview_image_dict.items()},
         }
         return item
 
