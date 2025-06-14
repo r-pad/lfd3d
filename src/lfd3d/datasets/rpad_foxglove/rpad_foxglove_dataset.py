@@ -373,6 +373,13 @@ class RpadFoxgloveDataset(BaseDataset):
             rgb_embed, depths[0], K_, self.num_points, self.max_depth
         )
 
+        if self.dataset_cfg.render_multiview:
+            multiview_image_dict = self.render_multiview(
+                rgbs[0], depths[0], K_, self.max_depth
+            )
+        else:
+            multiview_image_dict = {}
+
         gripper_idx = self.GRIPPER_IDX[self.source_of_data(demo_name)]
 
         action_pcd_mean, scene_pcd_std = self.get_normalize_mean_std(
@@ -406,6 +413,7 @@ class RpadFoxgloveDataset(BaseDataset):
             "augment_R": augment_tf["R"],
             "augment_t": augment_tf["t"],
             "augment_C": augment_tf["C"],
+            **{f"camera_{name}": cam for name, cam in multiview_image_dict.items()},
         }
         return item
 

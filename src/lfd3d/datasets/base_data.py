@@ -43,6 +43,28 @@ class BaseDataset(td.Dataset):
         noise = np.random.normal(0, noise_magnitude, points.shape)
         return points + noise
 
+    def unproject_to_pcd(self, rgb, depth, K, max_depth):
+        height, width = depth.shape
+        # Create pixel coordinate grid
+        x_grid, y_grid = np.meshgrid(np.arange(width), np.arange(height))
+        x_flat, y_flat, z_flat = x_grid.flatten(), y_grid.flatten(), depth.flatten()
+        rgb_flat = rgb.reshape(-1, rgb.shape[-1])
+
+        # Remove points with invalid depth
+        valid_depth = np.logical_and(z_flat > 0, z_flat < max_depth)
+        x_flat, y_flat, z_flat, rgb_flat = (
+            arr[valid_depth] for arr in (x_flat, y_flat, z_flat, rgb_flat)
+        )
+
+        # Unproject points using K inverse
+        pixels = np.stack([x_flat, y_flat, np.ones_like(x_flat)], axis=0)
+        K_inv = np.linalg.inv(K)
+        points = (K_inv @ pixels) * z_flat  # Shape: (3, N)
+        points = points.T  # Shape: (N, 3)
+
+        scene_pcd = torch.from_numpy(points[None])  # (1, N, 3)
+        return scene_pcd, rgb_flat
+
     def get_scene_pcd(self, rgb_embed, depth, K, num_points, max_depth):
         """
         Generate a downsampled point cloud (PCD) from RGB embeddings and depth map.
@@ -59,50 +81,37 @@ class BaseDataset(td.Dataset):
                 - scene_pcd (np.ndarray): Downsampled 3D points of shape (num_points, 3).
                 - scene_feat_pcd (np.ndarray): Features for downsampled points of shape (num_points, feat_dim).
         """
-        height, width = depth.shape
-        # Create pixel coordinate grid
-        x_grid, y_grid = np.meshgrid(np.arange(width), np.arange(height))
-        x_flat, y_flat, z_flat = x_grid.flatten(), y_grid.flatten(), depth.flatten()
-        feat_flat = rgb_embed.reshape(-1, rgb_embed.shape[-1])
-
-        # Remove points with invalid depth
-        valid_depth = np.logical_and(z_flat > 0, z_flat < max_depth)
-        x_flat, y_flat, z_flat, feat_flat = (
-            arr[valid_depth] for arr in (x_flat, y_flat, z_flat, feat_flat)
-        )
-
-        # Unproject points using K inverse
-        pixels = np.stack([x_flat, y_flat, np.ones_like(x_flat)], axis=0)
-        K_inv = np.linalg.inv(K)
-        points = (K_inv @ pixels) * z_flat  # Shape: (3, N)
-        points = points.T  # Shape: (N, 3)
-
-        scene_pcd = torch.from_numpy(points[None])  # (1, N, 3)
-
+        scene_pcd, rgb_flat = self.unproject_to_pcd(rgb_embed, depth, K, max_depth)
         if (
             self.split == "train"
             and self.dataset_cfg.augment_train
             and random.random() < self.dataset_cfg.augment_cfg.augment_prob
         ):
             scene_pcd, scene_feat_pcd, augment_tf = self.augment_scene_pcd(
-                scene_pcd, feat_flat, self.dataset_cfg.augment_cfg
+                scene_pcd, rgb_flat, self.dataset_cfg.augment_cfg
             )
         else:  # Just FPS
             scene_pcd, scene_feat_pcd = self.get_fps_pcd(
-                scene_pcd, feat_flat, num_points
+                scene_pcd, rgb_flat, num_points
             )
             augment_tf = {"R": np.eye(3), "t": np.zeros(3), "C": scene_pcd.mean(0)}
 
         return scene_pcd, scene_feat_pcd, augment_tf
 
-    def augment_scene_pcd(self, scene_pcd, feat_flat, augment_cfg):
+    def render_multiview(self, rgb, depth, K, max_depth):
+        scene_pcd, rgb_pcd = self.unproject_to_pcd(rgb, depth, K, max_depth)
+        # Normalize before rendering
+        scene_pcd = (scene_pcd - scene_pcd.mean(axis=0)) / scene_pcd.std()
+        return {}
+
+    def augment_scene_pcd(self, scene_pcd, rgb_flat, augment_cfg):
         """
         Augment the scene point cloud by applying a random sampling method (e.g., FPS or voxel)
         Also return a random SO(2) rotation around Y-axis and translation for downstream transform
 
         Args:
             scene_pcd (torch.Tensor): Input point cloud of shape (1, N, 3).
-            feat_flat (np.ndarray): Flattened features of shape (M, feat_dim).
+            rgb_flat (np.ndarray): Flattened features of shape (M, feat_dim).
             augment_cfg (dict): Configuration for augmentation, including 'pcd_sample', 'fps_num_points', and 'voxel_size'.
 
         Returns:
@@ -119,7 +128,7 @@ class BaseDataset(td.Dataset):
                 fps_num_points_options[0], fps_num_points_options[1]
             )
             scene_pcd, scene_feat_pcd = self.get_fps_pcd(
-                scene_pcd, feat_flat, num_points
+                scene_pcd, rgb_flat, num_points
             )
         elif selected_method == "voxel":
             voxel_sizes = augment_cfg["voxel_size"]
@@ -130,7 +139,7 @@ class BaseDataset(td.Dataset):
             _, cluster_ids = torch.unique(indices, return_inverse=True)
             scene_pcd = scatter_mean(pos, cluster_ids, dim=0).numpy()
             scene_feat_pcd = scatter_mean(
-                torch.from_numpy(feat_flat), cluster_ids, dim=0
+                torch.from_numpy(rgb_flat), cluster_ids, dim=0
             ).numpy()
         else:
             raise NotImplementedError
@@ -158,12 +167,12 @@ class BaseDataset(td.Dataset):
 
         return scene_pcd, scene_feat_pcd, {"R": R, "t": translation, "C": centroid}
 
-    def get_fps_pcd(self, scene_pcd, feat_flat, num_points):
+    def get_fps_pcd(self, scene_pcd, rgb_flat, num_points):
         scene_pcd_downsample, scene_points_idx = sample_farthest_points(
             scene_pcd, K=num_points, random_start_point=False
         )
         scene_pcd = scene_pcd_downsample.squeeze().numpy()  # (num_points, 3)
-        scene_feat_pcd = feat_flat[
+        scene_feat_pcd = rgb_flat[
             scene_points_idx.squeeze().numpy()
         ]  # (num_points, feat_dim)
         return scene_pcd, scene_feat_pcd
@@ -184,7 +193,7 @@ class BaseDataset(td.Dataset):
         """
         if not dataset_cfg.get("normalize", True):
             return np.zeros(3), np.ones(3)
-        return action_pcd.mean(axis=0), scene_pcd.std(axis=0)
+        return action_pcd.mean(axis=0), scene_pcd.std().repeat(3)
 
     def transform_pcds(
         self,
