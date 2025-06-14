@@ -413,7 +413,7 @@ class RpadFoxgloveDataset(BaseDataset):
             "augment_R": augment_tf["R"],
             "augment_t": augment_tf["t"],
             "augment_C": augment_tf["C"],
-            **{f"camera_{name}": cam for name, cam in multiview_image_dict.items()},
+            **{name: cam for name, cam in multiview_image_dict.items()},
         }
         return item
 
