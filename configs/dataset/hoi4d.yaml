@@ -5,3 +5,4 @@ name: hoi4d
 # Source of GT tracks - ["spatrack_tracks", "gflow_tracks", "mano_handpose"]
 # `spatrack_tracks` - Generated using SpatialTacker
 gt_source: "mano_handpose"
+rgb_feat: False # If true, return DINOv2 features, else just return RGB, (don't enable, currently broken!)

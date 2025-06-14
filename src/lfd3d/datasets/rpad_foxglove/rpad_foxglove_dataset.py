@@ -14,7 +14,6 @@ from lfd3d.datasets.rgb_text_feature_gen import (
 )
 from PIL import Image
 from sklearn.decomposition import PCA
-from torchvision import transforms
 from transformers import AutoModel, AutoProcessor
 
 
@@ -35,27 +34,6 @@ class RpadFoxgloveDataset(BaseDataset):
 
         self.num_points = dataset_cfg.num_points
         self.max_depth = dataset_cfg.max_depth
-
-        # Target shape of images (same as DINOv2)
-        self.target_shape = 224
-        self.rgb_preprocess = transforms.Compose(
-            [
-                transforms.Resize(
-                    self.target_shape,
-                    interpolation=transforms.InterpolationMode.BICUBIC,
-                ),
-                transforms.CenterCrop(self.target_shape),
-            ]
-        )
-        self.depth_preprocess = transforms.Compose(
-            [
-                transforms.Resize(
-                    self.target_shape,
-                    interpolation=transforms.InterpolationMode.NEAREST,
-                ),
-                transforms.CenterCrop(self.target_shape),
-            ]
-        )
 
         self.captions = {}
         self.text_embeddings = {}

@@ -1,6 +1,7 @@
 import json
 import os
 import pickle
+import random
 from pathlib import Path
 
 import numpy as np
@@ -10,7 +11,6 @@ import torchdatasets as td
 from lfd3d.datasets.base_data import BaseDataModule, BaseDataset
 from lfd3d.utils.data_utils import MANOInterface
 from PIL import Image
-from torchvision import transforms
 from tqdm import tqdm
 
 
@@ -71,27 +71,9 @@ class HOI4DDataset(BaseDataset):
         self.num_points = dataset_cfg.num_points
         self.max_depth = dataset_cfg.max_depth
 
-        # Target shape of images (same as DINOv2)
         self.orig_shape = (1080, 1920)
-        self.target_shape = 224
-        self.rgb_preprocess = transforms.Compose(
-            [
-                transforms.Resize(
-                    self.target_shape,
-                    interpolation=transforms.InterpolationMode.BICUBIC,
-                ),
-                transforms.CenterCrop(self.target_shape),
-            ]
-        )
-        self.depth_preprocess = transforms.Compose(
-            [
-                transforms.Resize(
-                    self.target_shape,
-                    interpolation=transforms.InterpolationMode.NEAREST,
-                ),
-                transforms.CenterCrop(self.target_shape),
-            ]
-        )
+        # indexes of selected gripper points -> handpicked for the MANO mesh
+        self.GRIPPER_IDX = np.array([343, 763, 60])
 
     def __len__(self):
         assert len(self.data_files) == len(self.filtered_tracks)
@@ -209,6 +191,10 @@ class HOI4DDataset(BaseDataset):
         except KeyError:
             event_start_idx = int(event["hdTimeStart"] * fps)
             event_end_idx = int(event["hdTimeEnd"] * fps) - 1
+
+        if self.split == "train":
+            event_start_idx = random.randint(event_start_idx, event_end_idx)
+
         return event, event_start_idx, event_end_idx
 
     def load_rgbd(self, dir_name, event_start_idx, event_end_idx):
@@ -277,6 +263,9 @@ class HOI4DDataset(BaseDataset):
             )
 
             if self.gt_source == "gflow_tracks":
+                raise NotImplementedError(
+                    "Hasn't been tested in a while, needs to be verified."
+                )
                 # Some events are missing because they've been filtered out during General Flow preprocessing.
                 try:
                     idx, data = self.event_metadata_dict[
@@ -292,6 +281,9 @@ class HOI4DDataset(BaseDataset):
                 start_tracks, end_tracks = traj_data[:, 0, :], traj_data[:, -1, :]
                 caption = f"{data['action']} {data['object']}"
             elif self.gt_source == "spatrack_tracks":
+                raise NotImplementedError(
+                    "Hasn't been tested in a while, needs to be verified."
+                )
                 _, depths = self.load_rgbd(dir_name, event_start_idx, event_end_idx)
                 start_tracks, end_tracks = self.process_and_register_tracks(
                     dir_name,
@@ -425,26 +417,30 @@ class HOI4DDataset(BaseDataset):
         caption = f"{event_name} {obj_name}"
         return caption
 
-    def load_rgb_text_feat(self, dir_name, event_idx):
+    def load_rgb_text_feat(self, rgb, dir_name, event_idx):
         """
         Load RGB/text features generated with DINOv2 and SIGLIP
         """
         features = np.load(f"{dir_name}/rgb_text_features/{event_idx}_compressed.npz")
-        rgb_embed, text_embed = features["rgb_embed"], features["text_embed"]
+        rgb_embed, text_embed = features["rgb_embed"], features["text_embed"].astype(np.float32)
 
-        upscale_by = 4
-        rgb_embed = rgb_embed.transpose(2, 0, 1)[None].astype(np.float32)
-        rgb_embed = (
-            F.interpolate(
-                torch.from_numpy(rgb_embed),
-                scale_factor=upscale_by,
-                mode="bilinear",
-                align_corners=False,
+        if self.dataset_cfg.rgb_feat:
+            upscale_by = 4
+            rgb_embed = rgb_embed.transpose(2, 0, 1)[None].astype(np.float32)
+            rgb_embed = (
+                F.interpolate(
+                    torch.from_numpy(rgb_embed),
+                    scale_factor=upscale_by,
+                    mode="bilinear",
+                    align_corners=False,
+                )
+                .numpy()
+                .squeeze()
+                .transpose(1, 2, 0)
             )
-            .numpy()
-            .squeeze()
-            .transpose(1, 2, 0)
-        )
+        else:
+            # Just return the (normalized) RGB values if features are not required.
+            rgb_embed = (((rgb / 255.0) * 2) - 1).astype(np.float32)
         return rgb_embed, text_embed
 
     def __getitem__(self, index):
@@ -462,7 +458,7 @@ class HOI4DDataset(BaseDataset):
         start_tracks, end_tracks = self.filtered_tracks[index]
 
         caption = self.compose_caption(dir_name, event)
-        rgb_embed, text_embed = self.load_rgb_text_feat(dir_name, event_idx)
+        rgb_embed, text_embed = self.load_rgb_text_feat(rgbs[0], dir_name, event_idx)
         start_scene_pcd, start_scene_feat_pcd, augment_tf = self.get_scene_pcd(
             rgb_embed, depths[0], K_, self.num_points, self.max_depth
         )
@@ -494,6 +490,7 @@ class HOI4DDataset(BaseDataset):
             "vid_name": dir_name,
             "pcd_mean": action_pcd_mean,
             "pcd_std": scene_pcd_std,
+            "gripper_idx": self.GRIPPER_IDX,
             "augment_R": augment_tf["R"],
             "augment_t": augment_tf["t"],
             "augment_C": augment_tf["C"],

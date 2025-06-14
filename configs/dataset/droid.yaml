@@ -2,5 +2,5 @@ defaults:
   - base_dataset # Inherit from base
 name: droid
 max_depth: 2
-rgb_feat: False # If true, return DINOv2 features, else just return RGB
+rgb_feat: False # If true, return DINOv2 features, else just return RGB (don't enable, currently broken!)
 use_full_text: True # Combine all subgoal captions into one and use the same caption for the whole demo

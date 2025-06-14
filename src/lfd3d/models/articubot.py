@@ -25,7 +25,6 @@ from lfd3d.utils.viz_utils import (
     get_img_and_track_pcd,
     invert_augmentation_and_normalization,
     project_pcd_on_image,
-    save_weighted_displacement_pcd_viz,
 )
 
 
@@ -1287,7 +1286,7 @@ class GoalRegressionModule(pl.LightningModule):
         )
         ###
 
-        _ = save_weighted_displacement_pcd_viz(anchor_pcd, weighted_displacement)
+        # _ = save_weighted_displacement_pcd_viz(anchor_pcd, weighted_displacement)
 
         viz_dict = {
             f"{tag}/track_projected_to_rgb": wandb_proj_img,

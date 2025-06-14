@@ -11,7 +11,6 @@ import torchdatasets as td
 from decord import VideoReader
 from lfd3d.datasets.base_data import BaseDataModule, BaseDataset
 from PIL import Image
-from torchvision import transforms
 
 
 def parse_timestamp(timestamp):
@@ -48,27 +47,6 @@ class DroidDataset(BaseDataset):
         self.droid_index = self.expand_all_events(self.droid_index)
 
         self.orig_shape = (180, 320)
-        # Target shape of images (same as DINOv2)
-        self.target_shape = 224
-        self.rgb_preprocess = transforms.Compose(
-            [
-                transforms.Resize(
-                    self.target_shape,
-                    interpolation=transforms.InterpolationMode.BICUBIC,
-                ),
-                transforms.CenterCrop(self.target_shape),
-            ]
-        )
-        self.depth_preprocess = transforms.Compose(
-            [
-                transforms.Resize(
-                    self.target_shape,
-                    interpolation=transforms.InterpolationMode.NEAREST,
-                ),
-                transforms.CenterCrop(self.target_shape),
-            ]
-        )
-
         with open(f"{self.current_dir}/zed_intrinsics.json") as f:
             self.camera_intrinsics = json.load(f)
 
