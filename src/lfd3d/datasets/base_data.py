@@ -6,15 +6,6 @@ import pytorch_lightning as pl
 import torch
 import torchdatasets as td
 from pytorch3d.ops import sample_farthest_points
-from pytorch3d.renderer import (
-    AlphaCompositor,
-    OrthographicCameras,
-    PointsRasterizationSettings,
-    PointsRasterizer,
-    PointsRenderer,
-    look_at_view_transform,
-)
-from pytorch3d.structures import Pointclouds
 from torch.utils import data
 from torch_cluster import grid_cluster
 from torch_scatter import scatter_mean
@@ -46,47 +37,6 @@ class BaseDataset(td.Dataset):
                 transforms.CenterCrop(self.target_shape),
             ]
         )
-        self.renderer = self.setup_renderer()
-        self.cam_names = ["front", "top", "right", "left"]
-
-    def setup_renderer(self):
-        # Use pytorch3d plot_scene to visualize camera locations wrt pcd
-        camera_configs = {
-            "front": {"eye": (0, 0, -2), "up": (0, -1, 0)},
-            "top": {"eye": (0, -2, 0), "up": (0, 0, -1)},
-            "right": {"eye": (2, 0, 0), "up": (0, -1, 0)},
-            "left": {"eye": (-2, 0, 0), "up": (0, -1, 0)},
-        }
-        all_R, all_T = [], []
-        for name, config in camera_configs.items():
-            R, T = look_at_view_transform(
-                eye=[config["eye"]],
-                at=[(0, 0, 0)],  # Look at origin
-                up=[config["up"]],  # Up direction
-            )
-            all_R.append(R)
-            all_T.append(T)
-
-        batched_R = torch.cat(all_R, dim=0)
-        batched_T = torch.cat(all_T, dim=0)
-        batched_cameras = OrthographicCameras(R=batched_R, T=batched_T)
-
-        # 224 is a common shape for SiGLIP/DINO etc
-        # Radius and points-per-pixel chosen arbitrarily to render decent images
-        raster_settings = PointsRasterizationSettings(
-            image_size=224,
-            radius=0.01,  # Point size
-            points_per_pixel=10,
-            bin_size=64,
-            max_points_per_bin=50000,
-        )
-
-        rasterizer = PointsRasterizer(
-            cameras=batched_cameras, raster_settings=raster_settings
-        )
-        compositor = AlphaCompositor()
-        renderer = PointsRenderer(rasterizer=rasterizer, compositor=compositor)
-        return renderer
 
     def add_gaussian_noise(self, points, noise_magnitude=0.01):
         # points: (N, 3) array
@@ -141,38 +91,22 @@ class BaseDataset(td.Dataset):
                 scene_pcd, rgb_flat, self.dataset_cfg.augment_cfg
             )
         else:  # Just FPS
-            scene_pcd, scene_feat_pcd = self.get_fps_pcd(
-                scene_pcd, rgb_flat, num_points
-            )
+            if num_points == -1:
+                scene_pcd = scene_pcd.squeeze().numpy()
+                scene_feat_pcd = rgb_flat
+            else:
+                scene_pcd, scene_feat_pcd = self.get_fps_pcd(
+                    scene_pcd, rgb_flat, num_points
+                )
             augment_tf = {"R": np.eye(3), "t": np.zeros(3), "C": scene_pcd.mean(0)}
 
         return scene_pcd, scene_feat_pcd, augment_tf
-
-    def render_multiview(self, rgb, depth, K, max_depth):
-        # Randomize to distribute load among gpus ...
-        # Not a very good solution tbh
-        render_device = random.randint(0, torch.cuda.device_count() - 1)
-
-        scene_pcd, rgb_pcd = self.unproject_to_pcd(rgb, depth, K, max_depth)
-        # Normalize before rendering
-        scene_pcd = (scene_pcd - scene_pcd.mean(axis=0)) / scene_pcd.std()
-        rgb_pcd = (rgb_pcd / 255.0).astype(np.float32)
-
-        point_cloud = Pointclouds(
-            points=[torch.from_numpy(scene_pcd).to(f"cuda:{render_device}").float()],
-            features=[torch.from_numpy(rgb_pcd).to(f"cuda:{render_device}").float()],
-        ).extend(len(self.cam_names))
-        self.renderer.rasterizer.cameras.to(f"cuda:{render_device}")
-
-        rendered_images = self.renderer(point_cloud).cpu().numpy()
-        return {
-            f"camera_{name}": img for name, img in zip(self.cam_names, rendered_images)
-        }
 
     def augment_scene_pcd(self, scene_pcd, rgb_flat, augment_cfg):
         """
         Augment the scene point cloud by applying a random sampling method (e.g., FPS or voxel)
         Also return a random SO(2) rotation around Y-axis and translation for downstream transform
+        and gaussian noise
 
         Args:
             scene_pcd (torch.Tensor): Input point cloud of shape (1, N, 3).
@@ -184,7 +118,6 @@ class BaseDataset(td.Dataset):
                 - scene_pcd (np.ndarray): Augmented point cloud of shape (num_points, 3).
                 - scene_feat_pcd (np.ndarray): Corresponding features of shape (num_points, feat_dim).
         """
-
         pcd_methods = augment_cfg["pcd_sample"]
         selected_method = random.choice(pcd_methods)
         if selected_method == "fps":

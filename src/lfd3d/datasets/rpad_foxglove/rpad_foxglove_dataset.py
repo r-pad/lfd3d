@@ -349,7 +349,7 @@ class RpadFoxgloveDataset(BaseDataset):
             )
         else:
             # Just return the (normalized) RGB values if features are not required.
-            rgb_embed = (((rgb / 255.0) * 2) - 1).astype(np.float32)
+            rgb_embed = (rgb / 255.0).astype(np.float32)
 
         return rgb_embed, text_embed
 
@@ -372,13 +372,6 @@ class RpadFoxgloveDataset(BaseDataset):
         start_scene_pcd, start_scene_feat_pcd, augment_tf = self.get_scene_pcd(
             rgb_embed, depths[0], K_, self.num_points, self.max_depth
         )
-
-        if self.dataset_cfg.render_multiview:
-            multiview_image_dict = self.render_multiview(
-                rgbs[0], depths[0], K_, self.max_depth
-            )
-        else:
-            multiview_image_dict = {}
 
         gripper_idx = self.GRIPPER_IDX[self.source_of_data(demo_name)]
 
@@ -413,7 +406,6 @@ class RpadFoxgloveDataset(BaseDataset):
             "augment_R": augment_tf["R"],
             "augment_t": augment_tf["t"],
             "augment_C": augment_tf["C"],
-            **{name: cam for name, cam in multiview_image_dict.items()},
         }
         return item
 
