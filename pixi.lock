@@ -179,6 +179,7 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/f9/53/d35476d547a286506f0a6a634ccf1e5d288fffd53d48f0bd5fef61d68684/googleapis_common_protos-1.69.2-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/b1/5e/38b408f41064c9fcdbb0ea27c1bd13a1c8657c4846e04dab9f5ea770602c/griffe-1.7.2-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/95/04/ff642e65ad6b90db43e668d70ffb6736436c7ce41fcc549f4e9472234127/h11-0.14.0-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/b1/45/e1a754dc7cd465ba35e438e28557119221ac89b20aaebef48282654e3dc7/h5py-3.14.0-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/87/f5/72347bc88306acb359581ac4d52f23c0ef445b57157adedb9aee0cd689d2/httpcore-1.0.7-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/2a/39/e50c7c3a983047577ee07d2a9e53faf5a69493943ec3f6a384bdc792deb2/httpx-0.28.1-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/64/09/a535946bf2dc88e61341f39dc507530411bb3ea4eac493e5ec833e8f35bd/huggingface_hub-0.25.2-py3-none-any.whl
@@ -1750,6 +1751,13 @@ packages:
   requires_dist:
   - typing-extensions ; python_full_version < '3.8'
   requires_python: '>=3.7'
+- pypi: https://files.pythonhosted.org/packages/b1/45/e1a754dc7cd465ba35e438e28557119221ac89b20aaebef48282654e3dc7/h5py-3.14.0-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
+  name: h5py
+  version: 3.14.0
+  sha256: 1223b902ef0b5d90bcc8a4778218d6d6cd0f5561861611eda59fa6c52b922f4d
+  requires_dist:
+  - numpy>=1.19.3
+  requires_python: '>=3.9'
 - pypi: https://files.pythonhosted.org/packages/87/f5/72347bc88306acb359581ac4d52f23c0ef445b57157adedb9aee0cd689d2/httpcore-1.0.7-py3-none-any.whl
   name: httpcore
   version: 1.0.7
@@ -2636,7 +2644,7 @@ packages:
 - pypi: .
   name: lfd3d
   version: 0.1.0
-  sha256: 62f62618e0cd6ee47e149be225a7e025b7c0931287cd5722335a391288bc1dea
+  sha256: 1d300be9a0740112b44c7bc22dc3cd222c8662923b8f3e7453a2aacc28a31073
   requires_dist:
   - diffusers==0.26.3
   - gif
@@ -2664,6 +2672,7 @@ packages:
   - peft>=0.15.2,<0.16
   - decord>=0.6.0,<0.7
   - draccus>=0.11.5,<0.12
+  - h5py>=3.14.0,<4
   - ruff==0.3.6 ; extra == 'develop'
   - mypy==1.3.0 ; extra == 'develop'
   - pytest==7.3.2 ; extra == 'develop'
