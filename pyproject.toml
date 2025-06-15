@@ -29,7 +29,6 @@ dependencies = [
     "addict==2.4.0",
     "mujoco>=3.2.7,<3.3",
     "tensorflow-datasets>=4.9.8,<5",
-    "tensorflow-cpu>=2.19.0,<3",
     "google-genai>=1.11.0,<2",
     "peft>=0.15.2,<0.16",
     "decord>=0.6.0,<0.7",
@@ -68,7 +67,6 @@ cuda-toolkit = "12.4.*"
 gcc = "11.*"
 gxx = "11.*"
 setuptools = "==65.5.0"
-protobuf = "*"
 
 # PyPI-specific dependencies
 [tool.pixi.pypi-dependencies]

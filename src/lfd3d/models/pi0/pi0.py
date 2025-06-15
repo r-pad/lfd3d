@@ -20,38 +20,36 @@ Unreadably ugly, but it isn't meant to be read.
 Read the original code from LeRobot - write an interface to use Pi0 here.
 """
 
-import math
-from collections import deque
-from dataclasses import dataclass, field, asdict
 import abc
 import logging
+import math
 import os
+from collections import deque
+from dataclasses import asdict, dataclass, field
+from enum import Enum
 from pathlib import Path
 from typing import Type, TypeVar
-from enum import Enum
 
-import torch
-import torch.nn.functional as F  # noqa: N812
-from torch import Tensor, nn
-from transformers import AutoTokenizer
+import draccus
 import packaging
 import safetensors
+import torch
+import torch.nn.functional as F  # noqa: N812
 from huggingface_hub import hf_hub_download
-from huggingface_hub.constants import SAFETENSORS_SINGLE_FILE, CONFIG_NAME
+from huggingface_hub.constants import CONFIG_NAME, SAFETENSORS_SINGLE_FILE
 from huggingface_hub.errors import HfHubHTTPError
-from safetensors.torch import load_model as load_model_as_safetensor
-from safetensors.torch import save_model as save_model_as_safetensor
-from torch import Tensor, nn
-import draccus
-from torch.optim import Optimizer
-from torch.optim.lr_scheduler import LambdaLR, LRScheduler
-
+from lfd3d.models.pi0.hub import HubMixin
 from lfd3d.models.pi0.paligemma_with_expert import (
     PaliGemmaWithExpertConfig,
     PaliGemmaWithExpertModel,
 )
+from safetensors.torch import load_model as load_model_as_safetensor
+from safetensors.torch import save_model as save_model_as_safetensor
+from torch import Tensor, nn
+from torch.optim import Optimizer
+from torch.optim.lr_scheduler import LambdaLR, LRScheduler
+from transformers import AutoTokenizer
 
-from lfd3d.models.pi0.hub import HubMixin
 
 def auto_select_torch_device() -> torch.device:
     """Tries to select automatically a torch device."""
@@ -62,8 +60,11 @@ def auto_select_torch_device() -> torch.device:
         logging.info("Metal backend detected, using cuda.")
         return torch.device("mps")
     else:
-        logging.warning("No accelerated backend detected. Using default cpu, this will be slow.")
+        logging.warning(
+            "No accelerated backend detected. Using default cpu, this will be slow."
+        )
         return torch.device("cpu")
+
 
 def is_amp_available(device: str):
     if device in ["cuda", "cpu"]:
@@ -72,6 +73,7 @@ def is_amp_available(device: str):
         return False
     else:
         raise ValueError(f"Unknown device '{device}.")
+
 
 def is_torch_device_available(try_device: str) -> bool:
     try_device = str(try_device)  # Ensure try_device is a string
@@ -82,11 +84,15 @@ def is_torch_device_available(try_device: str) -> bool:
     elif try_device == "cpu":
         return True
     else:
-        raise ValueError(f"Unknown device {try_device}. Supported devices are: cuda, mps or cpu.")
+        raise ValueError(
+            f"Unknown device {try_device}. Supported devices are: cuda, mps or cpu."
+        )
+
 
 ACTION = "action"
 OBS_STATE = "observation.state"
 T = TypeVar("T", bound="PreTrainedPolicy")
+
 
 class FeatureType(str, Enum):
     STATE = "STATE"
@@ -100,10 +106,12 @@ class NormalizationMode(str, Enum):
     MEAN_STD = "MEAN_STD"
     IDENTITY = "IDENTITY"
 
+
 @dataclass
 class PolicyFeature:
     type: FeatureType
     shape: tuple
+
 
 @dataclass
 class LRSchedulerConfig(draccus.ChoiceRegistry, abc.ABC):
@@ -114,8 +122,11 @@ class LRSchedulerConfig(draccus.ChoiceRegistry, abc.ABC):
         return self.get_choice_name(self.__class__)
 
     @abc.abstractmethod
-    def build(self, optimizer: Optimizer, num_training_steps: int) -> LRScheduler | None:
+    def build(
+        self, optimizer: Optimizer, num_training_steps: int
+    ) -> LRScheduler | None:
         raise NotImplementedError
+
 
 @LRSchedulerConfig.register_subclass("cosine_decay_with_warmup")
 @dataclass
@@ -139,7 +150,9 @@ class CosineDecayWithWarmupSchedulerConfig(LRSchedulerConfig):
 
             def cosine_decay_schedule(current_step):
                 step = min(current_step, self.num_decay_steps)
-                cosine_decay = 0.5 * (1 + math.cos(math.pi * step / self.num_decay_steps))
+                cosine_decay = 0.5 * (
+                    1 + math.cos(math.pi * step / self.num_decay_steps)
+                )
                 alpha = self.decay_lr / self.peak_lr
                 decayed = (1 - alpha) * cosine_decay + alpha
                 return decayed
@@ -151,6 +164,7 @@ class CosineDecayWithWarmupSchedulerConfig(LRSchedulerConfig):
 
         return LambdaLR(optimizer, lr_lambda, -1)
 
+
 def get_safe_dtype(dtype: torch.dtype, device: str | torch.device):
     """
     mps is currently not compatible with float64
@@ -161,6 +175,7 @@ def get_safe_dtype(dtype: torch.dtype, device: str | torch.device):
         return torch.float32
     else:
         return dtype
+
 
 @dataclass
 class OptimizerConfig(draccus.ChoiceRegistry, abc.ABC):
@@ -180,6 +195,7 @@ class OptimizerConfig(draccus.ChoiceRegistry, abc.ABC):
     def build(self) -> torch.optim.Optimizer:
         raise NotImplementedError
 
+
 @OptimizerConfig.register_subclass("adamw")
 @dataclass
 class AdamWConfig(OptimizerConfig):
@@ -194,7 +210,10 @@ class AdamWConfig(OptimizerConfig):
         kwargs.pop("grad_clip_norm")
         return torch.optim.AdamW(params, **kwargs)
 
+
 # Generic variable that is either PreTrainedConfig or a subclass thereof
+
+
 P = TypeVar("P", bound="PreTrainedConfig")
 
 
@@ -260,30 +279,46 @@ def create_stats_buffers(
         if stats:
             if isinstance(stats[key]["mean"], np.ndarray):
                 if norm_mode is NormalizationMode.MEAN_STD:
-                    buffer["mean"].data = torch.from_numpy(stats[key]["mean"]).to(dtype=torch.float32)
-                    buffer["std"].data = torch.from_numpy(stats[key]["std"]).to(dtype=torch.float32)
+                    buffer["mean"].data = torch.from_numpy(stats[key]["mean"]).to(
+                        dtype=torch.float32
+                    )
+                    buffer["std"].data = torch.from_numpy(stats[key]["std"]).to(
+                        dtype=torch.float32
+                    )
                 elif norm_mode is NormalizationMode.MIN_MAX:
-                    buffer["min"].data = torch.from_numpy(stats[key]["min"]).to(dtype=torch.float32)
-                    buffer["max"].data = torch.from_numpy(stats[key]["max"]).to(dtype=torch.float32)
+                    buffer["min"].data = torch.from_numpy(stats[key]["min"]).to(
+                        dtype=torch.float32
+                    )
+                    buffer["max"].data = torch.from_numpy(stats[key]["max"]).to(
+                        dtype=torch.float32
+                    )
             elif isinstance(stats[key]["mean"], torch.Tensor):
                 # Note: The clone is needed to make sure that the logic in save_pretrained doesn't see duplicated
                 # tensors anywhere (for example, when we use the same stats for normalization and
                 # unnormalization). See the logic here
                 # https://github.com/huggingface/safetensors/blob/079781fd0dc455ba0fe851e2b4507c33d0c0d407/bindings/python/py_src/safetensors/torch.py#L97.
                 if norm_mode is NormalizationMode.MEAN_STD:
-                    buffer["mean"].data = stats[key]["mean"].clone().to(dtype=torch.float32)
-                    buffer["std"].data = stats[key]["std"].clone().to(dtype=torch.float32)
+                    buffer["mean"].data = (
+                        stats[key]["mean"].clone().to(dtype=torch.float32)
+                    )
+                    buffer["std"].data = (
+                        stats[key]["std"].clone().to(dtype=torch.float32)
+                    )
                 elif norm_mode is NormalizationMode.MIN_MAX:
-                    buffer["min"].data = stats[key]["min"].clone().to(dtype=torch.float32)
-                    buffer["max"].data = stats[key]["max"].clone().to(dtype=torch.float32)
+                    buffer["min"].data = (
+                        stats[key]["min"].clone().to(dtype=torch.float32)
+                    )
+                    buffer["max"].data = (
+                        stats[key]["max"].clone().to(dtype=torch.float32)
+                    )
             else:
                 type_ = type(stats[key]["mean"])
-                raise ValueError(f"np.ndarray or torch.Tensor expected, but type is '{type_}' instead.")
+                raise ValueError(
+                    f"np.ndarray or torch.Tensor expected, but type is '{type_}' instead."
+                )
 
         stats_buffers[key] = buffer
     return stats_buffers
-
-
 
 
 @dataclass
@@ -317,7 +352,9 @@ class PreTrainedConfig(draccus.ChoiceRegistry, HubMixin, abc.ABC):
         self.pretrained_path = None
         if not self.device or not is_torch_device_available(self.device):
             auto_device = auto_select_torch_device()
-            logging.warning(f"Device '{self.device}' is not available. Switching to '{auto_device}'.")
+            logging.warning(
+                f"Device '{self.device}' is not available. Switching to '{auto_device}'."
+            )
             self.device = auto_device.type
 
         # Automatically deactivate AMP if necessary
@@ -374,7 +411,11 @@ class PreTrainedConfig(draccus.ChoiceRegistry, HubMixin, abc.ABC):
 
     @property
     def image_features(self) -> dict[str, PolicyFeature]:
-        return {key: ft for key, ft in self.input_features.items() if ft.type is FeatureType.VISUAL}
+        return {
+            key: ft
+            for key, ft in self.input_features.items()
+            if ft.type is FeatureType.VISUAL
+        }
 
     @property
     def action_feature(self) -> PolicyFeature | None:
@@ -444,6 +485,7 @@ This policy has been pushed to the Hub using [LeRobot](https://github.com/huggin
 - Docs: {{ docs_url | default("[More Information Needed]", true) }}
 """
 
+
 class PreTrainedPolicy(nn.Module, HubMixin, abc.ABC):
     """
     Base class for policy models.
@@ -472,7 +514,9 @@ class PreTrainedPolicy(nn.Module, HubMixin, abc.ABC):
     def _save_pretrained(self, save_directory: Path) -> None:
         self.config._save_pretrained(save_directory)
         model_to_save = self.module if hasattr(self, "module") else self
-        save_model_as_safetensor(model_to_save, str(save_directory / SAFETENSORS_SINGLE_FILE))
+        save_model_as_safetensor(
+            model_to_save, str(save_directory / SAFETENSORS_SINGLE_FILE)
+        )
 
     @classmethod
     def from_pretrained(
@@ -506,12 +550,15 @@ class PreTrainedPolicy(nn.Module, HubMixin, abc.ABC):
                 revision=revision,
                 **kwargs,
             )
+        config.device = "cpu"
         model_id = str(pretrained_name_or_path)
         instance = cls(config, **kwargs)
         if os.path.isdir(model_id):
             print("Loading weights from local directory")
             model_file = os.path.join(model_id, SAFETENSORS_SINGLE_FILE)
-            policy = cls._load_as_safetensor(instance, model_file, config.device, strict)
+            policy = cls._load_as_safetensor(
+                instance, model_file, config.device, strict
+            )
         else:
             try:
                 model_file = hf_hub_download(
@@ -525,7 +572,9 @@ class PreTrainedPolicy(nn.Module, HubMixin, abc.ABC):
                     token=token,
                     local_files_only=local_files_only,
                 )
-                policy = cls._load_as_safetensor(instance, model_file, config.device, strict)
+                policy = cls._load_as_safetensor(
+                    instance, model_file, config.device, strict
+                )
             except HfHubHTTPError as e:
                 raise FileNotFoundError(
                     f"{SAFETENSORS_SINGLE_FILE} not found on the HuggingFace Hub in {model_id}"
@@ -536,8 +585,12 @@ class PreTrainedPolicy(nn.Module, HubMixin, abc.ABC):
         return policy
 
     @classmethod
-    def _load_as_safetensor(cls, model: T, model_file: str, map_location: str, strict: bool) -> T:
-        if packaging.version.parse(safetensors.__version__) < packaging.version.parse("0.4.3"):
+    def _load_as_safetensor(
+        cls, model: T, model_file: str, map_location: str, strict: bool
+    ) -> T:
+        if packaging.version.parse(safetensors.__version__) < packaging.version.parse(
+            "0.4.3"
+        ):
             load_model_as_safetensor(model, model_file, strict=strict)
             if map_location != "cpu":
                 logging.warning(
@@ -548,7 +601,9 @@ class PreTrainedPolicy(nn.Module, HubMixin, abc.ABC):
                 )
                 model.to(map_location)
         else:
-            safetensors.torch.load_model(model, model_file, strict=strict, device=map_location)
+            safetensors.torch.load_model(
+                model, model_file, strict=strict, device=map_location
+            )
         return model
 
     # def generate_model_card(self, *args, **kwargs) -> ModelCard:
@@ -598,6 +653,7 @@ class PreTrainedPolicy(nn.Module, HubMixin, abc.ABC):
         with caching.
         """
         raise NotImplementedError
+
 
 class Normalize(nn.Module):
     """Normalizes data (e.g. "observation.image") for more stable and faster convergence during training."""
@@ -867,9 +923,12 @@ class PI0Config(PreTrainedConfig):
         return None
 
 
-
 def create_sinusoidal_pos_embedding(
-    time: torch.tensor, dimension: int, min_period: float, max_period: float, device="cpu"
+    time: torch.tensor,
+    dimension: int,
+    min_period: float,
+    max_period: float,
+    device="cpu",
 ) -> Tensor:
     """Computes sine-cosine positional embedding vectors for scalar positions."""
     if dimension % 2 != 0:
@@ -989,7 +1048,9 @@ def aloha_gripper_to_angular(value):
 
     # This is the inverse of the angular to linear transformation inside the Interbotix code.
     def linear_to_radian(linear_position, arm_length, horn_radius):
-        value = (horn_radius**2 + linear_position**2 - arm_length**2) / (2 * horn_radius * linear_position)
+        value = (horn_radius**2 + linear_position**2 - arm_length**2) / (
+            2 * horn_radius * linear_position
+        )
         return safe_arcsin(value)
 
     # The constants are taken from the Interbotix code.
@@ -1040,7 +1101,9 @@ class PI0Policy(PreTrainedPolicy):
         super().__init__(config)
         config.validate_features()
         self.config = config
-        self.normalize_inputs = Normalize(config.input_features, config.normalization_mapping, dataset_stats)
+        self.normalize_inputs = Normalize(
+            config.input_features, config.normalization_mapping, dataset_stats
+        )
         self.normalize_targets = Normalize(
             config.output_features, config.normalization_mapping, dataset_stats
         )
@@ -1048,7 +1111,9 @@ class PI0Policy(PreTrainedPolicy):
             config.output_features, config.normalization_mapping, dataset_stats
         )
 
-        self.language_tokenizer = AutoTokenizer.from_pretrained("google/paligemma-3b-pt-224")
+        self.language_tokenizer = AutoTokenizer.from_pretrained(
+            "google/paligemma-3b-pt-224"
+        )
         self.model = PI0FlowMatching(config)
 
         self.reset()
@@ -1061,7 +1126,9 @@ class PI0Policy(PreTrainedPolicy):
         return self.parameters()
 
     @torch.no_grad
-    def select_action(self, batch: dict[str, Tensor], noise: Tensor | None = None) -> Tensor:
+    def select_action(
+        self, batch: dict[str, Tensor], noise: Tensor | None = None
+    ) -> Tensor:
         """Select a single action given environment observations.
 
         This method wraps `select_actions` in order to return one action at a time for execution in the
@@ -1100,7 +1167,9 @@ class PI0Policy(PreTrainedPolicy):
             self._action_queue.extend(actions.transpose(0, 1))
         return self._action_queue.popleft()
 
-    def forward(self, batch: dict[str, Tensor], noise=None, time=None) -> tuple[Tensor, dict[str, Tensor]]:
+    def forward(
+        self, batch: dict[str, Tensor], noise=None, time=None
+    ) -> tuple[Tensor, dict[str, Tensor]]:
         """Do a full training forward pass to compute the loss"""
         if self.config.adapt_to_pi_aloha:
             batch[OBS_STATE] = self._pi_aloha_decode_state(batch[OBS_STATE])
@@ -1116,7 +1185,9 @@ class PI0Policy(PreTrainedPolicy):
         actions_is_pad = batch.get("action_is_pad")
 
         loss_dict = {}
-        losses = self.model.forward(images, img_masks, lang_tokens, lang_masks, state, actions, noise, time)
+        losses = self.model.forward(
+            images, img_masks, lang_tokens, lang_masks, state, actions, noise, time
+        )
         loss_dict["losses_after_forward"] = losses.clone()
 
         if actions_is_pad is not None:
@@ -1143,7 +1214,9 @@ class PI0Policy(PreTrainedPolicy):
         img_masks = []
 
         present_img_keys = [key for key in self.config.image_features if key in batch]
-        missing_img_keys = [key for key in self.config.image_features if key not in batch]
+        missing_img_keys = [
+            key for key in self.config.image_features if key not in batch
+        ]
 
         if len(present_img_keys) == 0:
             raise ValueError(
@@ -1155,7 +1228,9 @@ class PI0Policy(PreTrainedPolicy):
             img = batch[key]
 
             if self.config.resize_imgs_with_padding is not None:
-                img = resize_with_pad(img, *self.config.resize_imgs_with_padding, pad_value=0)
+                img = resize_with_pad(
+                    img, *self.config.resize_imgs_with_padding, pad_value=0
+                )
 
             # Normalize from range [0,1] to [-1,1] as expected by siglip
             img = img * 2.0 - 1.0
@@ -1194,7 +1269,9 @@ class PI0Policy(PreTrainedPolicy):
             return_tensors="pt",
         )
         lang_tokens = tokenized_prompt["input_ids"].to(device=device)
-        lang_masks = tokenized_prompt["attention_mask"].to(device=device, dtype=torch.bool)
+        lang_masks = tokenized_prompt["attention_mask"].to(
+            device=device, dtype=torch.bool
+        )
 
         return lang_tokens, lang_masks
 
@@ -1213,7 +1290,9 @@ class PI0Policy(PreTrainedPolicy):
             actions[:, :, motor_idx] *= -1
         # Reverse the gripper transformation that is being applied by the Aloha runtime.
         for motor_idx in [6, 13]:
-            actions[:, :, motor_idx] = aloha_gripper_from_angular(actions[:, :, motor_idx])
+            actions[:, :, motor_idx] = aloha_gripper_from_angular(
+                actions[:, :, motor_idx]
+            )
         return actions
 
     def _pi_aloha_encode_actions_inv(self, actions):
@@ -1222,7 +1301,9 @@ class PI0Policy(PreTrainedPolicy):
             actions[:, :, motor_idx] *= -1
         # Reverse the gripper transformation that is being applied by the Aloha runtime.
         for motor_idx in [6, 13]:
-            actions[:, :, motor_idx] = aloha_gripper_from_angular_inv(actions[:, :, motor_idx])
+            actions[:, :, motor_idx] = aloha_gripper_from_angular_inv(
+                actions[:, :, motor_idx]
+            )
         return actions
 
     def prepare_state(self, batch):
@@ -1272,15 +1353,25 @@ class PI0FlowMatching(nn.Module):
             train_expert_only=self.config.train_expert_only,
             attention_implementation=self.config.attention_implementation,
         )
-        self.paligemma_with_expert = PaliGemmaWithExpertModel(paligemma_with_export_config)
+        self.paligemma_with_expert = PaliGemmaWithExpertModel(
+            paligemma_with_export_config
+        )
 
         # Projections are float32
         self.state_proj = nn.Linear(self.config.max_state_dim, self.config.proj_width)
-        self.action_in_proj = nn.Linear(self.config.max_action_dim, self.config.proj_width)
-        self.action_out_proj = nn.Linear(self.config.proj_width, self.config.max_action_dim)
+        self.action_in_proj = nn.Linear(
+            self.config.max_action_dim, self.config.proj_width
+        )
+        self.action_out_proj = nn.Linear(
+            self.config.proj_width, self.config.max_action_dim
+        )
 
-        self.action_time_mlp_in = nn.Linear(self.config.proj_width * 2, self.config.proj_width)
-        self.action_time_mlp_out = nn.Linear(self.config.proj_width, self.config.proj_width)
+        self.action_time_mlp_in = nn.Linear(
+            self.config.proj_width * 2, self.config.proj_width
+        )
+        self.action_time_mlp_out = nn.Linear(
+            self.config.proj_width, self.config.proj_width
+        )
 
         self.set_requires_grad()
 
@@ -1324,7 +1415,9 @@ class PI0FlowMatching(nn.Module):
 
             # Normalize image embeddings
             img_emb_dim = img_emb.shape[-1]
-            img_emb = img_emb * torch.tensor(img_emb_dim**0.5, dtype=img_emb.dtype, device=img_emb.device)
+            img_emb = img_emb * torch.tensor(
+                img_emb_dim**0.5, dtype=img_emb.dtype, device=img_emb.device
+            )
 
             bsize, num_img_embs = img_emb.shape[:2]
             img_mask = img_mask[:, None].expand(bsize, num_img_embs)
@@ -1377,7 +1470,11 @@ class PI0FlowMatching(nn.Module):
 
         # Embed timestep using sine-cosine positional encoding with sensitivity in the range [0, 1]
         time_emb = create_sinusoidal_pos_embedding(
-            timestep, self.config.proj_width, min_period=4e-3, max_period=4.0, device=device
+            timestep,
+            self.config.proj_width,
+            min_period=4e-3,
+            max_period=4.0,
+            device=device,
         )
         time_emb = time_emb.type(dtype=dtype)
 
@@ -1395,7 +1492,9 @@ class PI0FlowMatching(nn.Module):
         embs.append(action_time_emb)
 
         bsize, action_time_dim = action_time_emb.shape[:2]
-        action_time_mask = torch.ones(bsize, action_time_dim, dtype=torch.bool, device=device)
+        action_time_mask = torch.ones(
+            bsize, action_time_dim, dtype=torch.bool, device=device
+        )
         pad_masks.append(action_time_mask)
 
         # Set attention masks so that image, language and state inputs do not attend to action tokens
@@ -1409,7 +1508,15 @@ class PI0FlowMatching(nn.Module):
         return embs, pad_masks, att_masks
 
     def forward(
-        self, images, img_masks, lang_tokens, lang_masks, state, actions, noise=None, time=None
+        self,
+        images,
+        img_masks,
+        lang_tokens,
+        lang_masks,
+        state,
+        actions,
+        noise=None,
+        time=None,
     ) -> Tensor:
         """Do a full training forward pass and compute the loss (batch_size x num_steps x num_motors)"""
         if noise is None:
@@ -1425,7 +1532,9 @@ class PI0FlowMatching(nn.Module):
         prefix_embs, prefix_pad_masks, prefix_att_masks = self.embed_prefix(
             images, img_masks, lang_tokens, lang_masks
         )
-        suffix_embs, suffix_pad_masks, suffix_att_masks = self.embed_suffix(state, x_t, time)
+        suffix_embs, suffix_pad_masks, suffix_att_masks = self.embed_suffix(
+            state, x_t, time
+        )
 
         pad_masks = torch.cat([prefix_pad_masks, suffix_pad_masks], dim=1)
         att_masks = torch.cat([prefix_att_masks, suffix_att_masks], dim=1)
@@ -1449,13 +1558,19 @@ class PI0FlowMatching(nn.Module):
         losses = F.mse_loss(u_t, v_t, reduction="none")
         return losses
 
-    def sample_actions(self, images, img_masks, lang_tokens, lang_masks, state, noise=None) -> Tensor:
+    def sample_actions(
+        self, images, img_masks, lang_tokens, lang_masks, state, noise=None
+    ) -> Tensor:
         """Do a full inference forward and compute the action (batch_size x num_steps x num_motors)"""
         bsize = state.shape[0]
         device = state.device
 
         if noise is None:
-            actions_shape = (bsize, self.config.n_action_steps, self.config.max_action_dim)
+            actions_shape = (
+                bsize,
+                self.config.n_action_steps,
+                self.config.max_action_dim,
+            )
             noise = self.sample_noise(actions_shape, device)
 
         prefix_embs, prefix_pad_masks, prefix_att_masks = self.embed_prefix(
@@ -1503,12 +1618,16 @@ class PI0FlowMatching(nn.Module):
         timestep,
     ):
         """Apply one denoising step of the noise `x_t` at a given timestep."""
-        suffix_embs, suffix_pad_masks, suffix_att_masks = self.embed_suffix(state, x_t, timestep)
+        suffix_embs, suffix_pad_masks, suffix_att_masks = self.embed_suffix(
+            state, x_t, timestep
+        )
 
         suffix_len = suffix_pad_masks.shape[1]
         batch_size = prefix_pad_masks.shape[0]
         prefix_len = prefix_pad_masks.shape[1]
-        prefix_pad_2d_masks = prefix_pad_masks[:, None, :].expand(batch_size, suffix_len, prefix_len)
+        prefix_pad_2d_masks = prefix_pad_masks[:, None, :].expand(
+            batch_size, suffix_len, prefix_len
+        )
 
         suffix_att_2d_masks = make_att_2d_masks(suffix_pad_masks, suffix_att_masks)
 
