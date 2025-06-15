@@ -21,6 +21,14 @@ from lfd3d.utils.viz_utils import (
     invert_augmentation_and_normalization,
     project_pcd_on_image,
 )
+from pytorch3d.renderer import (
+    AlphaCompositor,
+    OrthographicCameras,
+    PointsRasterizationSettings,
+    PointsRasterizer,
+    PointsRenderer,
+    look_at_view_transform,
+)
 from torch import nn
 
 
@@ -102,6 +110,9 @@ class Pi0GoalNetwork(nn.Module):
             )
         )
 
+        # Pi0 forces bf16
+        prefix_outputs = prefix_outputs.to(self.input_proj.weight.dtype)
+
         # Robot-finetuned VLM features
         vlm_tokens = self.input_proj(prefix_outputs)  # [batch, seq_len, hidden_dim]
         queries = self.gripper_queries.unsqueeze(0).expand(batch_size, -1, -1)
@@ -150,6 +161,82 @@ class Pi0GoalModule(BaseModule):
         self.batch_size = self.run_cfg.batch_size
         self.val_batch_size = self.run_cfg.val_batch_size
         self.max_depth = cfg.dataset.max_depth
+
+        self.renderer = self.setup_renderer()
+        self.cam_names = ["front", "top", "right", "left"]
+
+    def setup_renderer(self):
+        # Use pytorch3d plot_scene to visualize camera locations wrt pcd
+        camera_configs = {
+            "front": {"eye": (0, 0, -3), "up": (0, -1, 0)},
+            "top": {"eye": (0, -3, 0), "up": (0, 0, -1)},
+            "right": {"eye": (3, 0, 0), "up": (0, -1, 0)},
+            "left": {"eye": (-3, 0, 0), "up": (0, -1, 0)},
+        }
+        all_R, all_T = [], []
+        for name, config in camera_configs.items():
+            R, T = look_at_view_transform(
+                eye=[config["eye"]],
+                at=[(0, 0, 0)],  # Look at origin
+                up=[config["up"]],  # Up direction
+            )
+            all_R.append(R)
+            all_T.append(T)
+
+        batched_R = torch.cat(all_R, dim=0)
+        batched_T = torch.cat(all_T, dim=0)
+        batched_cameras = OrthographicCameras(R=batched_R, T=batched_T, focal_length=0.6)
+
+        # 224 is a common shape for SiGLIP/DINO etc
+        # Radius and points-per-pixel chosen arbitrarily to render decent images
+        raster_settings = PointsRasterizationSettings(
+            image_size=224,
+            radius=0.02,  # Point size
+            points_per_pixel=10,
+            bin_size=64,
+            max_points_per_bin=50000,
+        )
+
+        rasterizer = PointsRasterizer(
+            cameras=batched_cameras, raster_settings=raster_settings
+        )
+        compositor = AlphaCompositor()
+        renderer = PointsRenderer(rasterizer=rasterizer, compositor=compositor)
+        return renderer
+
+    def render_multiview(self, point_cloud):
+        # Only 3 channels and in valid range
+        assert point_cloud.features_padded().shape[2] == 3
+        assert point_cloud.features_padded().min() >= 0
+        assert point_cloud.features_padded().max() <= 1
+
+        # Sufficient density of points to render decent images
+        # HACK: Need a better way to do this....
+        assert point_cloud.points_padded().shape[1] >= 8192
+
+        self.renderer.rasterizer.cameras.to(point_cloud.device).float()
+
+        rendered_images = []
+        for i in range(len(point_cloud)):
+            single_pc = point_cloud[i : i + 1]  # Keep batch dim
+
+            # 0mean 1std before rendering for consistent camera placements
+            points = single_pc.points_padded()
+            points = (points - points.mean(1)) / points.std()
+            single_pc = single_pc.update_padded(points)
+
+            single_pc_expanded = single_pc.extend(4)  # Expand to 4 copies
+            with torch.no_grad():
+                images = self.renderer(single_pc_expanded)  # [4, H, W, C]
+            rendered_images.append(images)
+
+        rendered_images = torch.stack(rendered_images).permute(
+            1, 0, 2, 3, 4
+        )  # [4, B, H, W, C]
+        multiview_image_dict = {
+            f"camera_{name}": img for name, img in zip(self.cam_names, rendered_images)
+        }
+        return multiview_image_dict
 
     def forward(self, batch):
         batch_size = batch["camera_front"].shape[0]
@@ -355,10 +442,9 @@ class Pi0GoalModule(BaseModule):
         """
         Training step for the module. Logs training metrics and visualizations to wandb.
         """
-        assert all(
-            key in batch
-            for key in ["camera_front", "camera_top", "camera_right", "camera_left"]
-        ), "Enable multiview rendering to use Pi0Goal"
+        point_cloud = batch["anchor_pcd"]
+        multiview_image_dict = self.render_multiview(point_cloud)
+        batch.update(multiview_image_dict)
 
         self.train()
         batch_size = batch[self.label_key].points_padded().shape[0]
@@ -419,6 +505,10 @@ class Pi0GoalModule(BaseModule):
         """
         Validation step for the module. Logs validation metrics and visualizations to wandb.
         """
+        point_cloud = batch["anchor_pcd"]
+        multiview_image_dict = self.render_multiview(point_cloud)
+        batch.update(multiview_image_dict)
+
         val_tag = self.trainer.datamodule.val_tags[dataloader_idx]
         self.eval()
         with torch.no_grad():
@@ -463,6 +553,10 @@ class Pi0GoalModule(BaseModule):
         """
         Prediction step for model evaluation.
         """
+        point_cloud = batch["anchor_pcd"]
+        multiview_image_dict = self.render_multiview(point_cloud)
+        batch.update(multiview_image_dict)
+
         eval_tag = self.trainer.datamodule.eval_tags[dataloader_idx]
         n_samples_wta = self.trainer.datamodule.n_samples_wta
 
