@@ -2,3 +2,8 @@ name: pi0goal
 
 # Model settings
 type: cross_displacement # (flow, point) Type of model
+
+# Config for the decoder of the transformer
+hidden_dim: 256
+num_layers: 4
+num_heads: 8

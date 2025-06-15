@@ -18,7 +18,7 @@ dependencies = [
     "torchmetrics",
     "wandb==0.18",
     "moviepy==1.0.3",
-    "transformers==4.45.2",
+    "transformers>=4.48.3,<5",
     "sentencepiece",
     "robot_descriptions",
     "trimesh",

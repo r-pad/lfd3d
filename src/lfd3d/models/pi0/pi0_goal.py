@@ -2,13 +2,26 @@ import random
 from collections import defaultdict
 from typing import Dict, List
 
-import pytorch_lightning as pl
+import cv2
+import numpy as np
 import torch
 import torch.nn.functional as F
-from diffusers import get_cosine_schedule_with_warmup
-from lfd3d.models.pi0.pi0 import PI0Policy, make_att_2d_masks
+import wandb
+from lfd3d.models.base_module import BaseModule
+from lfd3d.models.pi0.pi0 import (
+    FeatureType,
+    PI0Policy,
+    PolicyFeature,
+    make_att_2d_masks,
+)
 from lfd3d.models.tax3d import calc_pcd_metrics
-from torch import nn, optim
+from lfd3d.utils.viz_utils import (
+    get_action_anchor_pcd,
+    get_img_and_track_pcd,
+    invert_augmentation_and_normalization,
+    project_pcd_on_image,
+)
+from torch import nn
 
 
 class Pi0GoalNetwork(nn.Module):
@@ -19,12 +32,52 @@ class Pi0GoalNetwork(nn.Module):
     def __init__(self, model_cfg):
         super(Pi0GoalNetwork, self).__init__()
         self.pi0 = PI0Policy.from_pretrained("lerobot/pi0")
-        self.pi0.eval()
-        self.decoder = 0
+
+        # Freeze the VLM
+        for param in self.pi0.parameters():
+            param.requires_grad = False
+
+        # Missing in the default config for some reason
+        # https://huggingface.co/lerobot/pi0/discussions/18
+        self.pi0.config.input_features = {
+            "observation.images.front": PolicyFeature(
+                type=FeatureType.VISUAL, shape=(3, 224, 224)
+            ),
+            "observation.images.top": PolicyFeature(
+                type=FeatureType.VISUAL, shape=(3, 224, 224)
+            ),
+            "observation.images.right": PolicyFeature(
+                type=FeatureType.VISUAL, shape=(3, 224, 224)
+            ),
+            "observation.images.left": PolicyFeature(
+                type=FeatureType.VISUAL, shape=(3, 224, 224)
+            ),
+            "observation.state": PolicyFeature(type=FeatureType.STATE, shape=(14,)),
+        }
+        vlm_dim = 2048  # From PaliGemma
+
+        hidden_dim = model_cfg.hidden_dim
+        num_layers = model_cfg.num_layers
+        num_heads = model_cfg.num_heads
+
+        # Project VLM tokens to hidden dim
+        self.input_proj = nn.Linear(vlm_dim, hidden_dim)
+
+        # Learnable gripper query tokens (4 points)
+        self.gripper_queries = nn.Parameter(torch.randn(4, hidden_dim))
+
+        # Cross-attention transformer layers
+        self.decoder = nn.TransformerDecoder(
+            nn.TransformerDecoderLayer(hidden_dim, num_heads, batch_first=True),
+            num_layers,
+        )
+
+        # Output projection to xyz (3 channels per point)
+        self.output_proj = nn.Linear(hidden_dim, 3)
 
     def forward(self, batch):
-        breakpoint()
         # Use PI0's preprocessing pipeline
+        batch_size = batch["observation.images.front"].shape[0]
         batch = self.pi0.normalize_inputs(batch)
         images_processed, img_masks = self.pi0.prepare_images(batch)
         lang_tokens, lang_masks = self.pi0.prepare_language(batch)
@@ -34,7 +87,7 @@ class Pi0GoalNetwork(nn.Module):
             images_processed, img_masks, lang_tokens, lang_masks
         )
 
-        # Process through robot-finetuned transformer
+        # Process through Pi0's PaliGemma backbone
         att_2d_masks = make_att_2d_masks(prefix_pad_masks, prefix_att_masks)
         position_ids = torch.cumsum(prefix_pad_masks, dim=1) - 1
 
@@ -49,14 +102,18 @@ class Pi0GoalNetwork(nn.Module):
             )
         )
 
-        tokens = prefix_outputs  # Robot-finetuned VLM features
-        return tokens
+        # Robot-finetuned VLM features
+        vlm_tokens = self.input_proj(prefix_outputs)  # [batch, seq_len, hidden_dim]
+        queries = self.gripper_queries.unsqueeze(0).expand(batch_size, -1, -1)
+        output = self.decoder(queries, vlm_tokens)
+
+        pred_points = self.output_proj(output)
+        return pred_points
 
 
-class Pi0GoalModule(pl.LightningModule):
+class Pi0GoalModule(BaseModule):
     """
     A goal generation module that handles model training, inference, evaluation and visualization.
-    Based on CrossDisplacementModule but reworked to use the Articubot high-level model.
     """
 
     def __init__(self, network, cfg) -> None:
@@ -94,67 +151,189 @@ class Pi0GoalModule(pl.LightningModule):
         self.val_batch_size = self.run_cfg.val_batch_size
         self.max_depth = cfg.dataset.max_depth
 
-    def configure_optimizers(self):
-        assert self.mode == "train", "Can only configure optimizers in training mode."
-        optimizer = optim.AdamW(
-            self.parameters(), lr=self.lr, weight_decay=self.weight_decay
-        )
-        lr_scheduler = get_cosine_schedule_with_warmup(
-            optimizer=optimizer,
-            num_warmup_steps=self.lr_warmup_steps,
-            num_training_steps=self.num_training_steps,
-        )
-        return {
-            "optimizer": optimizer,
-            "lr_scheduler": {
-                "scheduler": lr_scheduler,
-                "interval": "step",  # Step after every batch
-            },
-        }
-
-    def extract_gt_4_points(self, batch):
-        cross_displacement = batch[self.label_key].points_padded()
-        initial_gripper = batch["action_pcd"].points_padded()
-        ground_truth_gripper = initial_gripper + cross_displacement
-        batch_indices = torch.arange(
-            ground_truth_gripper.shape[0], device=ground_truth_gripper.device
-        ).unsqueeze(1)
-
-        # Select specific idxs to compute the loss over
-        gt_primary_points = ground_truth_gripper[batch_indices, batch["gripper_idx"], :]
-        # Assumes 0/1 are tips to be averaged
-        gt_extra_point = (gt_primary_points[:, 0, :] + gt_primary_points[:, 1, :]) / 2
-        gt = torch.cat([gt_primary_points, gt_extra_point[:, None, :]], dim=1)
-
-        init_primary_points = initial_gripper[batch_indices, batch["gripper_idx"], :]
-        init_extra_point = (
-            init_primary_points[:, 0, :] + init_primary_points[:, 1, :]
-        ) / 2
-        init = torch.cat([init_primary_points, init_extra_point[:, None, :]], dim=1)
-        return init, gt
-
     def forward(self, batch):
         batch_size = batch["camera_front"].shape[0]
         device = batch["camera_front"].device
+
         pi0_batch = {
-            "front": batch["camera_front"],
-            "top": batch["camera_top"],
-            "right": batch["camera_right"],
-            "left": batch["camera_left"],
+            "observation.state": torch.zeros(batch_size, 14, device=device),  # not used
+            "observation.images.front": batch["camera_front"].permute(0, 3, 1, 2),
+            "observation.images.top": batch["camera_top"].permute(0, 3, 1, 2),
+            "observation.images.right": batch["camera_right"].permute(0, 3, 1, 2),
+            "observation.images.left": batch["camera_left"].permute(0, 3, 1, 2),
             "task": batch["caption"],
-            "observation.state": torch.zeros(batch_size, 9, device=device),
         }
         pred_points = self.network(pi0_batch)
+
         init, gt = self.extract_gt_4_points(batch)
         loss = F.mse_loss(pred_points, gt)
         return None, loss
 
     @torch.no_grad()
     def predict(self, batch, progress=False):
-        return None
+        """
+        Compute prediction for a given batch.
+        NOTE: To maintain consistency with the codebase,
+        this returns the displacement to the goal position,
+        not the actual goal position itself.
 
-    def log_viz_to_wandb(self, batch, pred_dict, weighted_displacement, tag):
-        return None
+        Args:
+            batch: the input batch
+            progress: whether to show progress bar
+        """
+        batch_size = batch["camera_front"].shape[0]
+        device = batch["camera_front"].device
+
+        pi0_batch = {
+            "observation.state": torch.zeros(batch_size, 14, device=device),  # not used
+            "observation.images.front": batch["camera_front"].permute(0, 3, 1, 2),
+            "observation.images.top": batch["camera_top"].permute(0, 3, 1, 2),
+            "observation.images.right": batch["camera_right"].permute(0, 3, 1, 2),
+            "observation.images.left": batch["camera_left"].permute(0, 3, 1, 2),
+            "task": batch["caption"],
+        }
+        pred_points = self.network(pi0_batch)
+
+        init, gt = self.extract_gt_4_points(batch)
+
+        pred_displacement = pred_points - init
+        return {self.prediction_type: {"pred": pred_displacement}}
+
+    def log_viz_to_wandb(self, batch, pred_dict, tag):
+        """
+        Log visualizations to wandb.
+
+        Args:
+            batch: the input batch
+            pred_dict: the prediction dictionary
+            tag: the tag to use for logging
+        """
+        batch_size = batch[self.label_key].points_padded().shape[0]
+        # pick a random sample in the batch to visualize
+        viz_idx = np.random.randint(0, batch_size)
+        RED, GREEN, BLUE = (255, 0, 0), (0, 255, 0), (0, 0, 255)
+        max_depth = self.max_depth
+
+        all_pred = pred_dict[self.prediction_type]["all_pred"][viz_idx].cpu().numpy()
+        N = all_pred.shape[0]
+        end2start = np.linalg.inv(batch["start2end"][viz_idx].cpu().numpy())
+
+        if N == 1:
+            BLUES = [BLUE]
+        else:
+            # Multiple shades of blue for different samples
+            BLUES = [
+                (int(200 * (1 - i / (N - 1))), int(220 * (1 - i / (N - 1))), 255)
+                for i in range(N)
+            ]
+
+        goal_text = batch["caption"][viz_idx]
+        vid_name = batch["vid_name"][viz_idx]
+        rmse = pred_dict["rmse"][viz_idx]
+        anchor_pcd = batch["anchor_pcd"].points_padded()[viz_idx].cpu().numpy()
+
+        pcd, gt = self.extract_gt_4_points(batch)
+        pcd, gt = pcd.cpu().numpy()[viz_idx], gt.cpu().numpy()[viz_idx]
+        all_pred_pcd = pcd + all_pred
+        gt_pcd = gt
+        padding_mask = torch.ones(gt.shape[0]).bool().numpy()
+
+        # Move center back from action_pcd to the camera frame
+        # and invert augmentation transforms before viz
+        pcd_mean = batch["pcd_mean"][viz_idx].cpu().numpy()
+        pcd_std = batch["pcd_std"][viz_idx].cpu().numpy()
+        R = batch["augment_R"][viz_idx].cpu().numpy()
+        t = batch["augment_t"][viz_idx].cpu().numpy()
+        scene_centroid = batch["augment_C"][viz_idx].cpu().numpy()
+
+        pcd = invert_augmentation_and_normalization(
+            pcd, pcd_mean, pcd_std, R, t, scene_centroid
+        )
+        anchor_pcd = invert_augmentation_and_normalization(
+            anchor_pcd, pcd_mean, pcd_std, R, t, scene_centroid
+        )
+        all_pred_pcd = invert_augmentation_and_normalization(
+            all_pred_pcd, pcd_mean, pcd_std, R, t, scene_centroid
+        )
+        gt_pcd = invert_augmentation_and_normalization(
+            gt_pcd, pcd_mean, pcd_std, R, t, scene_centroid
+        )
+
+        # All points cloud are in the start image's coordinate frame
+        # We need to visualize the end image, therefore need to apply transform
+        # Transform the point clouds to align with end image coordinate frame
+        pcd_endframe = np.hstack((pcd, np.ones((pcd.shape[0], 1))))
+        pcd_endframe = (end2start @ pcd_endframe.T).T[:, :3]
+        all_pred_pcd_tmp = []
+        for i in range(N):
+            tmp_pcd = np.hstack((all_pred_pcd[i], np.ones((all_pred_pcd.shape[1], 1))))
+            tmp_pcd = (end2start @ tmp_pcd.T).T[:, :3]
+            all_pred_pcd_tmp.append(tmp_pcd)
+        all_pred_pcd = np.stack(all_pred_pcd_tmp)
+        gt_pcd = np.hstack((gt_pcd, np.ones((gt_pcd.shape[0], 1))))
+        gt_pcd = (end2start @ gt_pcd.T).T[:, :3]
+
+        K = batch["intrinsics"][viz_idx].cpu().numpy()
+
+        rgb_init, rgb_end = (
+            batch["rgbs"][viz_idx, 0].cpu().numpy(),
+            batch["rgbs"][viz_idx, 1].cpu().numpy(),
+        )
+        depth_init, depth_end = (
+            batch["depths"][viz_idx, 0].cpu().numpy(),
+            batch["depths"][viz_idx, 1].cpu().numpy(),
+        )
+
+        # Project tracks to image and save
+        init_rgb_proj = project_pcd_on_image(pcd, padding_mask, rgb_init, K, GREEN)
+        end_rgb_proj = project_pcd_on_image(gt_pcd, padding_mask, rgb_end, K, RED)
+        pred_rgb_proj = project_pcd_on_image(
+            all_pred_pcd[-1], padding_mask, rgb_end, K, BLUE
+        )
+        rgb_proj_viz = cv2.hconcat([init_rgb_proj, end_rgb_proj, pred_rgb_proj])
+
+        wandb_proj_img = wandb.Image(
+            rgb_proj_viz,
+            caption=f"Left: Initial Frame (GT Track)\n; Middle: Final Frame (GT Track)\n\
+            ; Right: Final Frame (Pred Track)\n; Goal Description : {goal_text};\n\
+            rmse={rmse};\nvideo path = {vid_name}; ",
+        )
+        ###
+
+        # Visualize point cloud
+        viz_pcd, _ = get_img_and_track_pcd(
+            rgb_end,
+            depth_end,
+            K,
+            padding_mask,
+            pcd_endframe,
+            gt_pcd,
+            all_pred_pcd,
+            GREEN,
+            RED,
+            BLUES,
+            max_depth,
+            anchor_pcd.shape[0],
+        )
+        ###
+
+        # Visualize action/anchor point cloud
+        action_anchor_pcd = get_action_anchor_pcd(
+            pcd,
+            anchor_pcd,
+            GREEN,
+            RED,
+        )
+        ###
+
+        viz_dict = {
+            f"{tag}/track_projected_to_rgb": wandb_proj_img,
+            f"{tag}/image_and_tracks_pcd": wandb.Object3D(viz_pcd),
+            f"{tag}/action_anchor_pcd": wandb.Object3D(action_anchor_pcd),
+            "trainer/global_step": self.global_step,
+        }
+
+        wandb.log(viz_dict)
 
     def training_step(self, batch, batch_idx):
         """
@@ -185,7 +364,7 @@ class Pi0GoalModule(pl.LightningModule):
             with torch.no_grad():
                 all_pred_dict = [self.predict(batch)]
                 # Use one sample for computing other metrics
-                pred_dict, weighted_displacement = all_pred_dict[0]
+                pred_dict = all_pred_dict[0]
                 # Store all sample preds for viz
                 pred_dict[self.prediction_type]["all_pred"] = [
                     i[0][self.prediction_type]["pred"] for i in all_pred_dict
@@ -215,107 +394,135 @@ class Pi0GoalModule(pl.LightningModule):
                 ####################################################
                 # logging visualizations
                 ####################################################
-                self.log_viz_to_wandb(batch, pred_dict, weighted_displacement, "train")
+                self.log_viz_to_wandb(batch, pred_dict, "train")
 
         self.train_outputs.append(train_metrics)
         return loss
-
-    def on_train_epoch_end(self):
-        if len(self.train_outputs) == 0:
-            return
-
-        log_dictionary = {}
-        loss = torch.stack([x["loss"] for x in self.train_outputs]).mean()
-        log_dictionary["train/loss"] = loss
-
-        def mean_metric(metric_name):
-            return torch.stack(
-                [x[metric_name].mean() for x in self.train_outputs if metric_name in x]
-            ).mean()
-
-        if any("rmse" in x for x in self.train_outputs):
-            log_dictionary["train/rmse"] = mean_metric("rmse")
-            log_dictionary["train/wta_rmse"] = mean_metric("wta_rmse")
-            log_dictionary["train/chamfer_dist"] = mean_metric("chamfer_dist")
-            log_dictionary["train/wta_chamfer_dist"] = mean_metric("wta_chamfer_dist")
-            log_dictionary["train/sample_std"] = mean_metric("sample_std")
-
-        ####################################################
-        # logging training metrics
-        ####################################################
-        self.log_dict(
-            log_dictionary,
-            add_dataloader_idx=False,
-            prog_bar=True,
-            sync_dist=True,
-        )
-        self.train_outputs.clear()
-
-    def on_validation_epoch_start(self):
-        # Choose a random batch index for each validation epoch
-        self.random_val_viz_idx = {
-            k: random.randint(0, len(v) - 1)
-            for k, v in self.trainer.val_dataloaders.items()
-        }
 
     def validation_step(self, batch, batch_idx, dataloader_idx=0):
         """
         Validation step for the module. Logs validation metrics and visualizations to wandb.
         """
-        return None
+        val_tag = self.trainer.datamodule.val_tags[dataloader_idx]
+        self.eval()
+        with torch.no_grad():
+            all_pred_dict = [self.predict(batch)]
+            pred_dict = all_pred_dict[0]
 
-    def on_validation_epoch_end(self):
-        log_dict = {}
-        all_metrics = {
-            "rmse": [],
-            "wta_rmse": [],
-            "chamfer_dist": [],
-            "wta_chamfer_dist": [],
-            "sample_std": [],
-        }
+            # Store all sample preds for viz
+            pred_dict[self.prediction_type]["all_pred"] = [
+                i[0][self.prediction_type]["pred"] for i in all_pred_dict
+            ]
+            pred_dict[self.prediction_type]["all_pred"] = torch.stack(
+                pred_dict[self.prediction_type]["all_pred"]
+            ).permute(1, 0, 2, 3)
 
-        for val_tag in self.trainer.datamodule.val_tags:
-            val_outputs = self.val_outputs[val_tag]
-            tag_metrics = {}
+        init, gt = self.extract_gt_4_points(batch)
+        gt_displacement = gt - init
 
-            if len(val_outputs) == 0:
-                continue
-
-            for metric in all_metrics.keys():
-                values = torch.stack([x[metric].mean() for x in val_outputs]).mean()
-                tag_metrics[metric] = values
-                all_metrics[metric].append(values)
-
-            # Per dataset metrics
-            for metric, value in tag_metrics.items():
-                log_dict[f"val_{val_tag}/{metric}"] = value
-
-        # Avg over all datasets
-        for metric, values in all_metrics.items():
-            log_dict[f"val/{metric}"] = torch.stack(values).mean()
-
-        # Minimize the linear combination of RMSE (reconstruction error) and -std (i.e. maximize diversity)
-        # TODO: Find a better metric, and dynamically configure this....
-        alpha = 0.95
-        log_dict["val/rmse_and_std_combi"] = alpha * log_dict["val/rmse"] + (
-            1 - alpha
-        ) * (-log_dict["val/sample_std"])
-
-        self.log_dict(
-            log_dict,
-            add_dataloader_idx=False,
-            sync_dist=True,
+        padding_mask = torch.ones(gt.shape[0], gt.shape[1]).bool()
+        pcd_std = batch["pcd_std"]
+        ground_truth = batch[self.label_key].to(self.device)
+        pred_dict = calc_pcd_metrics(
+            pred_dict,
+            init,
+            pred_dict[self.prediction_type]["all_pred"],
+            gt_displacement,
+            pcd_std,
+            padding_mask,
         )
-        self.val_outputs.clear()
+        self.val_outputs[val_tag].append(pred_dict)
+
+        ####################################################
+        # logging visualizations
+        ####################################################
+        if (
+            batch_idx == self.random_val_viz_idx[val_tag]
+            and self.trainer.is_global_zero
+        ):
+            self.log_viz_to_wandb(batch, pred_dict, f"val_{val_tag}")
+        return pred_dict
 
     def predict_step(self, batch, batch_idx, dataloader_idx=0):
         """
         Prediction step for model evaluation.
         """
-        return None
+        eval_tag = self.trainer.datamodule.eval_tags[dataloader_idx]
+        n_samples_wta = self.trainer.datamodule.n_samples_wta
+
+        all_pred_dict = [self.predict(batch)]
+
+        pred_dict = all_pred_dict[0]
+        # Store all sample preds for viz
+        pred_dict[self.prediction_type]["all_pred"] = [
+            i[0][self.prediction_type]["pred"] for i in all_pred_dict
+        ]
+        pred_dict[self.prediction_type]["all_pred"] = torch.stack(
+            pred_dict[self.prediction_type]["all_pred"]
+        ).permute(1, 0, 2, 3)
+
+        init, gt = self.extract_gt_4_points(batch)
+        gt_displacement = gt - init
+
+        padding_mask = torch.ones(gt.shape[0], gt.shape[1]).bool()
+        pcd_std = batch["pcd_std"]
+        ground_truth = batch[self.label_key].to(self.device)
+        pred_dict = calc_pcd_metrics(
+            pred_dict,
+            init,
+            pred_dict[self.prediction_type]["all_pred"],
+            gt_displacement,
+            pcd_std,
+            padding_mask,
+        )
+        self.predict_outputs[eval_tag].append(pred_dict)
+
+        return {
+            "rmse": pred_dict["rmse"],
+            "chamfer_dist": pred_dict["chamfer_dist"],
+            "wta_rmse": pred_dict["wta_rmse"],
+            "wta_chamfer_dist": pred_dict["wta_chamfer_dist"],
+            "vid_name": batch["vid_name"],
+            "caption": batch["caption"],
+        }
 
     def on_predict_epoch_end(self):
         """
         Visualize random 5 batches in the test sets.
         """
-        return None
+        for dataloader_idx, eval_tag in enumerate(self.trainer.datamodule.eval_tags):
+            if "test" not in eval_tag:
+                continue
+
+            pred_outputs = self.predict_outputs[eval_tag]
+            rmse = torch.cat([x["rmse"] for x in pred_outputs])
+            chamfer_dist = torch.cat([x["chamfer_dist"] for x in pred_outputs])
+            cross_displacement, all_cross_displacement = [], []
+            for i, pred in enumerate(pred_outputs):
+                cross_displacement.extend(pred["cross_displacement"]["pred"])
+                all_cross_displacement.extend(pred["cross_displacement"]["all_pred"])
+
+            dataloader = self.trainer.predict_dataloaders[dataloader_idx]
+            total_batches = len(dataloader)
+            random_indices = random.sample(range(total_batches), min(5, total_batches))
+
+            for i, batch in enumerate(dataloader):
+                if i not in random_indices:
+                    continue
+
+                batch_len = len(batch["caption"])
+                for idx in range(batch_len):
+                    pred_dict = self.compose_pred_dict_for_viz(
+                        rmse,
+                        chamfer_dist,
+                        cross_displacement,
+                        all_cross_displacement,
+                        idx,
+                    )
+                    viz_batch = self.compose_batch_for_viz(batch, idx)
+                    self.log_viz_to_wandb(
+                        viz_batch,
+                        pred_dict,
+                        eval_tag,
+                    )
+        self.predict_outputs.clear()
