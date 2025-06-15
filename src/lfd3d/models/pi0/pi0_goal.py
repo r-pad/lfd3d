@@ -231,6 +231,12 @@ class Pi0GoalModule(BaseModule):
         vid_name = batch["vid_name"][viz_idx]
         rmse = pred_dict["rmse"][viz_idx]
         anchor_pcd = batch["anchor_pcd"].points_padded()[viz_idx].cpu().numpy()
+        multiview_imgs = [
+            batch["camera_front"][viz_idx].cpu().numpy(),
+            batch["camera_top"][viz_idx].cpu().numpy(),
+            batch["camera_right"][viz_idx].cpu().numpy(),
+            batch["camera_left"][viz_idx].cpu().numpy(),
+        ]
 
         pcd, gt = self.extract_gt_4_points(batch)
         pcd, gt = pcd.cpu().numpy()[viz_idx], gt.cpu().numpy()[viz_idx]
@@ -326,10 +332,20 @@ class Pi0GoalModule(BaseModule):
         )
         ###
 
+        # Multiview image
+        img1 = cv2.hconcat([multiview_imgs[0], multiview_imgs[1]])
+        img2 = cv2.hconcat([multiview_imgs[2], multiview_imgs[3]])
+        multiview_img = cv2.vconcat([img1, img2])
+        wandb_multiview_img = wandb.Image(
+            multiview_img,
+            caption="Multiview image rendered from pcd - [Front / Top / Right / Left]",
+        )
+
         viz_dict = {
             f"{tag}/track_projected_to_rgb": wandb_proj_img,
             f"{tag}/image_and_tracks_pcd": wandb.Object3D(viz_pcd),
             f"{tag}/action_anchor_pcd": wandb.Object3D(action_anchor_pcd),
+            f"{tag}/multiview_image": wandb_multiview_img,
             "trainer/global_step": self.global_step,
         }
 
@@ -367,7 +383,7 @@ class Pi0GoalModule(BaseModule):
                 pred_dict = all_pred_dict[0]
                 # Store all sample preds for viz
                 pred_dict[self.prediction_type]["all_pred"] = [
-                    i[0][self.prediction_type]["pred"] for i in all_pred_dict
+                    i[self.prediction_type]["pred"] for i in all_pred_dict
                 ]
                 pred_dict[self.prediction_type]["all_pred"] = torch.stack(
                     pred_dict[self.prediction_type]["all_pred"]
@@ -411,7 +427,7 @@ class Pi0GoalModule(BaseModule):
 
             # Store all sample preds for viz
             pred_dict[self.prediction_type]["all_pred"] = [
-                i[0][self.prediction_type]["pred"] for i in all_pred_dict
+                i[self.prediction_type]["pred"] for i in all_pred_dict
             ]
             pred_dict[self.prediction_type]["all_pred"] = torch.stack(
                 pred_dict[self.prediction_type]["all_pred"]
@@ -455,7 +471,7 @@ class Pi0GoalModule(BaseModule):
         pred_dict = all_pred_dict[0]
         # Store all sample preds for viz
         pred_dict[self.prediction_type]["all_pred"] = [
-            i[0][self.prediction_type]["pred"] for i in all_pred_dict
+            i[self.prediction_type]["pred"] for i in all_pred_dict
         ]
         pred_dict[self.prediction_type]["all_pred"] = torch.stack(
             pred_dict[self.prediction_type]["all_pred"]

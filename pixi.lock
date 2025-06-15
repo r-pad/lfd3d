@@ -2703,7 +2703,7 @@ packages:
 - pypi: .
   name: lfd3d
   version: 0.1.0
-  sha256: 1a51e9f4bfd1fc0fb568ad3f7bf5728af0136bbc465fb3a41ea76386a671266f
+  sha256: d429a443368d4d46a361b20218603479c43aab8092b949447b4606e4d48ef728
   requires_dist:
   - diffusers==0.26.3
   - gif
@@ -2716,6 +2716,7 @@ packages:
   - torchmetrics
   - wandb==0.18
   - moviepy==1.0.3
+  - transformers>=4.48.3,<5
   - sentencepiece
   - robot-descriptions
   - trimesh
@@ -2731,7 +2732,6 @@ packages:
   - peft>=0.15.2,<0.16
   - decord>=0.6.0,<0.7
   - draccus>=0.11.5,<0.12
-  - transformers>=4.48.3,<5
   - ruff==0.3.6 ; extra == 'develop'
   - mypy==1.3.0 ; extra == 'develop'
   - pytest==7.3.2 ; extra == 'develop'
