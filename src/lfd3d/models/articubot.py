@@ -1535,7 +1535,9 @@ class GoalRegressionModule(pl.LightningModule):
             padding_mask,
         )
         self.predict_outputs[eval_tag].append(pred_dict)
-        self.predict_weighted_displacements[eval_tag].append(weighted_displacement)
+        self.predict_weighted_displacements[eval_tag].append(
+            weighted_displacement.cpu()
+        )
 
         return {
             "rmse": pred_dict["rmse"],

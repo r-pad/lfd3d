@@ -34,11 +34,11 @@ def get_eval_datamodule(datamodule, inference_cfg):
     for i, (tag, loader) in enumerate(datamodule.test_dataloader().items()):
         eval_dataloaders.append(loader)
         eval_tags.append(f"test_{tag}")
-    eval_dataloaders.append(datamodule.train_subset_dataloader())
-    eval_tags.append("train_subset")
-    for i, (tag, loader) in enumerate(datamodule.val_dataloader().items()):
-        eval_dataloaders.append(loader)
-        eval_tags.append(f"val_{tag}")
+    # eval_dataloaders.append(datamodule.train_subset_dataloader())
+    # eval_tags.append("train_subset")
+    # for i, (tag, loader) in enumerate(datamodule.val_dataloader().items()):
+    #     eval_dataloaders.append(loader)
+    #     eval_tags.append(f"val_{tag}")
 
     eval_datamodule = EvalDataModule(eval_dataloaders, eval_tags, inference_cfg)
     return eval_datamodule
