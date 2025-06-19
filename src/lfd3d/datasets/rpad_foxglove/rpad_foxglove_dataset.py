@@ -1,5 +1,6 @@
 import json
 import os
+import random
 from datetime import datetime
 from pathlib import Path
 
@@ -413,6 +414,11 @@ class RpadFoxgloveDataset(BaseDataset):
             scene_pcd_std,
             augment_tf,
         )
+
+        # HACK: Find a better way to do this. mark some subgoals as augmentable some way
+        # Make augmentation hydra config var
+        if subgoal_idx == 0 and random.random() < 0.75:
+            start_tracks = self.augment_start_tracks(start_scene_pcd, start_tracks)
 
         # collate_pcd_fn handles batching of the point clouds
         item = {
