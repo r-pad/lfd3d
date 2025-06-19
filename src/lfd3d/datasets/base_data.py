@@ -262,6 +262,53 @@ class BaseDataset(td.Dataset):
         K_[1, 2] -= crop_offset_y
         return K_
 
+    def augment_start_tracks(self, start_scene_pcd, start_tracks):
+        # HACK: Not available in the cluster, find a better way.
+        import open3d as o3d
+        from scipy.spatial.transform import Rotation
+
+        scene_pcd = o3d.geometry.PointCloud()
+        scene_pcd.points = o3d.utility.Vector3dVector(start_scene_pcd)
+
+        voxel_size = 0.10
+        N = 1
+        # Hand picked for one scene
+        center = np.array([0.0, 0.0, 0.6])
+        extent = np.array([0.8, 0.4, 0.4])
+        R = Rotation.from_euler("x", -45, degrees=True).as_matrix()
+
+        voxel_grid = o3d.geometry.VoxelGrid.create_from_point_cloud(
+            scene_pcd, voxel_size
+        )
+        occupied_voxels = set()
+        for voxel in voxel_grid.get_voxels():
+            occupied_voxels.add(tuple(voxel.grid_index))
+
+        bbox = o3d.geometry.OrientedBoundingBox(center, R, extent)
+
+        def sample_free_point(bbox, occupied_voxels, N):
+            points = []
+            while len(points) < N:
+                # Sample in OBB's local coordinate system (unit cube)
+                local_sample = np.random.rand(3) - 0.5  # [-0.5, 0.5]
+                # Transform to world coordinates
+                sample_pt = bbox.center + (bbox.R @ (local_sample * bbox.extent))
+                # Convert to voxel index
+                voxel_idx = tuple(
+                    ((sample_pt - voxel_grid.origin) / voxel_size).astype(int)
+                )
+                if voxel_idx not in occupied_voxels:
+                    points.append(sample_pt)
+            return points
+
+        tf_centroid = sample_free_point(bbox, occupied_voxels, N)[0]
+
+        rot = Rotation.random().as_matrix()
+        start_tracks = ((start_tracks - start_tracks.mean()) @ rot) + tf_centroid
+        start_tracks = self.add_gaussian_noise(start_tracks)
+
+        return start_tracks
+
 
 class BaseDataModule(pl.LightningDataModule):
     def __init__(self, batch_size, val_batch_size, num_workers, dataset_cfg, seed):
