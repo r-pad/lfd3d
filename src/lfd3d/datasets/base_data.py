@@ -6,6 +6,7 @@ import pytorch_lightning as pl
 import torch
 import torchdatasets as td
 from pytorch3d.ops import sample_farthest_points
+from scipy.spatial.transform import Rotation
 from torch.utils import data
 from torch_cluster import grid_cluster
 from torch_scatter import scatter_mean
@@ -262,51 +263,56 @@ class BaseDataset(td.Dataset):
         K_[1, 2] -= crop_offset_y
         return K_
 
-    def augment_start_tracks(self, start_scene_pcd, start_tracks):
-        # HACK: Not available in the cluster, find a better way.
-        import open3d as o3d
-        from scipy.spatial.transform import Rotation
+    def augment_start_tracks(self, start_tracks, gripper_idx):
+        rand = random.random()
+        # Generate synthetic gripper
+        if self.split == "train" and rand < 0.6:
+            # HACK: Verrrrry hacky.
+            # Corners of a bbox found manually with open3d
+            # for one specific scene in the lab.
+            # Definitely need to find a better way.
+            bbox = np.array(
+                [
+                    [-4.00000000e-01, -2.82842712e-01, 6.00000000e-01],
+                    [4.00000000e-01, -2.82842712e-01, 6.00000000e-01],
+                    [-4.00000000e-01, -2.77555756e-17, 3.17157288e-01],
+                    [-4.00000000e-01, 2.77555756e-17, 8.82842712e-01],
+                    [4.00000000e-01, 2.82842712e-01, 6.00000000e-01],
+                    [-4.00000000e-01, 2.82842712e-01, 6.00000000e-01],
+                    [4.00000000e-01, 2.77555756e-17, 8.82842712e-01],
+                    [4.00000000e-01, -2.77555756e-17, 3.17157288e-01],
+                ]
+            )
 
-        scene_pcd = o3d.geometry.PointCloud()
-        scene_pcd.points = o3d.utility.Vector3dVector(start_scene_pcd)
+            # Sample a random point within the bbox
+            base = bbox[0]
+            edge1 = bbox[1] - bbox[0]
+            edge2 = bbox[2] - bbox[0]
+            edge3 = bbox[3] - bbox[0]
+            u, v, w = np.random.uniform(0, 1, 3)
+            gripper_center = base + (u * edge1) + (v * edge2) + (w * edge3)
 
-        voxel_size = 0.10
-        N = 1
-        # Hand picked for one scene
-        center = np.array([0.0, 0.0, 0.6])
-        extent = np.array([0.8, 0.4, 0.4])
-        R = Rotation.from_euler("x", -45, degrees=True).as_matrix()
+            synth_gripper = np.zeros_like(start_tracks)
+            gripper_width = random.uniform(0, 0.045)  # width of fingers
+            # around this range for the aloha based on the selected gripper points
+            gripper_height = random.uniform(0.092, 0.098)
 
-        voxel_grid = o3d.geometry.VoxelGrid.create_from_point_cloud(
-            scene_pcd, voxel_size
-        )
-        occupied_voxels = set()
-        for voxel in voxel_grid.get_voxels():
-            occupied_voxels.add(tuple(voxel.grid_index))
+            synth_gripper[gripper_idx[0]] = [gripper_width, 0, 0.0]
+            synth_gripper[gripper_idx[1]] = [-gripper_width, 0, 0.0]
+            synth_gripper[gripper_idx[2]] = [0, gripper_height, 0.0]
 
-        bbox = o3d.geometry.OrientedBoundingBox(center, R, extent)
+            rot = Rotation.random().as_matrix()
+            start_tracks = (synth_gripper @ rot) + gripper_center
+        elif self.split == "train" and rand > 0.6 and rand < 0.8:  # apply *small* SE(3) transform
+            rot = Rotation.random().as_matrix()
+            transl_dirn = np.random.uniform(0, 1, 3)
+            transl_dirn = transl_dirn / np.linalg.norm(transl_dirn)
+            translation = transl_dirn * 0.1  # 10cm translation
 
-        def sample_free_point(bbox, occupied_voxels, N):
-            points = []
-            while len(points) < N:
-                # Sample in OBB's local coordinate system (unit cube)
-                local_sample = np.random.rand(3) - 0.5  # [-0.5, 0.5]
-                # Transform to world coordinates
-                sample_pt = bbox.center + (bbox.R @ (local_sample * bbox.extent))
-                # Convert to voxel index
-                voxel_idx = tuple(
-                    ((sample_pt - voxel_grid.origin) / voxel_size).astype(int)
-                )
-                if voxel_idx not in occupied_voxels:
-                    points.append(sample_pt)
-            return points
-
-        tf_centroid = sample_free_point(bbox, occupied_voxels, N)[0]
-
-        rot = Rotation.random().as_matrix()
-        start_tracks = ((start_tracks - start_tracks.mean()) @ rot) + tf_centroid
-        start_tracks = self.add_gaussian_noise(start_tracks)
-
+            centroid = start_tracks.mean(0)
+            start_tracks = ((start_tracks - centroid) @ rot) + centroid + translation
+        else:  # No augmentation
+            pass
         return start_tracks
 
 
