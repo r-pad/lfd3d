@@ -1,6 +1,5 @@
 import json
 import os
-import random
 from datetime import datetime
 from pathlib import Path
 
@@ -16,6 +15,10 @@ from lfd3d.datasets.rgb_text_feature_gen import (
 from PIL import Image
 from sklearn.decomposition import PCA
 from transformers import AutoModel, AutoProcessor
+
+# Subgoals where the gripper is in free space and can thus be replaced by a free-floating
+# SE(3) gripper - meaningful only when the observed arm/gripper is masked out
+AUGMENTABLE_SUBGOAL = ["grasp mug"]
 
 
 class RpadFoxgloveDataset(BaseDataset):
@@ -52,6 +55,7 @@ class RpadFoxgloveDataset(BaseDataset):
             "cpu"
         )
         # indexes of selected gripper points -> handpicked
+        # Right finger, left finger, base
         self.GRIPPER_IDX = {
             "aloha": np.array([6, 197, 174]),
             "human": np.array([343, 763, 60]),
@@ -408,10 +412,9 @@ class RpadFoxgloveDataset(BaseDataset):
             augment_tf,
         )
 
-        # HACK: Find a better way to do this. mark some subgoals as augmentable some way
-        # Make augmentation hydra config var
-        if subgoal_idx == 0 and random.random() < 0.75:
-            start_tracks = self.augment_start_tracks(start_scene_pcd, start_tracks)
+        # HACK: Find a better way to do this. store augentable subgoals somewhere
+        if actual_caption in AUGMENTABLE_SUBGOAL:
+            start_tracks = self.augment_start_tracks(start_tracks, gripper_idx)
 
         # collate_pcd_fn handles batching of the point clouds
         item = {
