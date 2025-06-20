@@ -1501,6 +1501,12 @@ class GoalRegressionModule(pl.LightningModule):
         """
         Prediction step for model evaluation.
         """
+
+        assert "actual_caption" in batch, """We expect the actual caption of
+        the subgoal to be present in the batch to calculate errors for each
+        subgoal independently. The actual caption differs from the "caption"
+        key only when use_full_text is True. """
+
         eval_tag = self.trainer.datamodule.eval_tags[dataloader_idx]
         n_samples_wta = self.trainer.datamodule.n_samples_wta
 
@@ -1546,6 +1552,7 @@ class GoalRegressionModule(pl.LightningModule):
             "wta_chamfer_dist": pred_dict["wta_chamfer_dist"],
             "vid_name": batch["vid_name"],
             "caption": batch["caption"],
+            "actual_caption": batch["actual_caption"],
         }
 
     def on_predict_epoch_end(self):

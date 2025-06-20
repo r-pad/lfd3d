@@ -35,7 +35,7 @@ class RpadFoxgloveDataset(BaseDataset):
         self.num_points = dataset_cfg.num_points
         self.max_depth = dataset_cfg.max_depth
 
-        self.captions = {}
+        self.captions, self.actual_captions = {}, {}
         self.text_embeddings = {}
         self.dataset = zarr.group(root)
         self.dataset_index = self.expand_all_events()
@@ -105,6 +105,10 @@ class RpadFoxgloveDataset(BaseDataset):
 
             idx = np.argsort(events["event"])
             sorted_event = np.asarray(events["event"])[idx]
+            # In the case of full text, we use the full caption as input
+            # and lose info abouut which subgoal is actually being evaluated
+            # This variable stores the actual subgoal for downstream processing
+            actual_event = sorted_event.copy()
 
             # Overwrite with a concatenation of all the subgoals
             if self.dataset_cfg.use_full_text:
@@ -117,8 +121,12 @@ class RpadFoxgloveDataset(BaseDataset):
                 expanded_event_caption = {
                     (demo_name, i): sorted_event[i].replace("_", " ")
                 }
+                actual_event_caption = {
+                    (demo_name, i): actual_event[i].replace("_", " ")
+                }
                 expanded_index.extend(expanded_event_idx)
                 self.captions.update(expanded_event_caption)
+                self.actual_captions.update(actual_event_caption)
 
         if self.additional_img_dir is not None and self.split == "train":
             # A different format for the additional image only data
@@ -360,6 +368,8 @@ class RpadFoxgloveDataset(BaseDataset):
         K_ = self.get_scaled_intrinsics(K, orig_shape, self.target_shape)
 
         caption = self.captions[(demo_name, subgoal_idx)]
+        # Only different if use_full_text=True
+        actual_caption = self.actual_captions[(demo_name, subgoal_idx)]
         start2end = torch.eye(4)  # Static camera
 
         rgbs, depths = self.load_rgbd(demo_name, subgoal_idx, event_indexes, K_)
@@ -406,6 +416,7 @@ class RpadFoxgloveDataset(BaseDataset):
             "augment_R": augment_tf["R"],
             "augment_t": augment_tf["t"],
             "augment_C": augment_tf["C"],
+            "actual_caption": actual_caption,
         }
         return item
 

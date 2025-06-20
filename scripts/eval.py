@@ -1,4 +1,5 @@
 import json
+from collections import defaultdict
 
 import hydra
 import omegaconf
@@ -175,8 +176,19 @@ def main(cfg):
             metric = f"{tag}/{postfix}"
             metrics.append(metric)
     for metric in metrics:
+        tag, postfix = metric.split("/")
         pred_metric = preds_dict[metric.split("/")[0]][metric.split("/")[1]]
         summary_stats.append([metric, pred_metric.mean()])
+        subgoal_captions = preds_dict[tag]["actual_caption"]
+
+        subgoal_metrics = defaultdict(list)
+        for val, caption in zip(pred_metric, subgoal_captions):
+            subgoal_metrics[caption].append(val)
+
+        for cls, vals in subgoal_metrics.items():
+            class_mean = torch.mean(torch.stack(vals))
+            summary_stats.append([f"{metric}/{cls}", class_mean])
+
     summary_table = wandb.Table(data=summary_stats, columns=["Metric", "Value"])
     wandb.log({f"{dataset_name}-eval_results_summary": summary_table})
 
