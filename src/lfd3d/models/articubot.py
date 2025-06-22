@@ -907,39 +907,52 @@ class GoalRegressionModule(pl.LightningModule):
         scene_pcd,
         scene_feat_pcd,
         scene_padding_mask,
+        first_scene_pcd,
+        first_scene_feat_pcd,
+        first_scene_padding_mask,
         add_action_pcd_masked,
         use_rgb,
         gripper_idx,
     ):
         batch_size, pcd_size, feat_dim = scene_feat_pcd.shape
+        _, first_pcd_size, _ = first_scene_feat_pcd.shape
+        num_categories = 3
         if add_action_pcd_masked:
+            one_hot_scene = torch.zeros(
+                batch_size, scene_pcd.shape[1], num_categories, device=scene_pcd.device
+            )
+            one_hot_scene[:, :, 0] = 1
+            scene_pcd = torch.cat(
+                [scene_pcd, one_hot_scene], dim=2
+            )  # Now [B, N, original_dim + 2]
+
             batch_indices = torch.arange(
                 gripper_pcd.shape[0], device=gripper_pcd.device
             ).unsqueeze(1)
             gripper_pcd = gripper_pcd[batch_indices, gripper_idx, :]
             extra_point = (gripper_pcd[:, 0, :] + gripper_pcd[:, 1, :]) / 2
             gripper_pcd = torch.cat([gripper_pcd, extra_point[:, None, :]], dim=1)
+            one_hot_gripper = torch.zeros(
+                batch_size,
+                gripper_pcd.shape[1],
+                num_categories,
+                device=gripper_pcd.device,
+            )
+            one_hot_gripper[:, :, 1] = 1.0
             # Concat action pcd and scene pcd and add a mask for the same
-            gripper_pcd = torch.cat(
-                [
-                    gripper_pcd,
-                    torch.ones(
-                        batch_size, gripper_pcd.shape[1], 1, device=scene_pcd.device
-                    ),
-                ],
-                dim=2,
-            )  # [B, K, 4]
-            scene_pcd = torch.cat(
-                [
-                    scene_pcd,
-                    torch.zeros(
-                        batch_size, scene_pcd.shape[1], 1, device=scene_pcd.device
-                    ),
-                ],
-                dim=2,
-            )  # [B, N, 4]
-            scene_pcd = torch.cat([gripper_pcd, scene_pcd], dim=1)
-            pcd_size += gripper_pcd.shape[1]
+            gripper_pcd = torch.cat([gripper_pcd, one_hot_gripper], dim=2)  # [B, K, 4]
+
+            one_hot_first_scene = torch.zeros(
+                batch_size,
+                first_scene_pcd.shape[1],
+                num_categories,
+                device=first_scene_pcd.device,
+            )
+            one_hot_first_scene[:, :, 2] = 1
+            first_scene_pcd = torch.cat([first_scene_pcd, one_hot_first_scene], dim=2)
+
+            scene_pcd = torch.cat([scene_pcd, gripper_pcd, first_scene_pcd], dim=1)
+            pcd_size = pcd_size + gripper_pcd.shape[1] + first_pcd_size
             scene_padding_mask = torch.cat(
                 [
                     scene_padding_mask,
@@ -949,6 +962,7 @@ class GoalRegressionModule(pl.LightningModule):
                         device=scene_pcd.device,
                         dtype=bool,
                     ),
+                    first_scene_padding_mask,
                 ],
                 dim=1,
             )
@@ -1020,6 +1034,14 @@ class GoalRegressionModule(pl.LightningModule):
             torch.arange(max_points, device=num_points.device)[None, :]
             < num_points[:, None]
         )
+        first_scene_pcd = batch["first_scene_pcd"].points_padded()
+        first_scene_feat_pcd = batch["first_scene_pcd"].features_padded()
+        batch_size, first_max_points, *_ = first_scene_pcd.shape
+        first_num_points = batch["first_scene_pcd"].num_points_per_cloud()
+        first_scene_padding_mask = (
+            torch.arange(first_max_points, device=num_points.device)[None, :]
+            < first_num_points[:, None]
+        )
 
         text_embedding = batch["text_embed"]
         batch_size, pcd_size, _ = scene_pcd.shape
@@ -1029,6 +1051,9 @@ class GoalRegressionModule(pl.LightningModule):
             scene_pcd,
             scene_feat_pcd,
             scene_padding_mask,
+            first_scene_pcd,
+            first_scene_feat_pcd,
+            first_scene_padding_mask,
             self.model_cfg.add_action_pcd_masked,
             self.model_cfg.use_rgb,
             batch["gripper_idx"],
@@ -1101,6 +1126,14 @@ class GoalRegressionModule(pl.LightningModule):
             torch.arange(max_points, device=num_points.device)[None, :]
             < num_points[:, None]
         )
+        first_scene_pcd = batch["first_scene_pcd"].points_padded()
+        first_scene_feat_pcd = batch["first_scene_pcd"].features_padded()
+        batch_size, first_max_points, *_ = first_scene_pcd.shape
+        first_num_points = batch["first_scene_pcd"].num_points_per_cloud()
+        first_scene_padding_mask = (
+            torch.arange(first_max_points, device=num_points.device)[None, :]
+            < first_num_points[:, None]
+        )
 
         text_embedding = batch["text_embed"]
         batch_size, pcd_size, _ = scene_pcd.shape  # Matches forward
@@ -1110,6 +1143,9 @@ class GoalRegressionModule(pl.LightningModule):
             scene_pcd,
             scene_feat_pcd,
             scene_padding_mask,
+            first_scene_pcd,
+            first_scene_feat_pcd,
+            first_scene_padding_mask,
             self.model_cfg.add_action_pcd_masked,
             self.model_cfg.use_rgb,
             batch["gripper_idx"],

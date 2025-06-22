@@ -82,6 +82,20 @@ def collate_pcd_fn(batch):
             )
             collated_batch["anchor_pcd"] = anchor_pointclouds
 
+        elif "first_scene" in key:
+            if "first_scene_pcd" in collated_batch:
+                continue
+            first_scene_pcds = [
+                torch.as_tensor(item["first_scene_pcd"]).float() for item in batch
+            ]
+            first_scene_feat_pcds = [
+                torch.as_tensor(item["first_scene_feat_pcd"]).float() for item in batch
+            ]
+            first_scene_pointclouds = Pointclouds(
+                points=first_scene_pcds, features=first_scene_feat_pcds
+            )
+            collated_batch["first_scene_pcd"] = first_scene_pointclouds
+
         # Process point clouds and exclude intrinsics
         elif (
             isinstance(sample, np.ndarray)

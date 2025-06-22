@@ -282,6 +282,8 @@ class RpadFoxgloveDataset(BaseDataset):
             return self.load_rgbd_for_img(demo_name, subgoal_idx, event_indexes, K)
         demo = self.dataset[demo_name]
 
+        rgb_first = Image.fromarray(demo["raw"]["rgb"]["image_rect"]["img"][0])
+        rgb_first = np.asarray(self.rgb_preprocess(rgb_first))
         # Return rgb/depth at beginning and end of event
         rgb_init = Image.fromarray(
             demo["raw"]["rgb"]["image_rect"]["img"][event_indexes["rgb_start"]]
@@ -291,11 +293,22 @@ class RpadFoxgloveDataset(BaseDataset):
             demo["raw"]["rgb"]["image_rect"]["img"][event_indexes["rgb_end"]]
         )
         rgb_end = np.asarray(self.rgb_preprocess(rgb_end))
-        rgbs = np.array([rgb_init, rgb_end])
+        rgbs = np.array([rgb_init, rgb_end, rgb_first])
 
         if self.dataset_cfg.with_mask:
             mask_init = np.asarray(demo["masks"][event_indexes["depth_start"]])
             mask_end = np.asarray(demo["masks"][event_indexes["depth_end"]])
+            mask_first = np.asarray(demo["masks"][0])
+
+        depth_first = (
+            (demo["raw"]["depth_registered"]["image_rect"]["img"][0] / 1000.0)
+            .squeeze()
+            .astype(np.float32)
+        )
+        if self.dataset_cfg.with_mask:
+            depth_first[mask_first] = 0
+        depth_first = Image.fromarray(depth_first)
+        depth_first = np.asarray(self.depth_preprocess(depth_first))
 
         depth_init = (
             (
@@ -325,7 +338,7 @@ class RpadFoxgloveDataset(BaseDataset):
             depth_end[mask_end] = 0
         depth_end = Image.fromarray(depth_end)
         depth_end = np.asarray(self.depth_preprocess(depth_end))
-        depths = np.array([depth_init, depth_end])
+        depths = np.array([depth_init, depth_end, depth_first])
 
         return rgbs, depths
 
@@ -394,14 +407,26 @@ class RpadFoxgloveDataset(BaseDataset):
         )
 
         rgb_embed, text_embed = self.compute_rgb_text_feat(rgbs[0], caption)
+        first_rgb_embed, _ = self.compute_rgb_text_feat(rgbs[-1], caption)
         start_scene_pcd, start_scene_feat_pcd, augment_tf = self.get_scene_pcd(
             rgb_embed, depths[0], K_, self.num_points, self.max_depth
+        )
+        first_scene_pcd, first_scene_feat_pcd, _ = self.get_scene_pcd(
+            first_rgb_embed, depths[-1], K_, self.num_points, self.max_depth
         )
 
         gripper_idx = self.GRIPPER_IDX[self.source_of_data(demo_name)]
 
         action_pcd_mean, scene_pcd_std = self.get_normalize_mean_std(
             start_tracks, start_scene_pcd, self.dataset_cfg
+        )
+        _, _, first_scene_pcd = self.transform_pcds(
+            start_tracks,
+            end_tracks,
+            first_scene_pcd,
+            action_pcd_mean,
+            scene_pcd_std,
+            augment_tf,
         )
         start_tracks, end_tracks, start_scene_pcd = self.transform_pcds(
             start_tracks,
@@ -421,6 +446,8 @@ class RpadFoxgloveDataset(BaseDataset):
             "action_pcd": start_tracks,
             "anchor_pcd": start_scene_pcd,
             "anchor_feat_pcd": start_scene_feat_pcd,
+            "first_scene_pcd": first_scene_pcd,
+            "first_scene_feat_pcd": first_scene_feat_pcd,
             "caption": caption,
             "text_embed": text_embed,
             "cross_displacement": end_tracks - start_tracks,
