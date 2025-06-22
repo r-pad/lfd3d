@@ -2,6 +2,7 @@ import os
 import pathlib
 import warnings
 from collections.abc import Sequence
+from copy import deepcopy
 from typing import Dict, List, Union, cast
 
 import torch
@@ -158,6 +159,7 @@ def load_checkpoint_config_from_wandb(
         "dataset.name",
         "dataset.additional_img_dir",
         "dataset.use_intermediate_frames",
+        "dataset.data_sources",
     ],
 ):
     """
@@ -183,7 +185,7 @@ def load_checkpoint_config_from_wandb(
 
     # Store values to preserve before merging
     preserve_values = {
-        key: OmegaConf.select(current_cfg, key) for key in keys_to_preserve
+        key: deepcopy(OmegaConf.select(current_cfg, key)) for key in keys_to_preserve
     }
 
     # update run config with dataset and model configs from original run config

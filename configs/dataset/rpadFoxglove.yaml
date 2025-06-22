@@ -9,3 +9,6 @@ data_sources: # List of data sources
 rgb_feat: False # If true, compute DINOv2 features, else just return RGB
 use_full_text: True # Combine all subgoal captions into one and use the same caption for the whole demo
 use_intermediate_frames: True # Use all intermediate frames in [start, end] as input to the model instead of only the start frame.
+
+# Only meaningful to set to True if use_full_text=False
+use_gemini_subgoals: False

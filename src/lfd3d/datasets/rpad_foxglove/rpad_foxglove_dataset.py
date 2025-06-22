@@ -35,7 +35,7 @@ class RpadFoxgloveDataset(BaseDataset):
         self.num_points = dataset_cfg.num_points
         self.max_depth = dataset_cfg.max_depth
 
-        self.captions, self.actual_captions = {}, {}
+        self.actual_captions = {}
         self.text_embeddings = {}
         self.dataset = zarr.group(root)
         self.dataset_index = self.expand_all_events()
@@ -82,8 +82,7 @@ class RpadFoxgloveDataset(BaseDataset):
         return demo_type
 
     def expand_all_events(self):
-        """This function *expands* each event to have an associated event_idx.
-        Updates `self.captions` with each event and its various subgoals
+        """This function *expands* each event to have an associated event_idx and caption.
 
         Returns:
             expanded_index (list of tuples (int/fname, int, [indexes])):
@@ -117,15 +116,15 @@ class RpadFoxgloveDataset(BaseDataset):
                 )
 
             for i in range(num_events):
-                expanded_event_idx = self.get_event_start_end_indexes(demo_name, i)
-                expanded_event_caption = {
-                    (demo_name, i): sorted_event[i].replace("_", " ")
-                }
+                input_caption = sorted_event[i].replace("_", " ")
+                expanded_event_idx = self.get_event_start_end_indexes(
+                    demo_name, i, input_caption
+                )
+
                 actual_event_caption = {
                     (demo_name, i): actual_event[i].replace("_", " ")
                 }
                 expanded_index.extend(expanded_event_idx)
-                self.captions.update(expanded_event_caption)
                 self.actual_captions.update(actual_event_caption)
 
         if self.additional_img_dir is not None and self.split == "train":
@@ -143,6 +142,7 @@ class RpadFoxgloveDataset(BaseDataset):
                             (
                                 dir,
                                 i,
+                                events[i],
                                 {
                                     "rgb_start": i,
                                     "rgb_end": i + 1,
@@ -151,7 +151,7 @@ class RpadFoxgloveDataset(BaseDataset):
                                 },
                             )
                         )
-                        self.captions[(dir, i)] = events[i]
+                        self.actual_captions[(dir, i)] = events[i]
         return expanded_index
 
     def load_camera_params(self, demo_name):
@@ -167,7 +167,7 @@ class RpadFoxgloveDataset(BaseDataset):
         width = cam_info["width"][0]
         return K, (height, width)
 
-    def get_event_start_end_indexes(self, demo_name, subgoal_idx):
+    def get_event_start_end_indexes(self, demo_name, subgoal_idx, caption):
         demo = self.dataset[demo_name]
 
         events = demo["events"]
@@ -205,12 +205,16 @@ class RpadFoxgloveDataset(BaseDataset):
                 rgb_idx = event_start_idx_rgb + rgb_idx_offset
                 rgb_timestamp = rgb_ts_event[rgb_idx_offset]
 
+                if self.dataset_cfg.use_gemini_subgoals and "gemini_subgoals" in demo:
+                    caption = str(demo["gemini_subgoals"][rgb_idx])
+
                 # Find the index of the closest depth timestamp
                 depth_idx = np.searchsorted(depth_ts, rgb_timestamp)
                 event_data.append(
                     (
                         demo_name,
                         subgoal_idx,
+                        caption,
                         {
                             "rgb_start": rgb_idx,
                             "rgb_end": event_end_idx_rgb,
@@ -220,10 +224,14 @@ class RpadFoxgloveDataset(BaseDataset):
                     )
                 )
         else:
+            if self.dataset_cfg.use_gemini_subgoals and "gemini_subgoals" in demo:
+                caption = str(demo["gemini_subgoals"][event_start_idx_rgb])
+
             event_data = [
                 (
                     demo_name,
                     subgoal_idx,
+                    caption,
                     {
                         "rgb_start": event_start_idx_rgb,
                         "rgb_end": event_end_idx_rgb,
@@ -362,12 +370,11 @@ class RpadFoxgloveDataset(BaseDataset):
         return rgb_embed, text_embed
 
     def __getitem__(self, idx):
-        demo_name, subgoal_idx, event_indexes = self.dataset_index[idx]
+        demo_name, subgoal_idx, caption, event_indexes = self.dataset_index[idx]
 
         K, orig_shape = self.load_camera_params(demo_name)
         K_ = self.get_scaled_intrinsics(K, orig_shape, self.target_shape)
 
-        caption = self.captions[(demo_name, subgoal_idx)]
         # Only different if use_full_text=True
         actual_caption = self.actual_captions[(demo_name, subgoal_idx)]
         start2end = torch.eye(4)  # Static camera
