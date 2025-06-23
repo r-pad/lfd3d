@@ -56,9 +56,10 @@ class BaseDataset(td.Dataset):
             max_depth (float): Maximum depth value for valid points.
 
         Returns:
-            tuple: (scene_pcd, scene_feat_pcd) where:
+            tuple: (scene_pcd, scene_feat_pcd, augment_tf) where:
                 - scene_pcd (np.ndarray): Downsampled 3D points of shape (num_points, 3).
                 - scene_feat_pcd (np.ndarray): Features for downsampled points of shape (num_points, feat_dim).
+                - augment_tf (dict): Augmentation parameters {'R': rotation matrix (3x3), 't': translation vector (3,), 'C': centroid (3,)}.
         """
         height, width = depth.shape
         # Create pixel coordinate grid
@@ -205,7 +206,7 @@ class BaseDataset(td.Dataset):
             start_scene_pcd (np.ndarray): Augmented scene PCD (M, 3).
             action_pcd_mean (np.ndarray): Mean of action PCD (3,).
             scene_pcd_std (np.ndarray): Standard deviation of scene PCD (3,).
-            augment_tf (dict): Augmentation parameters {'R': rotation matrix (3x3), 't': translation vector (3,)}.
+            augment_tf (dict): Augmentation parameters {'R': rotation matrix (3x3), 't': translation vector (3,), 'C': centroid (3,)}.
 
         Returns:
             tuple: (normalized_start_tracks, normalized_end_tracks, normalized_start_scene_pcd, cross_displacement)
@@ -266,7 +267,7 @@ class BaseDataset(td.Dataset):
     def augment_start_tracks(self, start_tracks, gripper_idx):
         rand = random.random()
         # Generate synthetic gripper
-        if self.split == "train" and rand < 0.6:
+        if self.split == "train" and self.dataset_cfg.augment_train and rand < 0.6:
             # HACK: Verrrrry hacky.
             # Corners of a bbox found manually with open3d
             # for one specific scene in the lab.
@@ -303,7 +304,12 @@ class BaseDataset(td.Dataset):
 
             rot = Rotation.random().as_matrix()
             start_tracks = (synth_gripper @ rot) + gripper_center
-        elif self.split == "train" and rand > 0.6 and rand < 0.8:  # apply *small* SE(3) transform
+        elif (
+            self.split == "train"
+            and self.dataset_cfg.augment_train
+            and rand > 0.6
+            and rand < 0.8
+        ):  # apply *small* SE(3) transform
             rot = Rotation.random().as_matrix()
             transl_dirn = np.random.uniform(0, 1, 3)
             transl_dirn = transl_dirn / np.linalg.norm(transl_dirn)
