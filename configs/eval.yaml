@@ -5,8 +5,8 @@ job_type: ${mode}_${dataset.name}
 
 defaults:
   # Each of these have their own configuration parameters.
-  - dataset: hoi4d
-  - model: df_cross
+  - dataset: ${dataset}
+  - model: ${model}
 
   # A set of inference settings for the model. Note that these may be different
   # from / or a subset of the training settings. This is that we don't have to
