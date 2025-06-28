@@ -196,10 +196,10 @@ def process_demo(
     POINTS = np.array(POINTS)
     if in_mm:
         POINTS *= 1000  # Convert from meters to millimeters
-    
+
     # Delete existing gripper_pos dataset if it exists
-    if 'gripper_pos' in demo:
-        del demo['gripper_pos']
+    if "gripper_pos" in demo:
+        del demo["gripper_pos"]
     demo.create_dataset("gripper_pos", data=POINTS)
 
 
@@ -218,7 +218,7 @@ def main(args):
     K[1, 1] /= 4
     K[1, 2] /= 4
 
-    cam_to_world = np.loadtxt("T_world_from_camera_est.txt")
+    cam_to_world = np.loadtxt(args.calib_file)
     setup_camera(model, cam_id, cam_to_world, width, height, K)
     renderer = mujoco.Renderer(model, width=width, height=height)
 
@@ -265,6 +265,11 @@ if __name__ == "__main__":
         action="store_true",
         help="Save point coordinates in millimeters instead of meters",
         default=False,
+    )
+    parser.add_argument(
+        "--calib_file",
+        help="Path to T_world_from_camera_est.txt",
+        required=True,
     )
     args = parser.parse_args()
 
