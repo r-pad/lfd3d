@@ -29,7 +29,9 @@ class RpadFoxgloveDataset(BaseDataset):
 
         self.data_sources = dataset_cfg.data_sources
         self.current_dir = os.path.dirname(__file__)
-        with open(f"{self.current_dir}/{split}.json") as f:
+        with open(
+            f"{self.current_dir}/splits/{self.dataset_cfg.data_name}/{split}.json"
+        ) as f:
             self.split_names = json.load(f)
 
         self.num_points = dataset_cfg.num_points

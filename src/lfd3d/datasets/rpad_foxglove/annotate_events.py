@@ -228,7 +228,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--model_name",
-        default="gemini-2.5-pro-exp-03-25",
+        default="gemini-2.5-pro",
         help="Name of the Gemini model to use",
     )
     parser.add_argument(

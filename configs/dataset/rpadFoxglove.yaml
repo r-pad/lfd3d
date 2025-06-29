@@ -1,6 +1,7 @@
 defaults:
   - base_dataset # Inherit from base
 name: rpadFoxglove
+data_name: "0627" # Name of dataset to select splits for
 
 additional_img_dir: null
 data_sources: # List of data sources

@@ -935,22 +935,23 @@ class GoalRegressionModule(pl.LightningModule):
             pcd_size += gripper_pcd.shape[1]
             scene_padding_mask = torch.cat(
                 [
-                    scene_padding_mask,
                     torch.ones(
                         batch_size,
                         gripper_pcd.shape[1],
                         device=scene_pcd.device,
                         dtype=bool,
                     ),
+                    scene_padding_mask,
                 ],
                 dim=1,
             )
+            if use_rgb:
+                gripper_feat = torch.zeros(
+                    batch_size, gripper_pcd.shape[1], feat_dim, device=scene_pcd.device
+                )
+                scene_feat_pcd = torch.cat([gripper_feat, scene_feat_pcd], dim=1)
 
         if use_rgb:
-            gripper_feat = torch.zeros(
-                batch_size, gripper_pcd.shape[1], feat_dim, device=scene_pcd.device
-            )
-            scene_feat_pcd = torch.cat([gripper_feat, scene_feat_pcd], dim=1)
             scene_pcd = torch.cat([scene_pcd, scene_feat_pcd], dim=2)
         return scene_pcd, pcd_size, scene_padding_mask
 
