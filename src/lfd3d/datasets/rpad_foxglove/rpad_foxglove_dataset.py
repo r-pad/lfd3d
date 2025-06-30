@@ -39,7 +39,7 @@ class RpadFoxgloveDataset(BaseDataset):
 
         self.actual_captions = {}
         self.text_embeddings = {}
-        self.dataset = zarr.group(root)
+        self.dataset = zarr.open_group(root, "r")
         dataset_index = self.expand_all_events()
         self.dataset_index = self.resample_dataset(dataset_index)
         self.size = len(self.dataset_index)
