@@ -40,7 +40,8 @@ class RpadFoxgloveDataset(BaseDataset):
         self.actual_captions = {}
         self.text_embeddings = {}
         self.dataset = zarr.group(root)
-        self.dataset_index = self.expand_all_events()
+        dataset_index = self.expand_all_events()
+        self.dataset_index = self.resample_dataset(dataset_index)
         self.size = len(self.dataset_index)
 
         self.siglip = AutoModel.from_pretrained("google/siglip-so400m-patch14-384").to(
@@ -60,6 +61,43 @@ class RpadFoxgloveDataset(BaseDataset):
 
     def __len__(self):
         return self.size
+
+    def resample_dataset(self, dataset_index):
+        """
+        Resamples the dataset by oversampling robot data if flag is set.
+        Args:
+            dataset_index (list): A list of indices or items from the dataset to be resampled.
+        Returns:
+            list: The resampled dataset_index, with robot entries potentially duplicated.
+        """
+        if self.split == "train" and self.dataset_cfg.oversample_robot:
+            demo_source_mapping = {
+                demo_name: self.source_of_data(demo_name) for demo_name in self.dataset
+            }
+            robot_indices = [
+                i
+                for i, item in enumerate(dataset_index)
+                if demo_source_mapping[item[0]] == "aloha"
+            ]
+            human_indices = [
+                i
+                for i, item in enumerate(dataset_index)
+                if demo_source_mapping[item[0]] == "human"
+            ]
+            if len(robot_indices) == 0:
+                pass
+            else:
+                oversample_factor = int(len(human_indices) / len(robot_indices)) - 1
+                if oversample_factor <= 0:
+                    pass
+                else:
+                    duplicated_robot_entries = [
+                        dataset_index[idx]
+                        for idx in robot_indices
+                        for _ in range(oversample_factor)
+                    ]
+                    dataset_index = dataset_index + duplicated_robot_entries
+        return dataset_index
 
     def source_of_data(self, demo_name):
         """
