@@ -58,6 +58,47 @@ def setup_camera(model, cam_id, cam_to_world, width, height, K):
     model.cam_fovy[cam_id] = fovy
 
 
+def render_rightArm_images(renderer, data, camera="teleoperator_pov"):
+    """
+    Render RGB, depth, and segmentation images with right arm masking from MuJoCo simulation.
+    Args:
+        renderer (mujoco.Renderer): MuJoCo renderer instance configured for the scene
+        data (mujoco.MjData): MuJoCo data object containing current simulation state
+        camera (str, optional): Name of the camera to render from.
+
+    Returns:
+        tuple: A tuple containing:
+            - rgb (np.ndarray): Masked RGB image of shape (H, W, 3), dtype uint8.
+                               Right arm pixels retain original colors, background pixels are black.
+            - depth (np.ndarray): Masked depth image of shape (H, W), dtype float32.
+                                 Right arm pixels contain depth values, background pixels are zero.
+            - seg (np.ndarray): Binary segmentation mask of shape (H, W), dtype bool.
+                               True for right arm pixels, False for background.
+    """
+    renderer.update_scene(data, camera=camera)
+    rgb = renderer.render()
+
+    # Depth rendering
+    renderer.enable_depth_rendering()
+    depth = renderer.render()
+    renderer.disable_depth_rendering()
+
+    # Segmentation rendering
+    renderer.enable_segmentation_rendering()
+    seg = renderer.render()
+    renderer.disable_segmentation_rendering()
+
+    seg = seg[:, :, 0]  # channel 1 is foreground/background
+    # NOTE: Classes for the right arm excluding the camera mount. Handpicked
+    target_classes = set(range(65, 91)) - {81, 82, 83}
+
+    seg = np.isin(seg, list(target_classes)).astype(bool)
+    rgb[~seg] = 0
+    depth[~seg] = 0
+
+    return rgb, depth, seg
+
+
 def get_right_gripper_mesh(mj_model, mj_data):
     """
     Extract the visual meshes of the right gripper from the Aloha MJCF model.
@@ -153,14 +194,21 @@ def process_demo(
     joint_positions_ts = demo["raw"]["follower_right"]["joint_states"]["ts"][:]
     rgb_imgs = demo["raw"]["rgb"]["image_rect"]["img"][:]
     rgb_ts = demo["raw"]["rgb"]["image_rect"]["ts"][:]
+    depth_imgs = demo["raw"]["depth_registered"]["image_rect"]["img"][:]
+    depth_ts = demo["raw"]["depth_registered"]["image_rect"]["ts"][:]
 
     rgb_idx, joint_idx, _ = align_timestamps(rgb_ts, joint_positions_ts)
+    rgb_idx, depth_idx, _ = align_timestamps(rgb_ts, depth_ts)
     rgb_imgs = rgb_imgs[rgb_idx]
     rgb_imgs = np.array([cv2.resize(i, (0, 0), fx=0.25, fy=0.25) for i in rgb_imgs])
+    depth_imgs = depth_imgs[depth_idx]
+    depth_imgs = np.array([cv2.resize(i, (0, 0), fx=0.25, fy=0.25) for i in depth_imgs])
     joint_positions = joint_positions[joint_idx]
 
     POINTS = []
+    masks = []
     for t in tqdm(range(joint_positions.shape[0])):
+        data.qpos[0] = -np.pi  # move the left arm out of the way
         data.qpos[8 : 8 + 6] = joint_positions[t, :6]
         data.qpos[8 + 6 : 8 + 8] = joint_positions[t, [7, 7]]
         mujoco.mj_forward(model, data)
@@ -179,15 +227,15 @@ def process_demo(
 
         POINTS.append(urdf_cam3dcoords)
 
+        _, _, seg = render_rightArm_images(renderer, data)
+        masks.append(seg)
+
         if visualize:
             os.makedirs(f"mujoco_renders/{demo.name}", exist_ok=True)
-            renderer.update_scene(data, camera="teleoperator_pov")
-            rend = renderer.render()
 
             urdf_proj_hom = (K @ urdf_cam3dcoords.T).T
             urdf_proj = (urdf_proj_hom / urdf_proj_hom[:, 2:])[:, :2]
             urdf_proj = np.clip(urdf_proj, [0, 0], [width - 1, height - 1]).astype(int)
-            rend[urdf_proj[:, 1], urdf_proj[:, 0]] = [0, 255, 0]  # Green
 
             rgb = rgb_imgs[t]
             rgb[urdf_proj[:, 1], urdf_proj[:, 0]] = [0, 255, 0]  # Green
@@ -201,6 +249,10 @@ def process_demo(
     if "gripper_pos" in demo:
         del demo["gripper_pos"]
     demo.create_dataset("gripper_pos", data=POINTS)
+
+    if "masks" in demo:
+        del demo["masks"]
+    demo.create_dataset("masks", data=masks)
 
 
 def main(args):
