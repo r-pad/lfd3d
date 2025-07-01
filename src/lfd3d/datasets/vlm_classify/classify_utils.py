@@ -25,7 +25,9 @@ def call_gemini_with_retry(
                 return None
 
 
-def generate_prompt_for_current_subtask(goal_text, subgoals, query_img, examples=[]):
+def generate_prompt_for_current_subtask(
+    goal_text, subgoals, query_img, gripper_state, examples=[]
+):
     """
     Generates an expert-level prompt for Gemini to identify the SINGLE
     current sub-task being performed in a static image.
@@ -34,6 +36,7 @@ def generate_prompt_for_current_subtask(goal_text, subgoals, query_img, examples
         goal_text (str): The high-level description of the overall task.
         subgoals (list): An ordered list of strings representing the sub-goals.
         query_img (PIL.Image): Query image
+        gripper_state (float): Current state of the gripper (0.0=fully closed, 1.0=fully open)
         examples (list): List of (PIL.Image, ground_truth_subgoal) tuples for in-context learning.
 
     Returns:
@@ -42,6 +45,12 @@ def generate_prompt_for_current_subtask(goal_text, subgoals, query_img, examples
     # Convert the Python list of subgoals to a formatted string for the prompt
     subgoals_str = "\n".join([f"- {sg}" for sg in subgoals])
     prompt = []
+
+    # Format gripper state description
+    if gripper_state < 0.2:
+        gripper_desc = f"closed (value: {gripper_state:.2f})"
+    else:
+        gripper_desc = f"open (value: {gripper_state:.2f})"
 
     base_prompt = f"""
 # AI Task: Current Robotic Sub-Task Identification
@@ -57,6 +66,7 @@ Based on the provided image, identify which ONE of the **Ordered Sub-Goals** the
 - **Ordered Sub-Goals**:
 {subgoals_str}
 - **Image**: A single snapshot of the robot during the task.
+- **Gripper State**: The robot's gripper is currently {gripper_desc}
 
 ## Critical Instructions:
 
@@ -64,7 +74,9 @@ Based on the provided image, identify which ONE of the **Ordered Sub-Goals** the
 
 2.  **Identify the "In-Progress" Sub-Goal**: Your primary task is to find the sub-goal that describes the action the robot is physically performing in the image.
 
-3.  **Tie-Breaker Rules (Extremely Important)**:
+3.  **Use Gripper State as Context**: The gripper state provides crucial information about whether the robot is grasping, releasing, or manipulating objects.
+
+4.  **Tie-Breaker Rules (Extremely Important)**:
     *   **If the robot is between actions** (e.g., it has just finished one sub-goal but has not yet started the next), your answer should be the sub-goal that was **just completed**.
     *   **If the entire task is visibly complete**, your answer should be the **final sub-goal** in the list.
     *   **If the task has not yet started** (e.g., the robot is idle before the first action), your answer should be the **first sub-goal** in the list.

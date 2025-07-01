@@ -48,8 +48,15 @@ def eval_demo(dataset, demo_name, subgoals, goal_text, client, model_name, outpu
     pil_image = Image.fromarray(img)
 
     if demo["gripper_pos"].shape[1] == 500:
+        GRIPPER_MIN, GRIPPER_MAX = 0.01, 0.048  # Values for aloha
+        joint_positions = demo["raw/follower_right/joint_states/pos"][:]
+        joint_positions_ts = demo["raw/follower_right/joint_states/ts"][:]
+        joint_idx = np.searchsorted(joint_positions_ts, img_ts[image_idx])
+        gripper_state = joint_positions[joint_idx, 7]
+        gripper_state_scaled = (gripper_state - GRIPPER_MIN) / GRIPPER_MAX
+
         prompt = generate_prompt_for_current_subtask(
-            goal_text, subgoals, pil_image, EXAMPLES
+            goal_text, subgoals, pil_image, gripper_state_scaled, EXAMPLES
         )
         config = genai.types.GenerateContentConfig(temperature=0.0, candidate_count=1)
         pred_goal = call_gemini_with_retry(client, model_name, prompt, config)
