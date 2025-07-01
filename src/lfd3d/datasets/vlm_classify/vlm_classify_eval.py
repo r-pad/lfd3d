@@ -1,4 +1,5 @@
 import argparse
+import json
 import os
 import random
 import shutil
@@ -71,6 +72,11 @@ def main():
         help="Root directory of the dataset",
     )
     parser.add_argument(
+        "--json_split",
+        default="../rpad_foxglove/splits/0320/val.json",
+        help="Root directory of the dataset",
+    )
+    parser.add_argument(
         "--task_name", default="place_mug_on_table", help="Task specified in dataset"
     )
     parser.add_argument(
@@ -86,6 +92,7 @@ def main():
     random.seed(args.seed)
     np.random.seed(args.seed)
 
+    split = json.load(open(args.json_split))
     goal_text, subgoals = TASK_SPEC[args.task_name]
     client = setup_client(os.environ.get("RPAD_GEMINI_API_KEY"))
     model_name = args.model_name
@@ -96,7 +103,7 @@ def main():
     os.mkdir(args.output_dir)
 
     gt, pred = [], []
-    pbar = tqdm(dataset)
+    pbar = tqdm(split)
     for demo_name in pbar:
         pbar.set_description(demo_name)
         gt_item, pred_item = eval_demo(

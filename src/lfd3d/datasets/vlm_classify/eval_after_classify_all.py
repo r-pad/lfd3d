@@ -34,7 +34,7 @@ def get_filtered_pred_gt(demo, subgoals, pred_goals):
 def main():
     root = "/data/sriram/rpad_foxglove/pick_mug_all.zarr"
     task_name = "place_mug_on_table"
-    json_split = "../rpad_foxglove/val.json"
+    json_split = "../rpad_foxglove/splits/0320/val.json"
     split = json.load(open(json_split))
 
     goal_text, subgoals = TASK_SPEC[task_name]
