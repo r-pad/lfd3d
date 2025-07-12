@@ -177,6 +177,15 @@ def get_right_gripper_mesh(mj_model, mj_data):
     return meshes
 
 
+def filter_segmask(rend_depth, rend_segmask, cam_depth):
+    cam_depth_meter = cam_depth / 1000.0
+    cam_depth_meter[~rend_segmask] = 0
+    depth_diff = np.abs(rend_depth - cam_depth_meter)
+    THRESHOLD = 5e-2
+    filter_mask = np.where(depth_diff < THRESHOLD, rend_segmask, 0)
+    return filter_mask
+
+
 def process_demo(
     demo,
     model,
@@ -227,8 +236,9 @@ def process_demo(
 
         POINTS.append(urdf_cam3dcoords)
 
-        _, _, seg = render_rightArm_images(renderer, data)
-        masks.append(seg)
+        _, depth, seg = render_rightArm_images(renderer, data)
+        filtered_seg = filter_segmask(depth, seg, depth_imgs[t])
+        masks.append(filtered_seg)
 
         if visualize:
             os.makedirs(f"mujoco_renders/{demo.name}", exist_ok=True)

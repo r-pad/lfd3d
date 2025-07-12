@@ -7,7 +7,7 @@ additional_img_dir: null
 data_sources: # List of data sources
   - human
   - aloha
-oversample_robot: False # If true, oversample the robot data to equalize the amounts of the two data sources in an epoch
+oversample_robot: True # If true, oversample the robot data to equalize the amounts of the two data sources in an epoch
 
 rgb_feat: False # If true, compute DINOv2 features, else just return RGB
 use_full_text: True # Combine all subgoal captions into one and use the same caption for the whole demo
