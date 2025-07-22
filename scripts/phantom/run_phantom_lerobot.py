@@ -71,7 +71,7 @@ HANDPOSE_DIR = "wilor_hand_pose"
 VIZ_DIR = "phantom_viz_results"
 OUTPUT_DIR = "phantom_retarget"
 
-videos = os.listdir(f"{args.lerobot_extradata_path}/{INPAINT_VIDEO_DIR}")
+videos = sorted(os.listdir(f"{args.lerobot_extradata_path}/{INPAINT_VIDEO_DIR}"))
 
 for vid_name in tqdm(videos):
     inpainted_video = iio.imread(
@@ -79,14 +79,23 @@ for vid_name in tqdm(videos):
     )
     hand_pose = np.load(f"{args.lerobot_extradata_path}/{HANDPOSE_DIR}/{vid_name}.npy")
 
-    cam_human_eef_pos, cam_human_eef_rot, human_eef_artic = retarget_human_pose(
-        hand_pose
-    )
-    n_human_original = cam_human_eef_pos.shape[0]
-    n_human_interpolate = n_human_original * interpolate_factor
-    cam_human_eef_pos, cam_human_eef_rot, human_eef_artic = smooth_and_interpolate_pose(
-        cam_human_eef_pos, cam_human_eef_rot, human_eef_artic, N=n_human_interpolate
-    )
+    try:
+        cam_human_eef_pos, cam_human_eef_rot, human_eef_artic = retarget_human_pose(
+            hand_pose
+        )
+        n_human_original = cam_human_eef_pos.shape[0]
+        n_human_interpolate = n_human_original * interpolate_factor
+        cam_human_eef_pos, cam_human_eef_rot, human_eef_artic = (
+            smooth_and_interpolate_pose(
+                cam_human_eef_pos,
+                cam_human_eef_rot,
+                human_eef_artic,
+                N=n_human_interpolate,
+            )
+        )
+    except Exception as e:
+        print(f"Could not retarget {vid_name} due to {e}. Skipping.")
+        continue
 
     if args.visualize:
         os.makedirs(
