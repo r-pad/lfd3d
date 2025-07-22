@@ -17,19 +17,19 @@ def inverse_kinematics(configuration, eef_pos, gripper_rot):
     pose_matrix[:3, :3] = gripper_rot
     ee_pose_se3 = mink.lie.se3.SE3.from_matrix(pose_matrix)
 
-    n_iter = 100
-    dt = 0.001
-    thresh = 1e-3
+    n_iter = 500
+    dt = 0.01
+    thresh = 1e-4
 
     ee_task = mink.FrameTask(
         frame_name="right/gripper",
         frame_type="site",
         position_cost=1.0,
-        orientation_cost=0.1,
+        orientation_cost=1.0,
     )
     ee_task.set_target(ee_pose_se3)
 
-    ke_task = mink.KineticEnergyRegularizationTask(cost=1e-7)
+    ke_task = mink.KineticEnergyRegularizationTask(cost=1e-3)
     ke_task.set_dt(dt)
 
     for i in range(n_iter):
