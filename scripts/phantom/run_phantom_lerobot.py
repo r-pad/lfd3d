@@ -7,6 +7,7 @@ import mink
 import mujoco
 import numpy as np
 from phantom_utils import (
+    ALOHA_REST_QPOS,
     render_with_ik,
     retarget_human_pose,
     setup_camera,
@@ -52,7 +53,6 @@ interpolate_factor = args.interpolate_factor
 cam_to_world = np.loadtxt(args.calib_file)
 model = load_robot_description("aloha_mj_description")
 data = mujoco.MjData(model)
-data.qpos[0] = -np.pi  # move the left arm out of the way for rendering
 mink_config = mink.Configuration(model)
 
 cam_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_CAMERA, "teleoperator_pov")
@@ -74,6 +74,7 @@ OUTPUT_DIR = "phantom_retarget"
 videos = sorted(os.listdir(f"{args.lerobot_extradata_path}/{INPAINT_VIDEO_DIR}"))
 
 for vid_name in tqdm(videos):
+    data.qpos = ALOHA_REST_QPOS
     inpainted_video = iio.imread(
         f"{args.lerobot_extradata_path}/{INPAINT_VIDEO_DIR}/{vid_name}"
     )

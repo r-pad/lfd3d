@@ -9,6 +9,9 @@ from tqdm import tqdm
 
 ALOHA_GRIPPER_MIN, ALOHA_GRIPPER_MAX = 0.01, 0.04
 HUMAN_GRIPPER_IDX = np.array([343, 763, 60])
+ALOHA_REST_QPOS = np.array(
+    [0, -1.73, 1.49, 0, 0, 0, 0, 0, 0, -1.73, 1.49, 0, 0, 0, 0, 0]
+)
 
 
 def inverse_kinematics(configuration, eef_pos, gripper_rot):
