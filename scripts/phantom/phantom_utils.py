@@ -14,7 +14,7 @@ ALOHA_REST_QPOS = np.array(
 )
 
 
-def inverse_kinematics(configuration, eef_pos, gripper_rot):
+def inverse_kinematics(model, configuration, eef_pos, gripper_rot):
     pose_matrix = np.eye(4)
     pose_matrix[:3, 3] = eef_pos
     pose_matrix[:3, :3] = gripper_rot
@@ -31,12 +31,20 @@ def inverse_kinematics(configuration, eef_pos, gripper_rot):
         orientation_cost=1.0,
     )
     ee_task.set_target(ee_pose_se3)
+    # A posture task to encourage the IK to solve for more "natural" poses
+    # Left arm is at rest whereas the right arm is upright in an L shape
+    TARGET_POSE = ALOHA_REST_QPOS.copy()
+    TARGET_POSE[8:] = 0
+    posture_task = mink.PostureTask(model, cost=0.05)
+    posture_task.set_target(TARGET_POSE)
 
     ke_task = mink.KineticEnergyRegularizationTask(cost=1e-3)
     ke_task.set_dt(dt)
 
     for i in range(n_iter):
-        vel = mink.solve_ik(configuration, [ee_task, ke_task], dt=dt, solver="daqp")
+        vel = mink.solve_ik(
+            configuration, [ee_task, ke_task, posture_task], dt=dt, solver="daqp"
+        )
         configuration.integrate_inplace(vel, dt)
 
         err = ee_task.compute_error(configuration)
@@ -110,7 +118,7 @@ def render_with_ik(
 
     n_poses = eef_pos.shape[0]
     for i in tqdm(range(n_poses)):
-        Q = inverse_kinematics(mink_config, eef_pos[i], eef_rot[i])
+        Q = inverse_kinematics(model, mink_config, eef_pos[i], eef_rot[i])
 
         # Keep them synced ....
         data.qpos = Q
@@ -139,21 +147,24 @@ def render_with_ik(
     )
 
 
-def gripper_points_to_rotation(p1, p2, p3):
-    assert len(p1.shape) == 2  # N, 3
-    # Create two vectors
-    v1 = p1 - p2
-    v2 = p1 - p3
+def gripper_points_to_rotation(gripper_center, palm_point, finger_point):
+    # Always use palm->gripper as primary axis (more stable)
+    forward = gripper_center - palm_point
+    x_axis = forward / np.linalg.norm(forward, axis=1, keepdims=True)
 
-    # Normalize first vector (e.g., gripper forward direction)
-    x_axis = v1 / np.linalg.norm(v1, axis=1, keepdims=True)
+    # Use finger relative to the forward direction for secondary axis
+    finger_vec = gripper_center - finger_point
 
-    # Create orthogonal y-axis
-    z_temp = np.cross(v1, v2)
-    z_axis = z_temp / np.linalg.norm(z_temp, axis=1, keepdims=True)
-    y_axis = np.cross(z_axis, x_axis)
+    # Project finger vector onto plane perpendicular to forward
+    finger_projected = (
+        finger_vec - np.sum(finger_vec * x_axis, axis=1, keepdims=True) * x_axis
+    )
+    y_axis = finger_projected / np.linalg.norm(finger_projected, axis=1, keepdims=True)
 
-    return np.column_stack([x_axis, y_axis, z_axis]).reshape(-1, 3, 3)
+    # Z completes the frame
+    z_axis = np.cross(x_axis, y_axis)
+
+    return np.stack([x_axis, y_axis, z_axis], axis=-1)
 
 
 def setup_camera(model, cam_id, cam_to_world, width, height, K):
