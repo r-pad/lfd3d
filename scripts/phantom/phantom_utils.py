@@ -6,6 +6,8 @@ from scipy.interpolate import interp1d
 from scipy.signal import savgol_filter
 from scipy.spatial.transform import Rotation as R
 from tqdm import tqdm
+import torch
+from torch import pi
 
 ALOHA_GRIPPER_MIN, ALOHA_GRIPPER_MAX = 0.01, 0.04
 HUMAN_GRIPPER_IDX = np.array([343, 763, 60])
@@ -55,6 +57,70 @@ def inverse_kinematics(model, configuration, eef_pos, gripper_rot):
     Q = configuration.q
     print(f"iter: {i}, err: {np.linalg.norm(err)}")
     return Q
+
+def convert_sim_joints(Q, gripper_artic):
+    """
+    Map the joints of the sim aloha used for IK
+    back to the real aloha to train a policy.
+    Different formats, units, orientations ...."""
+    vec = torch.tensor(
+        [
+            Q[0],
+            Q[1],
+            Q[1],
+            Q[2],
+            Q[2],
+            Q[3],
+            Q[4],
+            Q[5],
+            0,
+
+            Q[8],
+            Q[9],
+            Q[9],
+            Q[10],
+            Q[10],
+            Q[11],
+            Q[12],
+            Q[13],
+            0,
+        ]
+    )
+    # Minor but important distinction here.
+    # In lerobot, the gripper_artic comes from the real robot
+    # doesn't need to be mapped sim2real and is thus written into `vec`
+    # *after*. Here, gripper_artic comes from hand pose retargeted to sim gripper
+    # and thus needs to be written into `vec` *before* mapping sim2real.
+    vec[-1] = gripper_artic
+    vec = torch.rad2deg(map_sim2real(vec))
+    return vec
+
+def map_sim2real(vec):
+    """
+    inverse of map_real2sim from r-pad/lerobot
+    sim = real*sign + offset
+    real = (sim - offset)*sign
+    """
+    sign = torch.tensor([-1, -1, -1, 1, 1, 1, 1, 1, 1,
+                      -1, -1, -1, 1, 1, 1, 1, 1, 1])
+    offset = torch.tensor([pi/2, 0, 0, -pi/2, -pi/2, 0, 0, 0, 0,
+                       pi/2, 0, 0, -pi/2, -pi/2, 0, 0, 0, 0])
+    vec = (vec - offset)*sign
+
+    # Inverted from real2sim
+    real_shoulder_min, real_shoulder_max = 0.23, 3.59
+    sim_shoulder_min, sim_shoulder_max = -1.26, 1.85
+
+    vec[1] = (vec[1] - sim_shoulder_min)*((real_shoulder_max-real_shoulder_min)/(sim_shoulder_max-sim_shoulder_min)) + real_shoulder_min
+    vec[2] = (vec[2] - sim_shoulder_min)*((real_shoulder_max-real_shoulder_min)/(sim_shoulder_max-sim_shoulder_min)) + real_shoulder_min
+    vec[10] = (vec[10] - sim_shoulder_min)*((real_shoulder_max-real_shoulder_min)/(sim_shoulder_max-sim_shoulder_min)) + real_shoulder_min
+    vec[11] = (vec[11] - sim_shoulder_min)*((real_shoulder_max-real_shoulder_min)/(sim_shoulder_max-sim_shoulder_min)) + real_shoulder_min
+
+    real_gripper_min, real_gripper_max = -1.7262, 0.11
+    sim_gripper_min, sim_gripper_max = -0.04, 0
+    vec[8] = (vec[8] - sim_gripper_min)*((real_gripper_max-real_gripper_min)/(sim_gripper_max-sim_gripper_min)) + real_gripper_min
+    vec[17] = (vec[17] - sim_gripper_min)*((real_gripper_max-real_gripper_min)/(sim_gripper_max-sim_gripper_min)) + real_gripper_min
+    return vec
 
 
 def render_rightArm_images(renderer, data, camera="teleoperator_pov", use_seg=False):
@@ -108,6 +174,7 @@ def render_with_ik(
     actual_eef_pos = []
     actual_eef_rot = []
     actual_eef_artic = []
+    joint_state = []
 
     site = "right/gripper"
     site_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SITE, site)
@@ -131,6 +198,10 @@ def render_with_ik(
         actual_eef_rot.append(data.site_xmat[site_id].reshape(3, 3).copy())
         actual_eef_artic.append(gripper_artic[i])
 
+        # Store joint angles (after mapping back to real robot)
+        joint_angles = convert_sim_joints(data.qpos, gripper_artic[i])
+        joint_state.append(joint_angles)
+
         if i % n == 0:
             rgb, depth, seg = render_rightArm_images(renderer, data)
             render_images.append(rgb)
@@ -144,6 +215,7 @@ def render_with_ik(
         np.array(actual_eef_pos),
         np.array(actual_eef_rot),
         np.array(actual_eef_artic),
+        np.array(joint_state)
     )
 
 

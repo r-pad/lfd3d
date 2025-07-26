@@ -125,6 +125,7 @@ for vid_name in tqdm(videos):
         world_human_actual_eef_pos,
         world_human_actual_eef_rot,
         world_human_actual_eef_artic,
+        joint_state
     ) = render_with_ik(
         model,
         mink_config,
@@ -181,4 +182,5 @@ for vid_name in tqdm(videos):
         eef_pos=world_human_eef_pos,
         eef_rot=world_human_eef_rot,
         eef_artic=human_eef_artic,
+        joint_state=joint_state
     )
