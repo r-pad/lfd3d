@@ -2,14 +2,14 @@ import mink
 import mujoco
 import numpy as np
 import open3d as o3d
+import torch
 from scipy.interpolate import interp1d
 from scipy.signal import savgol_filter
 from scipy.spatial.transform import Rotation as R
-from tqdm import tqdm
-import torch
 from torch import pi
+from tqdm import tqdm
 
-ALOHA_GRIPPER_MIN, ALOHA_GRIPPER_MAX = 0.01, 0.04
+ALOHA_GRIPPER_MIN, ALOHA_GRIPPER_MAX = 0, 0.041
 HUMAN_GRIPPER_IDX = np.array([343, 763, 60])
 ALOHA_REST_QPOS = np.array(
     [0, -1.73, 1.49, 0, 0, 0, 0, 0, 0, -1.73, 1.49, 0, 0, 0, 0, 0]
@@ -58,6 +58,7 @@ def inverse_kinematics(model, configuration, eef_pos, gripper_rot):
     print(f"iter: {i}, err: {np.linalg.norm(err)}")
     return Q
 
+
 def convert_sim_joints(Q, gripper_artic):
     """
     Map the joints of the sim aloha used for IK
@@ -74,7 +75,6 @@ def convert_sim_joints(Q, gripper_artic):
             Q[4],
             Q[5],
             0,
-
             Q[8],
             Q[9],
             Q[9],
@@ -95,31 +95,63 @@ def convert_sim_joints(Q, gripper_artic):
     vec = torch.rad2deg(map_sim2real(vec))
     return vec
 
+
 def map_sim2real(vec):
     """
     inverse of map_real2sim from r-pad/lerobot
     sim = real*sign + offset
     real = (sim - offset)*sign
     """
-    sign = torch.tensor([-1, -1, -1, 1, 1, 1, 1, 1, 1,
-                      -1, -1, -1, 1, 1, 1, 1, 1, 1])
-    offset = torch.tensor([pi/2, 0, 0, -pi/2, -pi/2, 0, 0, 0, 0,
-                       pi/2, 0, 0, -pi/2, -pi/2, 0, 0, 0, 0])
-    vec = (vec - offset)*sign
+    sign = torch.tensor([-1, -1, -1, 1, 1, 1, 1, 1, 1, -1, -1, -1, 1, 1, 1, 1, 1, 1])
+    offset = torch.tensor(
+        [
+            pi / 2,
+            0,
+            0,
+            -pi / 2,
+            -pi / 2,
+            0,
+            0,
+            0,
+            0,
+            pi / 2,
+            0,
+            0,
+            -pi / 2,
+            -pi / 2,
+            0,
+            0,
+            0,
+            0,
+        ]
+    )
+    vec = (vec - offset) * sign
 
     # Inverted from real2sim
     real_shoulder_min, real_shoulder_max = 0.23, 3.59
     sim_shoulder_min, sim_shoulder_max = -1.26, 1.85
 
-    vec[1] = (vec[1] - sim_shoulder_min)*((real_shoulder_max-real_shoulder_min)/(sim_shoulder_max-sim_shoulder_min)) + real_shoulder_min
-    vec[2] = (vec[2] - sim_shoulder_min)*((real_shoulder_max-real_shoulder_min)/(sim_shoulder_max-sim_shoulder_min)) + real_shoulder_min
-    vec[10] = (vec[10] - sim_shoulder_min)*((real_shoulder_max-real_shoulder_min)/(sim_shoulder_max-sim_shoulder_min)) + real_shoulder_min
-    vec[11] = (vec[11] - sim_shoulder_min)*((real_shoulder_max-real_shoulder_min)/(sim_shoulder_max-sim_shoulder_min)) + real_shoulder_min
+    vec[1] = (vec[1] - sim_shoulder_min) * (
+        (real_shoulder_max - real_shoulder_min) / (sim_shoulder_max - sim_shoulder_min)
+    ) + real_shoulder_min
+    vec[2] = (vec[2] - sim_shoulder_min) * (
+        (real_shoulder_max - real_shoulder_min) / (sim_shoulder_max - sim_shoulder_min)
+    ) + real_shoulder_min
+    vec[10] = (vec[10] - sim_shoulder_min) * (
+        (real_shoulder_max - real_shoulder_min) / (sim_shoulder_max - sim_shoulder_min)
+    ) + real_shoulder_min
+    vec[11] = (vec[11] - sim_shoulder_min) * (
+        (real_shoulder_max - real_shoulder_min) / (sim_shoulder_max - sim_shoulder_min)
+    ) + real_shoulder_min
 
     real_gripper_min, real_gripper_max = -1.7262, 0.11
     sim_gripper_min, sim_gripper_max = -0.04, 0
-    vec[8] = (vec[8] - sim_gripper_min)*((real_gripper_max-real_gripper_min)/(sim_gripper_max-sim_gripper_min)) + real_gripper_min
-    vec[17] = (vec[17] - sim_gripper_min)*((real_gripper_max-real_gripper_min)/(sim_gripper_max-sim_gripper_min)) + real_gripper_min
+    vec[8] = (vec[8] - sim_gripper_min) * (
+        (real_gripper_max - real_gripper_min) / (sim_gripper_max - sim_gripper_min)
+    ) + real_gripper_min
+    vec[17] = (vec[17] - sim_gripper_min) * (
+        (real_gripper_max - real_gripper_min) / (sim_gripper_max - sim_gripper_min)
+    ) + real_gripper_min
     return vec
 
 
@@ -215,7 +247,7 @@ def render_with_ik(
         np.array(actual_eef_pos),
         np.array(actual_eef_rot),
         np.array(actual_eef_artic),
-        np.array(joint_state)
+        np.array(joint_state),
     )
 
 

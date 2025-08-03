@@ -72,7 +72,7 @@ protobuf = "*"
 # PyPI-specific dependencies
 [tool.pixi.pypi-dependencies]
 lfd3d = { path = ".", editable = true }
-torch = { version = "==2.4.1", index = "https://download.pytorch.org/whl/cu124" }
+torch = { version = "==2.6.0", index = "https://download.pytorch.org/whl/cu124" }
 torchvision = "*"
 timm = "==0.9.12"
 fvcore = "==0.1.5.post20221221"
