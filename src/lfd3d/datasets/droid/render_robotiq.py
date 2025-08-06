@@ -10,11 +10,10 @@ import numpy as np
 import open3d as o3d
 import tensorflow_datasets as tfds
 import trimesh
+from lfd3d.utils.data_utils import combine_meshes
 from robot_descriptions.loaders.mujoco import load_robot_description
 from scipy.spatial.transform import Rotation
 from tqdm import tqdm
-
-from lfd3d.utils.data_utils import combine_meshes
 
 """
 NOTE: MJCF needs to be modified to add free joint
@@ -113,7 +112,7 @@ def search_annotations_json(
 def process_item(
     item,
     idx,
-    K,
+    camera_intrinsics,
     height,
     width,
     sample_n_points,
@@ -154,6 +153,18 @@ def process_item(
 
     with open(metadata_file[0]) as f:
         metadata = json.load(f)
+    cam_serial = metadata["ext1_cam_serial"]
+    cam_params = camera_intrinsics[cam_serial]
+    K = np.array(
+        [
+            [cam_params["fx"], 0.0, cam_params["cx"]],
+            [0.0, cam_params["fy"], cam_params["cy"]],
+            [0.0, 0.0, 1.0],
+        ]
+    )
+    K = K / 4  # downsampled images
+    K[2, 2] = 1
+    baseline = cam_params["baseline"] / 1000
 
     gripper_cartesian_pos = np.array(
         [i["observation"]["cartesian_position"] for i in steps]
@@ -227,18 +238,7 @@ def process_item(
 
 
 def main(args):
-    # "Average" intrinsics for Zed
-    K = np.array(
-        [
-            [522.42260742, 0.0, 653.9631958],
-            [0.0, 522.42260742, 358.79196167],
-            [0.0, 0.0, 1.0],
-        ]
-    )
-    K = K / 4  # downsampled images
-    K[2, 2] = 1
     height, width = 180, 320
-
     root = args.root
     builder = tfds.builder_from_directory(builder_dir=root)
     dataset = builder.as_dataset(split="train")
@@ -255,12 +255,14 @@ def main(args):
     droid_language_annotations_keys = list(droid_language_annotations.keys())
     with open("idx_to_fname_mapping.json") as f:
         idx_to_fname_mapping = json.load(f)
+    with open("zed_intrinsics.json") as f:
+        camera_intrinsics = json.load(f)
 
     for idx, item in tqdm(enumerate(dataset), total=len(dataset)):
         process_item(
             item,
             idx,
-            K,
+            camera_intrinsics,
             height,
             width,
             args.sample_n_points,
@@ -289,7 +291,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--metadata_dir",
         type=str,
-        default="/data/sriram/DROID/droid_raw",
+        default="/data/sriram/autobot_mount/DROID/droid_raw",
         help="Directory containing metadata files",
     )
     parser.add_argument(
