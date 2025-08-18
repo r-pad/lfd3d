@@ -1,5 +1,6 @@
 """This file adapts a LeRobot dataset to the LFD3D format."""
 
+import logging
 from pathlib import Path
 
 import numpy as np
@@ -8,12 +9,13 @@ from lerobot.common.datasets.lerobot_dataset import (
     LeRobotDataset,
     LeRobotDatasetMetadata,
 )
-from lfd3d.datasets.base_data import BaseDataset
+from lfd3d.datasets.base_data import BaseDataModule, BaseDataset
 from lfd3d.datasets.rpad_foxglove.rpad_foxglove_dataset import (
     RGBTextFeaturizer,
     RpadFoxgloveDataset,
 )
 from PIL import Image
+from tqdm import tqdm
 
 
 class RpadLeRobotDataset(BaseDataset):
@@ -46,6 +48,8 @@ class RpadLeRobotDataset(BaseDataset):
     def load_transition(
         self, idx
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, str, str]:
+        logging.warning(f"getting from {idx}")
+
         start_item = self.lerobot_dataset[idx]
         # The next_event_idx is relative to the episode, so we calculate the absolute index
         end_idx = (
@@ -147,7 +151,37 @@ class RpadLeRobotDataset(BaseDataset):
 
     def __len__(self):
         # Return the length of the underlying LeRobot dataset
-        return len(self.lerobot_dataset)
+        # HACK WHY DO WE HAVE AN OFF-BY-ONE
+        return len(self.lerobot_dataset) - 1
+
+
+class RpadLeRobotDataModule(BaseDataModule):
+    def __init__(
+        self, repo_id, batch_size, val_batch_size, num_workers, dataset_cfg, seed
+    ):
+        super().__init__(batch_size, val_batch_size, num_workers, dataset_cfg, seed)
+        self.val_tags = ["aloha"]
+        # Subset of train to use for eval
+        self.TRAIN_SUBSET_SIZE = 20
+        self.repo_id = repo_id
+
+    def setup(self, stage: str = "fit"):
+        self.stage = stage
+        self.val_datasets = {}
+        self.test_datasets = {}
+
+        self.train_dataset = RpadLeRobotDataset(
+            repo_id=self.repo_id, dataset_cfg=self.dataset_cfg, split="train"
+        )
+        for tag in self.val_tags:
+            dataset_cfg = self.dataset_cfg.copy()
+            dataset_cfg.data_sources = [tag]
+            self.val_datasets[tag] = RpadLeRobotDataset(
+                repo_id=self.repo_id, dataset_cfg=dataset_cfg, split="val"
+            )
+            self.test_datasets[tag] = RpadLeRobotDataset(
+                repo_id=self.repo_id, dataset_cfg=dataset_cfg, split="test"
+            )
 
 
 if __name__ == "__main__":
@@ -236,3 +270,21 @@ if __name__ == "__main__":
         repo_id="beisner/aloha_plate_placement_goal", dataset_cfg=cfg.dataset
     )
     item = lr_dset[0]
+
+    datamodule = RpadLeRobotDataModule(
+        repo_id="beisner/aloha_plate_placement_goal",
+        batch_size=cfg.training.batch_size,
+        val_batch_size=cfg.training.val_batch_size,
+        num_workers=cfg.resources.num_workers,
+        dataset_cfg=cfg.dataset,
+        seed=cfg.seed,
+    )
+    datamodule.setup()
+    train_dloader = datamodule.train_dataloader()
+    val_dloader = datamodule.val_dataloader()
+
+    for batch in tqdm(train_dloader):
+        print(batch)
+
+    for batch in tqdm(val_dloader):
+        print(batch)
