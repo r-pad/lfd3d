@@ -4,6 +4,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
+import torchdatasets as td
 from lerobot.common.datasets.lerobot_dataset import (
     LeRobotDataset,
     LeRobotDatasetMetadata,
@@ -28,6 +29,7 @@ class RpadLeRobotDataset(BaseDataset):
         self.lerobot_metadata = LeRobotDatasetMetadata(repo_id=repo_id, root=root)
 
         # Store the same dataset configuration...
+        self.cache_dir = dataset_cfg.cache_dir
         self.dataset_cfg = dataset_cfg
         self.num_points = dataset_cfg.num_points
         self.max_depth = dataset_cfg.max_depth
@@ -179,6 +181,21 @@ class RpadLeRobotDataModule(BaseDataModule):
             self.test_datasets[tag] = RpadLeRobotDataset(
                 dataset_cfg=dataset_cfg, split="test"
             )
+
+        if self.train_dataset.cache_dir:
+            invalidating_cacher = td.cachers.ProbabilisticCacherWrapper(
+                td.cachers.HDF5(Path(self.train_dataset.cache_dir)),
+                invalidation_rate=self.dataset_cfg.cache_invalidation_rate,
+                seed=self.seed,
+            )
+            self.train_dataset.cache(invalidating_cacher)
+            for tag in self.val_tags:
+                self.val_datasets[tag].cache(
+                    td.cachers.HDF5(Path(self.train_dataset.cache_dir) / f"val_{tag}")
+                )
+                self.test_datasets[tag].cache(
+                    td.cachers.HDF5(Path(self.train_dataset.cache_dir) / f"test_{tag}")
+                )
 
 
 if __name__ == "__main__":
