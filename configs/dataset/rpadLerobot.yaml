@@ -1,0 +1,13 @@
+defaults:
+  - base_dataset # Inherit from base
+name: rpadLerobot
+
+# The LeRobot dataset repo containing post-processed goals.
+# # Overriding this means you have to do LEROBOT_HOME / repo_id directly in data_dir.
+data_dir: null # don't want to override automatic computation, unless you do...
+repo_id: beisner/aloha_plate_placement_goal
+
+data_sources: # List of data sources
+  - aloha
+
+rgb_feat: False # If true, compute DINOv2 features, else just return RGB

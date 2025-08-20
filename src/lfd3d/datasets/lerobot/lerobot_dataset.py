@@ -1,6 +1,5 @@
 """This file adapts a LeRobot dataset to the LFD3D format."""
 
-import logging
 from pathlib import Path
 
 import numpy as np
@@ -19,10 +18,9 @@ from tqdm import tqdm
 
 
 class RpadLeRobotDataset(BaseDataset):
-    def __init__(
-        self, repo_id: str, dataset_cfg, root: str | None = None, split: str = "train"
-    ):
+    def __init__(self, dataset_cfg, root: str | None = None, split: str = "train"):
         super().__init__()
+        repo_id = dataset_cfg.repo_id
 
         self.lerobot_dataset = LeRobotDataset(
             repo_id=repo_id, root=root, tolerance_s=0.0004, video_backend="pyav"
@@ -48,13 +46,16 @@ class RpadLeRobotDataset(BaseDataset):
     def load_transition(
         self, idx
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, str, str]:
-        logging.warning(f"getting from {idx}")
-
         start_item = self.lerobot_dataset[idx]
         # The next_event_idx is relative to the episode, so we calculate the absolute index
         end_idx = (
             start_item["next_event_idx"] - start_item["frame_index"] + idx
         ).item()
+        # HACK! I don't understand why we have an off-by-one in the next_event_idx.
+        # So far it only seems to cause problems in the final transition. But this is
+        # a major code smell, that makes me wonder if it's off-by-one everywhere. But
+        # I haven't checked thouroghly. Feels more like a subtle bug than an off-by-one.
+        end_idx = min(end_idx, len(self.lerobot_dataset) - 1)
         end_item = self.lerobot_dataset[end_idx]
         task = start_item["task"]
         episode_index = start_item["episode_index"]
@@ -151,19 +152,15 @@ class RpadLeRobotDataset(BaseDataset):
 
     def __len__(self):
         # Return the length of the underlying LeRobot dataset
-        # HACK WHY DO WE HAVE AN OFF-BY-ONE
-        return len(self.lerobot_dataset) - 1
+        return len(self.lerobot_dataset)
 
 
 class RpadLeRobotDataModule(BaseDataModule):
-    def __init__(
-        self, repo_id, batch_size, val_batch_size, num_workers, dataset_cfg, seed
-    ):
+    def __init__(self, batch_size, val_batch_size, num_workers, dataset_cfg, seed):
         super().__init__(batch_size, val_batch_size, num_workers, dataset_cfg, seed)
         self.val_tags = ["aloha"]
         # Subset of train to use for eval
         self.TRAIN_SUBSET_SIZE = 20
-        self.repo_id = repo_id
 
     def setup(self, stage: str = "fit"):
         self.stage = stage
@@ -171,16 +168,16 @@ class RpadLeRobotDataModule(BaseDataModule):
         self.test_datasets = {}
 
         self.train_dataset = RpadLeRobotDataset(
-            repo_id=self.repo_id, dataset_cfg=self.dataset_cfg, split="train"
+            dataset_cfg=self.dataset_cfg, root=self.root, split="train"
         )
         for tag in self.val_tags:
             dataset_cfg = self.dataset_cfg.copy()
             dataset_cfg.data_sources = [tag]
             self.val_datasets[tag] = RpadLeRobotDataset(
-                repo_id=self.repo_id, dataset_cfg=dataset_cfg, split="val"
+                dataset_cfg=dataset_cfg, root=self.root, split="val"
             )
             self.test_datasets[tag] = RpadLeRobotDataset(
-                repo_id=self.repo_id, dataset_cfg=dataset_cfg, split="test"
+                dataset_cfg=dataset_cfg, split="test"
             )
 
 
@@ -190,7 +187,7 @@ if __name__ == "__main__":
     cfg_dict = {
         "dataset": {
             "name": "rpadFoxglove",
-            "data_dir": "/data/rpadFoxglove_pick_mug_all_0627.zarr/pick_mug_all_0627.zarr",
+            "data_dir": None,
             "cache_dir": None,
             "cache_invalidation_rate": 0.05,
             "train_size": None,
@@ -214,6 +211,7 @@ if __name__ == "__main__":
             "use_full_text": True,
             "use_intermediate_frames": False,
             "use_gemini_subgoals": False,
+            "repo_id": "beisner/aloha_plate_placement_goal",
         },
         "model": {
             "name": "articubot",
@@ -266,13 +264,10 @@ if __name__ == "__main__":
         "lora": {"enable": False, "rank": 4, "target_modules": "all", "dropout": 0.1},
     }
     cfg = OmegaConf.create(cfg_dict)
-    lr_dset = RpadLeRobotDataset(
-        repo_id="beisner/aloha_plate_placement_goal", dataset_cfg=cfg.dataset
-    )
+    lr_dset = RpadLeRobotDataset(dataset_cfg=cfg.dataset)
     item = lr_dset[0]
 
     datamodule = RpadLeRobotDataModule(
-        repo_id="beisner/aloha_plate_placement_goal",
         batch_size=cfg.training.batch_size,
         val_batch_size=cfg.training.val_batch_size,
         num_workers=cfg.resources.num_workers,
