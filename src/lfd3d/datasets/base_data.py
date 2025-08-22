@@ -235,7 +235,8 @@ class BaseDataset(td.Dataset):
             normalized_start_scene_pcd,
         )
 
-    def get_scaled_intrinsics(self, K, orig_shape, target_shape=224):
+    @staticmethod
+    def get_scaled_intrinsics(K, orig_shape, target_shape=224):
         """
         Scale camera intrinsics matrix based on image resizing and cropping.
 

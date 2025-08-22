@@ -43,6 +43,12 @@ Test split generated using [sriramsk1999/general-flow](https://github.com/sriram
 - Generata GT for robot demonstrations with `src/lfd3d/datasets/rpad_foxglove/render_aloha.py`.
 - Annotate events with `src/lfd3d/datasets/rpad_foxglove/annotate_events.py`.
 
+### RPAD-Lerobot
+- With your collected lerobot dataset, run upgrade_dataset.py from the lerobot repo to generate a [repo_id]_goal repo
+- Run a training job like this:
+```python scripts/train.py model=articubot dataset=rpadLerobot dataset.repo_id=beisner/aloha_plate_placement_goal dataset.augment_train=True dataset.data_sources="[aloha]" resources.num_workers=16 dataset.cache_dir=/data/lfd3d_dataloading_cache
+```
+
 ### RT-1
 
 **NOTE:** This section needs to be updated, rgb features should come from dinov2, set up gripper centric preds

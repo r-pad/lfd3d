@@ -5,12 +5,16 @@ description = "A Python Package Template"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { file = "LICENSE.txt" }
-authors = [{ email = "baeisner@andrew.cmu.edu", name = "Ben Eisner" }, { email = "sskrishn@andrew.cmu.edu", name = "Sriram Krishna" }]
+authors = [
+    { email = "baeisner@andrew.cmu.edu", name = "Ben Eisner" },
+    { email = "sskrishn@andrew.cmu.edu", name = "Sriram Krishna" },
+]
 dependencies = [
-    "diffusers==0.26.3",
+    "diffusers>=0.26.3",
     "gif",
     "typer",
-    "huggingface-hub==0.25.2",
+    "huggingface-hub>=0.25.2,<=0.32.2",
+    "datasets<4.0.0",
     "hydra-core==1.3.2",
     "pytorch-lightning==2.4",
     "omegaconf==2.3.0",
@@ -32,7 +36,8 @@ dependencies = [
     "tensorflow-cpu>=2.19.0,<3",
     "google-genai>=1.11.0,<2",
     "peft>=0.15.2,<0.16",
-    "decord>=0.6.0,<0.7", "mink>=0.0.11,<0.0.12",
+    "decord>=0.6.0,<0.7",
+    "mink>=0.0.11,<0.0.12",
 ]
 
 [project.optional-dependencies]
@@ -41,6 +46,7 @@ develop = [
     "mypy==1.3.0",
     "pytest==7.3.2",
     "pre-commit==3.3.3",
+    "basedpyright",
 ]
 notebooks = ["jupyter"]
 docs = ["mkdocs-material", "mkdocstrings[python]"]
@@ -60,6 +66,10 @@ lfd3d = ["py.typed"]
 channels = ["pytorch", "nvidia/label/cuda-12.4.0", "conda-forge"]
 platforms = ["linux-64"]
 
+[tool.pixi.system-requirements]
+libc = { family = "glibc", version = "2.31" }
+cuda = "12.4"
+
 # Conda dependencies
 [tool.pixi.dependencies]
 python = "3.10.*"
@@ -67,13 +77,13 @@ cuda-toolkit = "12.4.*"
 gcc = "11.*"
 gxx = "11.*"
 setuptools = "==65.5.0"
-protobuf = "*"
+protobuf = ">=4.21,<6"
 
 # PyPI-specific dependencies
 [tool.pixi.pypi-dependencies]
 lfd3d = { path = ".", editable = true }
 torch = { version = "==2.6.0", index = "https://download.pytorch.org/whl/cu124" }
-torchvision = "*"
+torchvision = { version = "==0.21.0", index = "https://download.pytorch.org/whl/cu124" }
 timm = "==0.9.12"
 fvcore = "==0.1.5.post20221221"
 iopath = "==0.1.9"
@@ -83,6 +93,7 @@ wheel = "*"
 ninja = "*"
 spconv-cu124 = "*"
 torch_geometric = "<2.3"
+lerobot = { git = "https://github.com/r-pad/lerobot.git" }
 
 # Git dependencies as tasks
 [tool.pixi.tasks]
@@ -97,19 +108,31 @@ install-rpad-libs = "pip install git+https://github.com/r-pad/pyg_libs.git git+h
 install-torchdatasets = "pip install git+https://github.com/sriramsk1999/torchdatasets.git"
 install-segment-anything = "pip install git+https://github.com/facebookresearch/segment-anything.git"
 install-mano = "pip install git+https://github.com/hassony2/chumpy.git git+https://github.com/hassony2/manopth.git"
-install-deps = { depends-on = ["install-open3d", "install-pyg", "install-pytorch3d", "install-rpad-libs", "install-torchdatasets", "install-segment-anything", "install-mano"] }
+install-deps = { depends-on = [
+    "install-open3d",
+    "install-pyg",
+    "install-pytorch3d",
+    "install-rpad-libs",
+    "install-torchdatasets",
+    "install-segment-anything",
+    "install-mano",
+] }
 
 setup-pre-commit = "pre-commit install"
 test-cuda = "python -c 'import torch; print(torch.cuda.is_available())'"
 
 # Environments
 [tool.pixi.environments]
-default = { features = ["develop", "notebooks", "docs"], solve-group = "default"}
+default = { features = [
+    "develop",
+    "notebooks",
+    "docs",
+], solve-group = "default" }
 
 [tool.ruff]
 # Enable Pyflakes ('F'), pycodestyle ('E'), isort ('I')
 target-version = "py39"
-line-length = 88  # Same as Black
+line-length = 88                                               # Same as Black
 select = ["E", "F", "I", "W", "N", "UP", "B", "A", "C4", "PL"]
 ignore = []
 
@@ -130,7 +153,7 @@ exclude = [
 ]
 
 [tool.ruff.per-file-ignores]
-"__init__.py" = ["F401"]  # Ignore unused imports in __init__.py
+"__init__.py" = ["F401"] # Ignore unused imports in __init__.py
 
 [tool.ruff.isort]
 known-third-party = ["wandb"]
@@ -142,6 +165,16 @@ indent-style = "space"
 skip-magic-trailing-comma = false
 line-ending = "auto"
 
+[tool.basedpyright]
+include = ["src"]
+reportMissingImports = "error"
+reportMissingTypeStubs = false
+pythonVersion = "3.10"
+venvPath = ".pixi/envs"
+venv = "default"
+typeCheckingMode = "basic"
+
+
 [tool.mypy]
 python_version = "3.10"
 warn_return_any = true
@@ -151,7 +184,19 @@ namespace_packages = true
 explicit_package_bases = true
 
 [[tool.mypy.overrides]]
-module = ["torchvision.*", "diffusers", "pytorch3d.transforms", "timm.*", "open3d", "tqdm.auto", "tensorflow_datasets", "pytorch3d.structures", "torchdatasets", "tqdm", "tensorflow"]
+module = [
+    "torchvision.*",
+    "diffusers",
+    "pytorch3d.transforms",
+    "timm.*",
+    "open3d",
+    "tqdm.auto",
+    "tensorflow_datasets",
+    "pytorch3d.structures",
+    "torchdatasets",
+    "tqdm",
+    "tensorflow",
+]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

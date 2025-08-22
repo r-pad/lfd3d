@@ -8,13 +8,8 @@ import torch
 import torchdatasets as td
 import zarr
 from lfd3d.datasets.base_data import BaseDataModule, BaseDataset
-from lfd3d.datasets.rgb_text_feature_gen import (
-    get_dinov2_image_embedding,
-    get_siglip_text_embedding,
-)
+from lfd3d.datasets.rgb_text_featurizer import RGBTextFeaturizer
 from PIL import Image
-from sklearn.decomposition import PCA
-from transformers import AutoModel, AutoProcessor
 
 
 class RpadFoxgloveDataset(BaseDataset):
@@ -38,20 +33,14 @@ class RpadFoxgloveDataset(BaseDataset):
         self.max_depth = dataset_cfg.max_depth
 
         self.actual_captions = {}
-        self.text_embeddings = {}
         self.dataset = zarr.open_group(root, "r")
         dataset_index = self.expand_all_events()
         self.dataset_index = self.resample_dataset(dataset_index)
         self.size = len(self.dataset_index)
 
-        self.siglip = AutoModel.from_pretrained("google/siglip-so400m-patch14-384").to(
-            "cpu"
-        )
-        self.siglip_processor = AutoProcessor.from_pretrained(
-            "google/siglip-so400m-patch14-384"
-        )
-        self.dinov2 = torch.hub.load("facebookresearch/dinov2", "dinov2_vitl14_reg").to(
-            "cpu"
+        # Initialize RGB/text featurizer
+        self.rgb_text_featurizer = RGBTextFeaturizer(
+            target_shape=self.target_shape, rgb_feat=self.dataset_cfg.rgb_feat
         )
         # indexes of selected gripper points -> handpicked
         self.GRIPPER_IDX = {
@@ -373,42 +362,6 @@ class RpadFoxgloveDataset(BaseDataset):
             end_tracks = demo["gripper_pos"][event_end_idx]
         return start_tracks, end_tracks
 
-    def compute_rgb_text_feat(self, rgb, text):
-        """
-        Compute RGB/text features generated with DINOv2 and SIGLIP
-        """
-        siglip_dim = 1152
-        if text not in self.text_embeddings:
-            # Compute features on CPU to avoid CUDA multiprocessing issues
-            # We're only computing the features once and caching so its okay.
-            self.text_embeddings[text] = get_siglip_text_embedding(
-                text,
-                siglip=self.siglip,
-                siglip_processor=self.siglip_processor,
-                device="cpu",
-            )
-        text_embed = self.text_embeddings[text]
-
-        if self.dataset_cfg.rgb_feat:
-            # Compress RGB features
-            pca_n_components = 256
-            rgb_embed = get_dinov2_image_embedding(
-                Image.fromarray(rgb), dinov2=self.dinov2, device="cpu"
-            )
-
-            pca_model = PCA(n_components=pca_n_components)
-            rgb_embed = pca_model.fit_transform(
-                rgb_embed.reshape(-1, rgb_embed.shape[2])
-            )
-            rgb_embed = rgb_embed.reshape(
-                self.target_shape, self.target_shape, pca_n_components
-            )
-        else:
-            # Just return the (normalized) RGB values if features are not required.
-            rgb_embed = (((rgb / 255.0) * 2) - 1).astype(np.float32)
-
-        return rgb_embed, text_embed
-
     def __getitem__(self, idx):
         demo_name, subgoal_idx, caption, event_indexes = self.dataset_index[idx]
 
@@ -425,7 +378,9 @@ class RpadFoxgloveDataset(BaseDataset):
             demo_name, event_indexes["rgb_start"], event_indexes["rgb_end"]
         )
 
-        rgb_embed, text_embed = self.compute_rgb_text_feat(rgbs[0], caption)
+        rgb_embed, text_embed = self.rgb_text_featurizer.compute_rgb_text_feat(
+            rgbs[0], caption
+        )
         start_scene_pcd, start_scene_feat_pcd, augment_tf = self.get_scene_pcd(
             rgb_embed, depths[0], K_, self.num_points, self.max_depth
         )

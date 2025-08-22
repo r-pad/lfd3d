@@ -17,6 +17,7 @@ from lfd3d.datasets import (
     RT1DataModule,
     SynthBlockDataModule,
 )
+from lfd3d.datasets.lerobot.lerobot_dataset import RpadLeRobotDataModule
 from lfd3d.models.articubot import ArticubotNetwork, GoalRegressionModule
 from lfd3d.models.diptv3 import DiPTv3, DiPTv3Adapter
 from lfd3d.models.tax3d import (
@@ -83,6 +84,7 @@ def create_datamodule(cfg):
         "multi": MultiDatasetDataModule,
         "genGoalGen": GenGoalGenDataModule,
         "rpadFoxglove": RpadFoxgloveDataModule,
+        "rpadLerobot": RpadLeRobotDataModule,
     }
 
     datamodule_fn = dataset_map.get(cfg.dataset.name)
