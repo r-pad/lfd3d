@@ -93,7 +93,7 @@ wheel = "*"
 ninja = "*"
 spconv-cu124 = "*"
 torch_geometric = "<2.3"
-lerobot = { path = "../lerobot", editable = true }
+lerobot = { git = "https://github.com/r-pad/lerobot.git" }
 
 # Git dependencies as tasks
 [tool.pixi.tasks]
