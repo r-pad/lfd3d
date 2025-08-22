@@ -21,13 +21,13 @@ parser = argparse.ArgumentParser(description="Run Phantom on Lerobot")
 parser.add_argument(
     "--calib_file",
     type=str,
-    default="../../src/lfd3d/datasets/rpad_foxglove/calibration/T_world_from_camera_est_left_v6_0709.txt",
+    default="../../src/lfd3d/datasets/aloha_calibration/T_world_from_camera_est_left_v6_0709.txt",
     help="Cam to world calibration file",
 )
 parser.add_argument(
     "--intrinsics_file",
     type=str,
-    default="../../src/lfd3d/datasets/rpad_foxglove/calibration/intrinsics.txt",
+    default="../../src/lfd3d/datasets/aloha_calibration/intrinsics.txt",
     help="Path to intrinsics file",
 )
 parser.add_argument(
@@ -125,7 +125,7 @@ for vid_name in tqdm(videos):
         world_human_actual_eef_pos,
         world_human_actual_eef_rot,
         world_human_actual_eef_artic,
-        joint_state
+        joint_state,
     ) = render_with_ik(
         model,
         mink_config,
@@ -182,5 +182,5 @@ for vid_name in tqdm(videos):
         eef_pos=world_human_eef_pos,
         eef_rot=world_human_eef_rot,
         eef_artic=human_eef_artic,
-        joint_state=joint_state
+        joint_state=joint_state,
     )

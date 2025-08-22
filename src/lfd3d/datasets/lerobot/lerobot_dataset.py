@@ -10,10 +10,8 @@ from lerobot.common.datasets.lerobot_dataset import (
     LeRobotDatasetMetadata,
 )
 from lfd3d.datasets.base_data import BaseDataModule, BaseDataset
-from lfd3d.datasets.rpad_foxglove.rpad_foxglove_dataset import (
-    RGBTextFeaturizer,
-    RpadFoxgloveDataset,
-)
+from lfd3d.datasets.rgb_text_featurizer import RGBTextFeaturizer
+from lfd3d.datasets.rpad_foxglove.rpad_foxglove_dataset import RpadFoxgloveDataset
 from PIL import Image
 from tqdm import tqdm
 
@@ -44,6 +42,13 @@ class RpadLeRobotDataset(BaseDataset):
             "aloha": np.array([6, 197, 174]),
             "human": np.array([343, 763, 60]),
         }
+
+        K = self._load_camera_params()
+        H, W = (720, 1280)
+        orig_shape = (H, W)
+        self.K_ = RpadFoxgloveDataset.get_scaled_intrinsics(
+            K, orig_shape, self.target_shape
+        )
 
     def load_transition(
         self, idx
@@ -89,9 +94,7 @@ class RpadLeRobotDataset(BaseDataset):
 
     @staticmethod
     def _load_camera_params():
-        file_path = (
-            Path(__file__).parent.parent / "rpad_foxglove/calibration/intrinsics.txt"
-        )
+        file_path = Path(__file__).parent.parent / "aloha_calibration/intrinsics.txt"
         return np.loadtxt(file_path)
 
     def __getitem__(self, index):
@@ -102,16 +105,12 @@ class RpadLeRobotDataset(BaseDataset):
 
         start_tracks, end_tracks = gripper_pcds[0], gripper_pcds[1]
         actual_caption = caption
-        K = self._load_camera_params()
-        H, W = (720, 1280)
-        orig_shape = (H, W)
-        K_ = RpadFoxgloveDataset.get_scaled_intrinsics(K, orig_shape, self.target_shape)
 
         rgb_embed, text_embed = self.rgb_text_featurizer.compute_rgb_text_feat(
             rgbs[0], caption
         )
         start_scene_pcd, start_scene_feat_pcd, augment_tf = self.get_scene_pcd(
-            rgb_embed, depths[0], K_, self.num_points, self.max_depth
+            rgb_embed, depths[0], self.K_, self.num_points, self.max_depth
         )
 
         # We only use this dataset with aloha gripper, human version is collected w/ foxglove.
@@ -137,7 +136,7 @@ class RpadLeRobotDataset(BaseDataset):
             "caption": caption,
             "text_embed": text_embed,
             "cross_displacement": end_tracks - start_tracks,
-            "intrinsics": K_,
+            "intrinsics": self.K_,
             "rgbs": rgbs,
             "depths": depths,
             "start2end": start2end,
