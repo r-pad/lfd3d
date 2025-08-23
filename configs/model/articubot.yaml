@@ -9,6 +9,6 @@ add_action_pcd_masked: True # Add in action pcd with boolean mask (increment in_
 use_text_embedding: True # If true, expects (siglip) text embedding to be provided as input
 use_rgb: False # If true, expects +3 in_chanels
 
-is_gmm: False # Train a GMM and minimize negative log likelihood instead
+is_gmm: True # Train a GMM and minimize negative log likelihood instead
 fixed_variance: [0.01, 0.05, 0.1, 0.25, 0.5] # for gmm
 uniform_weights_coeff: 0.1 # coefficient for nll loss term when we use uniform mixing weights instead of pred

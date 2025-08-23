@@ -33,6 +33,10 @@ class RpadLeRobotDataset(BaseDataset):
         self.max_depth = dataset_cfg.max_depth
         self.split = split
 
+        self.color_key = dataset_cfg.color_key
+        self.depth_key = dataset_cfg.depth_key
+        self.gripper_pcd_key = dataset_cfg.gripper_pcd_key
+
         self.rgb_text_featurizer = RGBTextFeaturizer(
             target_shape=self.target_shape, rgb_feat=self.dataset_cfg.rgb_feat
         )
@@ -41,9 +45,14 @@ class RpadLeRobotDataset(BaseDataset):
         self.GRIPPER_IDX = {
             "aloha": np.array([6, 197, 174]),
             "human": np.array([343, 763, 60]),
+            "libero_franka": np.array([0, 1, 2]),
         }
 
-        K = self._load_camera_params()
+        assert (
+            len(dataset_cfg.data_sources) == 1
+        ), "not handling multiple data sources yet"
+        self.data_source = dataset_cfg.data_sources[0]
+        K = self._load_camera_params(self.data_source)
         H, W = (720, 1280)
         orig_shape = (H, W)
         self.K_ = RpadFoxgloveDataset.get_scaled_intrinsics(
@@ -67,7 +76,7 @@ class RpadLeRobotDataset(BaseDataset):
         task = start_item["task"]
         episode_index = start_item["episode_index"]
 
-        COLOR_KEY = "observation.images.cam_azure_kinect.color"
+        COLOR_KEY = self.color_key
         rgb_init = (start_item[COLOR_KEY].permute(1, 2, 0).numpy() * 255).astype(
             np.uint8
         )
@@ -78,23 +87,24 @@ class RpadLeRobotDataset(BaseDataset):
         rgb_end = np.asarray(self.rgb_preprocess(rgb_end))
         rgbs = np.array([rgb_init, rgb_end])
 
-        DEPTH_KEY = "observation.images.cam_azure_kinect.transformed_depth"
+        DEPTH_KEY = self.depth_key
         depth_init = Image.fromarray(start_item[DEPTH_KEY].numpy()[0])
         depth_init = np.asarray(self.depth_preprocess(depth_init))
         depth_end = Image.fromarray(end_item[DEPTH_KEY].numpy()[0])
         depth_end = np.asarray(self.depth_preprocess(depth_end))
         depths = np.array([depth_init, depth_end])
 
-        GRIPPER_PCD_KEY = "observation.points.gripper_pcds"
+        GRIPPER_PCD_KEY = self.gripper_pcd_key
         gripper_pcd_init = start_item[GRIPPER_PCD_KEY]
         gripper_pcd_end = end_item[GRIPPER_PCD_KEY]
         gripper_pcds = np.array([gripper_pcd_init, gripper_pcd_end])
 
         return rgbs, depths, gripper_pcds, task, f"{episode_index}"
 
-    @staticmethod
-    def _load_camera_params():
-        file_path = Path(__file__).parent.parent / "aloha_calibration/intrinsics.txt"
+    def _load_camera_params(self, data_source):
+        file_path = (
+            Path(__file__).parent.parent / f"{data_source}_calibration/intrinsics.txt"
+        )
         return np.loadtxt(file_path)
 
     def __getitem__(self, index):
@@ -113,8 +123,7 @@ class RpadLeRobotDataset(BaseDataset):
             rgb_embed, depths[0], self.K_, self.num_points, self.max_depth
         )
 
-        # We only use this dataset with aloha gripper, human version is collected w/ foxglove.
-        gripper_idx = self.GRIPPER_IDX["aloha"]
+        gripper_idx = self.GRIPPER_IDX[self.data_source]
 
         action_pcd_mean, scene_pcd_std = self.get_normalize_mean_std(
             start_tracks, start_scene_pcd, self.dataset_cfg
@@ -159,7 +168,7 @@ class RpadLeRobotDataset(BaseDataset):
 class RpadLeRobotDataModule(BaseDataModule):
     def __init__(self, batch_size, val_batch_size, num_workers, dataset_cfg, seed):
         super().__init__(batch_size, val_batch_size, num_workers, dataset_cfg, seed)
-        self.val_tags = ["aloha"]
+        self.val_tags = dataset_cfg.data_sources
         # Subset of train to use for eval
         self.TRAIN_SUBSET_SIZE = 20
 

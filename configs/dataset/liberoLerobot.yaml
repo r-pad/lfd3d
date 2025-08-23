@@ -5,14 +5,16 @@ name: rpadLerobot
 # The LeRobot dataset repo containing post-processed goals.
 # # Overriding this means you have to do LEROBOT_HOME / repo_id directly in data_dir.
 data_dir: null # don't want to override automatic computation, unless you do...
-repo_id: beisner/aloha_plate_placement_goal
+repo_id: sriramsk/libero_lerobot_singleTask_heatmapGoal
+
+max_depth: 2.0 # Filter out PCD beyond this depth
 
 # Camera keys in the dataset
-color_key: "observation.images.cam_azure_kinect.color"
-depth_key: "observation.images.cam_azure_kinect.transformed_depth"
+color_key: "observation.images.agentview"
+depth_key: "observation.images.agentview_depth"
 gripper_pcd_key: "observation.points.gripper_pcds"
 
 data_sources: # List of data sources
-  - aloha
+  - libero_franka
 
 rgb_feat: False # If true, compute DINOv2 features, else just return RGB

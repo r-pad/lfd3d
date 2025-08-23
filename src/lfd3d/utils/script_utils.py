@@ -85,6 +85,7 @@ def create_datamodule(cfg):
         "genGoalGen": GenGoalGenDataModule,
         "rpadFoxglove": RpadFoxgloveDataModule,
         "rpadLerobot": RpadLeRobotDataModule,
+        "liberoLerobot": RpadLeRobotDataModule,  # same module, just different default configs
     }
 
     datamodule_fn = dataset_map.get(cfg.dataset.name)
