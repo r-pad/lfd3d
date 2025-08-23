@@ -5,6 +5,11 @@
 This project uses [pixi](https://pixi.sh/latest/) for dependency management.
 
 ``` bash
+# avoid LeRobot install errors
+export GIT_LFS_SKIP_SMUDGE=1
+export CPPFLAGS="-I/usr/include"
+export CFLAGS="-DHAVE_LINUX_INPUT_H"
+
 pixi install
 pixi run install-deps
 pixi run setup-pre-commit
