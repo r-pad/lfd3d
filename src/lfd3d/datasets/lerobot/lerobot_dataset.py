@@ -52,12 +52,8 @@ class RpadLeRobotDataset(BaseDataset):
             len(dataset_cfg.data_sources) == 1
         ), "not handling multiple data sources yet"
         self.data_source = dataset_cfg.data_sources[0]
-        K = self._load_camera_params(self.data_source)
-        H, W = (720, 1280)
-        orig_shape = (H, W)
-        self.K_ = RpadFoxgloveDataset.get_scaled_intrinsics(
-            K, orig_shape, self.target_shape
-        )
+        self.K = self._load_camera_params(self.data_source)
+        self.K_ = None
 
     def load_transition(
         self, idx
@@ -80,6 +76,13 @@ class RpadLeRobotDataset(BaseDataset):
         rgb_init = (start_item[COLOR_KEY].permute(1, 2, 0).numpy() * 255).astype(
             np.uint8
         )
+
+        # Make dict {(H, W): K} to handle different resolutions in a dataset?
+        if self.K_ is None:
+            orig_shape = rgb_init.shape[:2]
+            self.K_ = RpadFoxgloveDataset.get_scaled_intrinsics(
+                self.K, orig_shape, self.target_shape
+            )
         rgb_init = Image.fromarray(rgb_init)
         rgb_init = np.asarray(self.rgb_preprocess(rgb_init))
         rgb_end = (end_item[COLOR_KEY].permute(1, 2, 0).numpy() * 255).astype(np.uint8)
