@@ -59,19 +59,23 @@ class RpadLeRobotDataset(BaseDataset):
         self, idx
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, str, str]:
         start_item = self.lerobot_dataset[idx]
+        task = start_item["task"]
+        episode_index = start_item["episode_index"]
         # The next_event_idx is relative to the episode, so we calculate the absolute index
         end_idx = (
             start_item["next_event_idx"] - start_item["frame_index"] + idx
         ).item()
-        # HACK! I don't understand why we have an off-by-one in the next_event_idx.
-        # So far it only seems to cause problems in the final transition. But this is
-        # a major code smell, that makes me wonder if it's off-by-one everywhere. But
-        # I haven't checked thouroghly. Feels more like a subtle bug than an off-by-one.
-        end_idx = min(end_idx, len(self.lerobot_dataset) - 1)
-        end_item = self.lerobot_dataset[end_idx]
-        task = start_item["task"]
-        episode_index = start_item["episode_index"]
 
+        # Off-by-one error in the data generation code on lerobot side
+        # Fixed, but this change remains here because I don't want to regenerate
+        # the datasets. Can probably be removed at some later point.
+        if (end_idx == len(self.lerobot_dataset)) or (
+            self.lerobot_dataset[end_idx]["episode_index"]
+            != start_item["episode_index"]
+        ):
+            end_idx = end_idx - 1
+
+        end_item = self.lerobot_dataset[end_idx]
         COLOR_KEY = self.color_key
         rgb_init = (start_item[COLOR_KEY].permute(1, 2, 0).numpy() * 255).astype(
             np.uint8
