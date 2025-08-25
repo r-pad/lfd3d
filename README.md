@@ -5,6 +5,11 @@
 This project uses [pixi](https://pixi.sh/latest/) for dependency management.
 
 ``` bash
+# avoid LeRobot install errors
+export GIT_LFS_SKIP_SMUDGE=1
+export CPPFLAGS="-I/usr/include"
+export CFLAGS="-DHAVE_LINUX_INPUT_H"
+
 pixi install
 pixi run install-deps
 pixi run setup-pre-commit
@@ -46,7 +51,13 @@ Test split generated using [sriramsk1999/general-flow](https://github.com/sriram
 ### RPAD-Lerobot
 - With your collected lerobot dataset, run upgrade_dataset.py from the lerobot repo to generate a [repo_id]_goal repo
 - Run a training job like this:
-```python scripts/train.py model=articubot dataset=rpadLerobot dataset.repo_id=beisner/aloha_plate_placement_goal dataset.augment_train=True dataset.data_sources="[aloha]" resources.num_workers=16 dataset.cache_dir=/data/lfd3d_dataloading_cache
+```python
+python scripts/train.py model=articubot dataset=rpadLerobot dataset.repo_id=beisner/aloha_plate_placement_goal dataset.augment_train=True dataset.data_sources="[aloha]" resources.num_workers=16 dataset.cache_dir=/data/lfd3d_dataloading_cache
+```
+
+- For LIBERO:
+```python
+python scripts/train.py model=articubot dataset=liberoLerobot dataset.repo_id=sriramsk/libero_lerobot_singleTask_heatmapGoal dataset.augment_train=True dataset.cache_dir=libero_cache model.use_rgb=True model.in_channels=7 training.batch_size=4
 ```
 
 ### RT-1
