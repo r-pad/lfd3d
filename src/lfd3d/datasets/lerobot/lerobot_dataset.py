@@ -1,5 +1,6 @@
 """This file adapts a LeRobot dataset to the LFD3D format."""
 
+import random
 from pathlib import Path
 
 import numpy as np
@@ -9,6 +10,7 @@ from lerobot.common.datasets.lerobot_dataset import (
     LeRobotDataset,
     LeRobotDatasetMetadata,
 )
+from lerobot.common.datasets.utils import get_episode_data_index
 from lfd3d.datasets.base_data import BaseDataModule, BaseDataset
 from lfd3d.datasets.rgb_text_featurizer import RGBTextFeaturizer
 from lfd3d.datasets.rpad_foxglove.rpad_foxglove_dataset import RpadFoxgloveDataset
@@ -17,7 +19,13 @@ from tqdm import tqdm
 
 
 class RpadLeRobotDataset(BaseDataset):
-    def __init__(self, dataset_cfg, root: str | None = None, split: str = "train"):
+    def __init__(
+        self,
+        dataset_cfg,
+        root: str | None = None,
+        split: str = "train",
+        split_indices: list = [],
+    ):
         super().__init__()
         repo_id = dataset_cfg.repo_id
 
@@ -33,6 +41,7 @@ class RpadLeRobotDataset(BaseDataset):
         self.max_depth = dataset_cfg.max_depth
         self.split = split
 
+        self.split_indices = split_indices
         self.color_key = dataset_cfg.color_key
         self.depth_key = dataset_cfg.depth_key
         self.gripper_pcd_key = dataset_cfg.gripper_pcd_key
@@ -115,10 +124,15 @@ class RpadLeRobotDataset(BaseDataset):
         return np.loadtxt(file_path)
 
     def __getitem__(self, index):
+        # Map the dataset index to the actual LeRobot dataset index using split_indices
+        actual_index = self.split_indices[index]
+
         # Retrieve the item from the underlying LeRobot dataset
         start2end = torch.eye(4)  # Static camera
 
-        rgbs, depths, gripper_pcds, caption, demo_name = self.load_transition(index)
+        rgbs, depths, gripper_pcds, caption, demo_name = self.load_transition(
+            actual_index
+        )
 
         start_tracks, end_tracks = gripper_pcds[0], gripper_pcds[1]
         actual_caption = caption
@@ -168,33 +182,85 @@ class RpadLeRobotDataset(BaseDataset):
         return item
 
     def __len__(self):
-        # Return the length of the underlying LeRobot dataset
-        return len(self.lerobot_dataset)
+        # Return the length based on split indices
+        return len(self.split_indices)
 
 
 class RpadLeRobotDataModule(BaseDataModule):
-    def __init__(self, batch_size, val_batch_size, num_workers, dataset_cfg, seed):
+    def __init__(
+        self,
+        batch_size,
+        val_batch_size,
+        num_workers,
+        dataset_cfg,
+        seed,
+        val_episode_ratio=0.1,
+    ):
         super().__init__(batch_size, val_batch_size, num_workers, dataset_cfg, seed)
         self.val_tags = dataset_cfg.data_sources
         # Subset of train to use for eval
         self.TRAIN_SUBSET_SIZE = 20
+        self.val_episode_ratio = val_episode_ratio
+        self.train_indices = None
+        self.val_indices = None
+
+    def _generate_episode_splits(self):
+        """Generate train/val splits based on episodes using LeRobot's episode_data_index."""
+        # Load metadata to get episode information
+        temp_meta = LeRobotDatasetMetadata(
+            repo_id=self.dataset_cfg.repo_id, root=self.root
+        )
+
+        # Get episode data index which maps episodes to their frame ranges
+        episode_data_index = get_episode_data_index(temp_meta.episodes)
+
+        # Get all episode indices
+        episode_list = list(temp_meta.episodes.keys())
+
+        # Sample episodes for validation
+        num_val_episodes = max(1, int(len(episode_list) * self.val_episode_ratio))
+        val_episodes = random.sample(episode_list, num_val_episodes)
+        train_episodes = [ep for ep in episode_list if ep not in val_episodes]
+
+        # Get frame indices for train and val episodes using episode_data_index
+        train_indices = []
+        val_indices = []
+
+        for ep_idx in train_episodes:
+            start_frame = episode_data_index["from"][ep_idx].item()
+            end_frame = episode_data_index["to"][ep_idx].item()
+            train_indices.extend(range(start_frame, end_frame))
+
+        for ep_idx in val_episodes:
+            start_frame = episode_data_index["from"][ep_idx].item()
+            end_frame = episode_data_index["to"][ep_idx].item()
+            val_indices.extend(range(start_frame, end_frame))
+
+        return sorted(train_indices), sorted(val_indices)
 
     def setup(self, stage: str = "fit"):
         self.stage = stage
         self.val_datasets = {}
         self.test_datasets = {}
 
+        self.train_indices, self.val_indices = self._generate_episode_splits()
         self.train_dataset = RpadLeRobotDataset(
-            dataset_cfg=self.dataset_cfg, root=self.root, split="train"
+            dataset_cfg=self.dataset_cfg,
+            root=self.root,
+            split="train",
+            split_indices=self.train_indices,
         )
         for tag in self.val_tags:
             dataset_cfg = self.dataset_cfg.copy()
             dataset_cfg.data_sources = [tag]
             self.val_datasets[tag] = RpadLeRobotDataset(
-                dataset_cfg=dataset_cfg, root=self.root, split="val"
+                dataset_cfg=dataset_cfg,
+                root=self.root,
+                split="val",
+                split_indices=self.val_indices,
             )
             self.test_datasets[tag] = RpadLeRobotDataset(
-                dataset_cfg=dataset_cfg, split="test"
+                dataset_cfg=dataset_cfg, split="test", split_indices=self.val_indices
             )
 
         if self.train_dataset.cache_dir:
