@@ -57,13 +57,6 @@ class RpadLeRobotDataset(BaseDataset):
             "libero_franka": np.array([0, 1, 2]),
         }
 
-        assert (
-            len(dataset_cfg.data_sources) == 1
-        ), "not handling multiple data sources yet"
-        self.data_source = dataset_cfg.data_sources[0]
-        self.K = self._load_camera_params(self.data_source)
-        self.K_ = None
-
     def load_transition(
         self, idx
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, str, str]:
@@ -89,13 +82,8 @@ class RpadLeRobotDataset(BaseDataset):
         rgb_init = (start_item[COLOR_KEY].permute(1, 2, 0).numpy() * 255).astype(
             np.uint8
         )
+        orig_shape = rgb_init.shape[:2]
 
-        # Make dict {(H, W): K} to handle different resolutions in a dataset?
-        if self.K_ is None:
-            orig_shape = rgb_init.shape[:2]
-            self.K_ = RpadFoxgloveDataset.get_scaled_intrinsics(
-                self.K, orig_shape, self.target_shape
-            )
         rgb_init = Image.fromarray(rgb_init)
         rgb_init = np.asarray(self.rgb_preprocess(rgb_init))
         rgb_end = (end_item[COLOR_KEY].permute(1, 2, 0).numpy() * 255).astype(np.uint8)
@@ -115,7 +103,7 @@ class RpadLeRobotDataset(BaseDataset):
         gripper_pcd_end = end_item[GRIPPER_PCD_KEY]
         gripper_pcds = np.array([gripper_pcd_init, gripper_pcd_end])
 
-        return rgbs, depths, gripper_pcds, task, f"{episode_index}"
+        return rgbs, depths, orig_shape, gripper_pcds, task, f"{episode_index}"
 
     def _load_camera_params(self, data_source):
         file_path = (
@@ -123,16 +111,42 @@ class RpadLeRobotDataset(BaseDataset):
         )
         return np.loadtxt(file_path)
 
+    def source_of_data(self, idx):
+        """
+        Return the source of the current demo i.e. where the data is from
+        """
+        item = self.lerobot_dataset[idx]
+        # Currently identifying demo type by checking number of vertices
+        # For human data, we have 778 vertices from the MANO mesh
+        # For aloha data, we're sampling 500 points from the mesh.
+        # For libero data, we have 4 points calculated analytically
+        # HACK: This is pretty hacky, should find a better way to do this.
+        n_points = item["observation.points.gripper_pcds"].shape[0]
+        if n_points == 778:
+            demo_type = "human"
+        elif n_points == 500:
+            demo_type = "aloha"
+        elif n_points == 4:
+            demo_type = "libero_franka"
+        else:
+            raise NotImplementedError
+
+        return demo_type
+
     def __getitem__(self, index):
         # Map the dataset index to the actual LeRobot dataset index using split_indices
         actual_index = self.split_indices[index]
+        data_source = self.source_of_data(actual_index)
 
-        # Retrieve the item from the underlying LeRobot dataset
         start2end = torch.eye(4)  # Static camera
 
-        rgbs, depths, gripper_pcds, caption, demo_name = self.load_transition(
-            actual_index
+        # Retrieve the item from the underlying LeRobot dataset
+        rgbs, depths, orig_shape, gripper_pcds, caption, demo_name = (
+            self.load_transition(actual_index)
         )
+
+        K = self._load_camera_params(data_source)
+        K_ = RpadFoxgloveDataset.get_scaled_intrinsics(K, orig_shape, self.target_shape)
 
         start_tracks, end_tracks = gripper_pcds[0], gripper_pcds[1]
         actual_caption = caption
@@ -141,10 +155,10 @@ class RpadLeRobotDataset(BaseDataset):
             rgbs[0], caption
         )
         start_scene_pcd, start_scene_feat_pcd, augment_tf = self.get_scene_pcd(
-            rgb_embed, depths[0], self.K_, self.num_points, self.max_depth
+            rgb_embed, depths[0], K_, self.num_points, self.max_depth
         )
 
-        gripper_idx = self.GRIPPER_IDX[self.data_source]
+        gripper_idx = self.GRIPPER_IDX[data_source]
 
         action_pcd_mean, scene_pcd_std = self.get_normalize_mean_std(
             start_tracks, start_scene_pcd, self.dataset_cfg
@@ -166,7 +180,7 @@ class RpadLeRobotDataset(BaseDataset):
             "caption": caption,
             "text_embed": text_embed,
             "cross_displacement": end_tracks - start_tracks,
-            "intrinsics": self.K_,
+            "intrinsics": K_,
             "rgbs": rgbs,
             "depths": depths,
             "start2end": start2end,
@@ -197,7 +211,7 @@ class RpadLeRobotDataModule(BaseDataModule):
         val_episode_ratio=0.1,
     ):
         super().__init__(batch_size, val_batch_size, num_workers, dataset_cfg, seed)
-        self.val_tags = dataset_cfg.data_sources
+        self.val_tags = ["lerobot"]
         # Subset of train to use for eval
         self.TRAIN_SUBSET_SIZE = 20
         self.val_episode_ratio = val_episode_ratio
@@ -252,7 +266,6 @@ class RpadLeRobotDataModule(BaseDataModule):
         )
         for tag in self.val_tags:
             dataset_cfg = self.dataset_cfg.copy()
-            dataset_cfg.data_sources = [tag]
             self.val_datasets[tag] = RpadLeRobotDataset(
                 dataset_cfg=dataset_cfg,
                 root=self.root,
