@@ -26,8 +26,7 @@ def main(cfg):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-    # Since most of us are training on 3090s+, we can use mixed precision.
-    torch.set_float32_matmul_precision("medium")
+    torch.set_float32_matmul_precision("highest")
 
     # Global seed for reproducibility.
     pl.seed_everything(cfg.seed)
