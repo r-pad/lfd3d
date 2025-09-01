@@ -23,6 +23,6 @@ pixi run python scripts/train.py \
 	dataset.cache_dir=/tmp/libero_all_cache \
 	model.use_rgb=True \
 	model.in_channels=7 \
-	training.batch_size=24 \
+	training.batch_size=48 \
 	resources.num_workers=48 \
 	training.check_val_every_n_epochs=1
