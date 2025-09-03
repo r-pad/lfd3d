@@ -30,7 +30,7 @@ class RpadLeRobotDataset(BaseDataset):
         repo_id = dataset_cfg.repo_id
 
         self.lerobot_dataset = LeRobotDataset(
-            repo_id=repo_id, root=root, tolerance_s=0.0004, video_backend="pyav"
+            repo_id=repo_id, root=root, tolerance_s=0.0004
         )
         self.lerobot_metadata = LeRobotDatasetMetadata(repo_id=repo_id, root=root)
 
