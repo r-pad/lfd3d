@@ -78,6 +78,7 @@ gcc = "11.*"
 gxx = "11.*"
 setuptools = "==65.5.0"
 protobuf = ">=4.21,<6"
+ffmpeg = ">=6,<8"
 
 # PyPI-specific dependencies
 [tool.pixi.pypi-dependencies]
