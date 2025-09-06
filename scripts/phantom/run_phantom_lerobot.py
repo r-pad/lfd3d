@@ -1,5 +1,6 @@
 import argparse
 import os
+from glob import glob
 
 import cv2
 import imageio.v3 as iio
@@ -8,11 +9,13 @@ import mujoco
 import numpy as np
 from phantom_utils import (
     ALOHA_REST_QPOS,
+    read_depth_video,
     render_with_ik,
     retarget_human_pose,
     setup_camera,
     smooth_and_interpolate_pose,
     visualize_eef,
+    write_depth_video,
 )
 from robot_descriptions.loaders.mujoco import load_robot_description
 from tqdm import tqdm
@@ -67,9 +70,12 @@ setup_camera(model, cam_id, cam_to_world, width, height, K)
 renderer = mujoco.Renderer(model, width=width, height=height)
 
 INPAINT_VIDEO_DIR = "e2fgvi_vid"
+DEPTH_DIR = "observation.images.cam_azure_kinect.transformed_depth"
+MASK_DIR = "gsam2_masks"
 HANDPOSE_DIR = "wilor_hand_pose"
 VIZ_DIR = "phantom_viz_results"
 OUTPUT_DIR = "phantom_retarget"
+FPS = 15
 
 videos = sorted(os.listdir(f"{args.lerobot_extradata_path}/{INPAINT_VIDEO_DIR}"))
 
@@ -78,6 +84,20 @@ for vid_name in tqdm(videos):
     inpainted_video = iio.imread(
         f"{args.lerobot_extradata_path}/{INPAINT_VIDEO_DIR}/{vid_name}"
     )
+
+    depth_video = read_depth_video(
+        f"{args.lerobot_extradata_path}/{DEPTH_DIR}/{vid_name.replace('.mp4', '.mkv')}"
+    )
+    real_masks = np.array(
+        [
+            cv2.imread(i, -1)
+            for i in sorted(
+                glob(f"{args.lerobot_extradata_path}/{MASK_DIR}/{vid_name}_masks/*")
+            )
+        ]
+    ).astype(bool)
+    depth_video[real_masks] = 0
+
     hand_pose = np.load(f"{args.lerobot_extradata_path}/{HANDPOSE_DIR}/{vid_name}.npy")
 
     try:
@@ -151,12 +171,12 @@ for vid_name in tqdm(videos):
         iio.imwrite(
             f"{args.lerobot_extradata_path}/{VIZ_DIR}/{vid_name}/ik_human_img_{vid_name}",
             ik_human_render_img,
-            fps=60,
+            fps=FPS,
         )
         iio.imwrite(
             f"{args.lerobot_extradata_path}/{VIZ_DIR}/{vid_name}/ik_human_seg_{vid_name}",
             ik_human_render_seg.astype(np.uint8) * 255,
-            fps=60,
+            fps=FPS,
         )
 
     ik_human_render_seg = np.array(
@@ -165,9 +185,17 @@ for vid_name in tqdm(videos):
     ik_human_render_img = np.array(
         [cv2.resize(i, (WIDTH, HEIGHT)) for i in ik_human_render_img]
     )
+    ik_human_render_depth = np.array(
+        [
+            cv2.resize(i, (WIDTH, HEIGHT), interpolation=cv2.INTER_NEAREST)
+            for i in ik_human_render_depth
+        ]
+    )
 
     composite_img = inpainted_video.copy()
     composite_img[ik_human_render_seg] = ik_human_render_img[ik_human_render_seg]
+    composite_depth = depth_video.copy()
+    composite_depth[ik_human_render_seg] = ik_human_render_depth[ik_human_render_seg]
 
     os.makedirs(
         f"{args.lerobot_extradata_path}/{OUTPUT_DIR}/{vid_name}/", exist_ok=True
@@ -175,7 +203,12 @@ for vid_name in tqdm(videos):
     iio.imwrite(
         f"{args.lerobot_extradata_path}/{OUTPUT_DIR}/{vid_name}/{vid_name}",
         composite_img,
-        fps=60,
+        fps=FPS,
+    )
+    write_depth_video(
+        f"{args.lerobot_extradata_path}/{OUTPUT_DIR}/{vid_name}/depth_{vid_name.replace('.mp4', '.mkv')}",
+        composite_depth,
+        fps=FPS,
     )
     np.savez(
         f"{args.lerobot_extradata_path}/{OUTPUT_DIR}/{vid_name}/{vid_name}_eef.npz",
