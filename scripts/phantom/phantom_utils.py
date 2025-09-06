@@ -1,3 +1,4 @@
+import av
 import mink
 import mujoco
 import numpy as np
@@ -186,8 +187,8 @@ def render_rightArm_images(renderer, data, camera="teleoperator_pov", use_seg=Fa
     renderer.disable_segmentation_rendering()
 
     seg = seg[:, :, 0]  # channel 1 is foreground/background
-    # NOTE: Classes for the right arm excluding the camera mount. Handpicked
-    target_classes = set(range(65, 91)) - {81, 82, 83}
+    # NOTE: Classes for the right arm
+    target_classes = set(range(65, 91))
 
     seg = np.isin(seg, list(target_classes)).astype(bool)
     if use_seg:
@@ -195,6 +196,62 @@ def render_rightArm_images(renderer, data, camera="teleoperator_pov", use_seg=Fa
         depth[~seg] = 0
 
     return rgb, depth, seg
+
+
+def read_depth_video(video_path):
+    # Open video with PyAV directly
+    container = av.open(video_path)
+    video_stream = container.streams.video[0]
+
+    loaded_frames = []
+    # Decode frames
+    for frame in container.decode(video_stream):
+        # Convert frame to numpy array preserving bit depth
+        if frame.format.name in ["gray16le", "gray16be"]:
+            # 16-bit grayscale
+            frame_array = frame.to_ndarray(format="gray16le") / 1000.0
+        else:
+            raise NotImplementedError("Not supporting other formats right now.")
+        loaded_frames.append(frame_array)
+    container.close()
+
+    frames = np.stack([frame for frame in loaded_frames])
+    return frames
+
+
+def write_depth_video(
+    video_path: str,
+    depth_frames: np.ndarray,
+    fps: int,
+    vcodec: str = "ffv1",
+    pix_fmt: str = "gray16le",
+) -> None:
+    if depth_frames.ndim != 3:
+        raise ValueError(f"Expected 3D array (T, H, W), got shape {depth_frames.shape}")
+
+    T, height, width = depth_frames.shape
+
+    # Convert depth to uint16 (multiply by 1000 to reverse the /1000 in read function)
+    depth_uint16 = (depth_frames * 1000).astype(np.uint16)
+
+    with av.open(video_path, "w") as output:
+        output_stream = output.add_stream(vcodec, fps)
+        output_stream.pix_fmt = pix_fmt
+        output_stream.width = width
+        output_stream.height = height
+
+        for frame_idx in range(T):
+            frame_array = depth_uint16[frame_idx]
+            input_frame = av.VideoFrame.from_ndarray(frame_array, format=pix_fmt)
+
+            packet = output_stream.encode(input_frame)
+            if packet:
+                output.mux(packet)
+
+        # Flush encoder
+        packet = output_stream.encode()
+        if packet:
+            output.mux(packet)
 
 
 def render_with_ik(
