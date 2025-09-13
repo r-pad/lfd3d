@@ -8,6 +8,7 @@ keep_gripper_in_fps: False
 add_action_pcd_masked: True # Add in action pcd with boolean mask (increment in_channels)
 use_text_embedding: True # If true, expects (siglip) text embedding to be provided as input
 use_rgb: False # If true, expects +3 in_chanels
+use_dual_head: False # If true, maintain separate heads for human/robot inputs
 
 is_gmm: True # Train a GMM and minimize negative log likelihood instead
 fixed_variance: [0.01, 0.05, 0.1, 0.25, 0.5] # for gmm
