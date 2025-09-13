@@ -59,7 +59,7 @@ class RpadLeRobotDataset(BaseDataset):
 
     def load_transition(
         self, idx
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, str, str]:
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, str, str]:
         start_item = self.lerobot_dataset[idx]
         task = start_item["task"]
         episode_index = start_item["episode_index"]
@@ -192,6 +192,7 @@ class RpadLeRobotDataset(BaseDataset):
             "augment_t": augment_tf["t"],
             "augment_C": augment_tf["C"],
             "actual_caption": actual_caption,
+            "data_source": data_source,
         }
         return item
 

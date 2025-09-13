@@ -444,6 +444,9 @@ class HOI4DDataset(BaseDataset):
         return rgb_embed, text_embed
 
     def __getitem__(self, index):
+        raise NotImplementedError(
+            "needs to be updated."
+        )
         vid_name, event_idx = self.data_files[index]
         dir_name = os.path.dirname(os.path.dirname(vid_name))
 

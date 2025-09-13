@@ -206,6 +206,9 @@ class DroidDataset(BaseDataset):
         return rgb_embed, text_embed
 
     def __getitem__(self, idx):
+        raise NotImplementedError(
+            "needs to be updated."
+        )
         index, subgoal_idx = self.droid_index[idx]
 
         K, baseline = self.load_camera_params(index)

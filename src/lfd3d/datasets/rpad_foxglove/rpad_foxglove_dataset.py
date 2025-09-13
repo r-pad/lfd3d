@@ -363,6 +363,9 @@ class RpadFoxgloveDataset(BaseDataset):
         return start_tracks, end_tracks
 
     def __getitem__(self, idx):
+        raise NotImplementedError(
+            "needs to be updated."
+        )
         demo_name, subgoal_idx, caption, event_indexes = self.dataset_index[idx]
 
         K, orig_shape = self.load_camera_params(demo_name)
