@@ -333,7 +333,7 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/3f/0a/678ebcf4b6dad6ad63dfc2445d190f79a97fa7bc7150f57a6c505459e2bc/keras-3.9.2-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/de/c6/7b9bb8044e150d4d1558423a1568e4f227193662a02231064e3824f37e0a/kiwisolver-1.4.8-cp310-cp310-manylinux_2_12_x86_64.manylinux2010_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/2d/00/d90b10b962b4277f5e64a78b6609968859ff86889f5b898c1a778c06ec00/lark-1.2.2-py3-none-any.whl
-      - pypi: git+https://github.com/r-pad/lerobot.git?rev=d8db17dd93c000b99ebd04977922fccb851b870b#d8db17dd93c000b99ebd04977922fccb851b870b
+      - pypi: git+https://github.com/r-pad/lerobot.git?rev=bfc33ea1e506006f079f53f6a3b6cb91f4827372#bfc33ea1e506006f079f53f6a3b6cb91f4827372
       - pypi: https://files.pythonhosted.org/packages/1d/fc/716c1e62e512ef1c160e7984a73a5fc7df45166f2ff3f254e71c58076f7c/libclang-18.1.1-py2.py3-none-manylinux2010_x86_64.whl
       - pypi: git+https://github.com/sriramsk1999/LIBERO.git?rev=15a91548acf90c6f502a99c21ca18792c5ae8256#15a91548acf90c6f502a99c21ca18792c5ae8256
       - pypi: https://files.pythonhosted.org/packages/16/2a/d5de2884759ca5eb1103200c1c3b9c5df362250020870a1556d19d15a6d1/lightning_utilities-0.11.7-py3-none-any.whl
@@ -438,6 +438,7 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/92/44/8634af40b0db528b5b37e901c0dc67321354880d251bf8965901d57693a5/PyOpenGL-3.1.9-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/05/e7/df2285f3d08fee213f2d041540fa4fc9ca6c2d44cf36d3a035bf2a8d2bcc/pyparsing-3.2.3-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/49/b3/d8482e8cacc8ea15a356efea13d22ce1c5914a9ee36622ba250523240bf2/pyquaternion-0.9.9-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/af/2d/d6d4a12a4af3b944e4ab27850bf1e696fc17fbdccdcd5fbbafadbfbca5a4/pyrealsense2-2.56.5.9235-cp310-cp310-manylinux1_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/8d/59/b4572118e098ac8e46e399a1dd0f2d85403ce8bbaad9ec79373ed6badaf9/PySocks-1.7.1-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/7a/d0/de969198293cdea22b3a6fb99a99aeeddb7b3827f0823b33c5dc0734bbe5/pytest-7.3.2-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/ec/57/56b9bcc3c9c6a792fcbaf139543cee77261f3651ca9da0c93f5c1221264b/python_dateutil-2.9.0.post0-py2.py3-none-any.whl
@@ -3641,7 +3642,7 @@ packages:
   purls: []
   size: 671240
   timestamp: 1740155456116
-- pypi: git+https://github.com/r-pad/lerobot.git?rev=d8db17dd93c000b99ebd04977922fccb851b870b#d8db17dd93c000b99ebd04977922fccb851b870b
+- pypi: git+https://github.com/r-pad/lerobot.git?rev=bfc33ea1e506006f079f53f6a3b6cb91f4827372#bfc33ea1e506006f079f53f6a3b6cb91f4827372
   name: lerobot
   version: 0.1.0
   requires_dist:
@@ -3689,6 +3690,7 @@ packages:
   - future==0.18.2
   - easydict==1.9
   - libero @ git+https://github.com/sriramsk1999/LIBERO.git@15a91548acf90c6f502a99c21ca18792c5ae8256
+  - pyrealsense2>=2.55.1.6486
   - hf-doc-builder @ git+https://github.com/huggingface/doc-builder.git@main ; extra == 'docs'
   - watchdog>=6.0.0 ; extra == 'docs'
   - pre-commit>=3.7.0 ; extra == 'dev'
@@ -3698,7 +3700,6 @@ packages:
   - pynput>=1.7.7 ; extra == 'dynamixel'
   - feetech-servo-sdk>=1.0.0 ; extra == 'feetech'
   - pynput>=1.7.7 ; extra == 'feetech'
-  - pyrealsense2>=2.55.1.6486 ; sys_platform != 'darwin' and extra == 'intelrealsense'
   - transformers>=4.48.0 ; extra == 'pi0'
   - gym-pusht>=0.1.5 ; python_full_version < '4.0' and extra == 'pusht'
   - hello-robot-stretch-body>=0.7.27 ; python_full_version < '4.0' and sys_platform == 'linux' and extra == 'stretch'
@@ -3716,7 +3717,7 @@ packages:
 - pypi: .
   name: lfd3d
   version: 0.1.0
-  sha256: f0bfd9c815e76f723ac8ce904d9c1cc7bebb68131bd942033ae75574ff83d42e
+  sha256: 7b78383bd8b7519ee6c0de78d27293a688cc07c8f2ebb01613bc33c00df04093
   requires_dist:
   - diffusers>=0.26.3
   - gif
@@ -5973,6 +5974,11 @@ packages:
   - numpy
   - mkdocs ; extra == 'dev'
   - nose ; extra == 'test'
+- pypi: https://files.pythonhosted.org/packages/af/2d/d6d4a12a4af3b944e4ab27850bf1e696fc17fbdccdcd5fbbafadbfbca5a4/pyrealsense2-2.56.5.9235-cp310-cp310-manylinux1_x86_64.whl
+  name: pyrealsense2
+  version: 2.56.5.9235
+  sha256: 050301dcb13abe49e14449b010732a5b7ec50d0de829c8f8a9356944518d5784
+  requires_python: '>=3.9'
 - pypi: https://files.pythonhosted.org/packages/8d/59/b4572118e098ac8e46e399a1dd0f2d85403ce8bbaad9ec79373ed6badaf9/PySocks-1.7.1-py3-none-any.whl
   name: pysocks
   version: 1.7.1
