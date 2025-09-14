@@ -66,11 +66,17 @@ class RpadLeRobotDataset(BaseDataset):
             "libero_franka": np.array([0, 1, 2]),
         }
 
+    def maybe_extract_subgoal(self, task, idx, item):
+        if not self.dataset_cfg.use_subgoals:
+            return task
+        raise NotImplementedError("tbd")
+
     def load_transition(
         self, idx
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, str, str]:
         start_item = self.lerobot_dataset[idx]
         task = start_item["task"]
+        task = self.maybe_extract_subgoal(task, idx, start_item)
         episode_index = start_item["episode_index"]
         # The next_event_idx is relative to the episode, so we calculate the absolute index
         end_idx = (
