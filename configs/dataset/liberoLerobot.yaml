@@ -6,6 +6,7 @@ name: rpadLerobot
 # # Overriding this means you have to do LEROBOT_HOME / repo_id directly in data_dir.
 data_dir: null # don't want to override automatic computation, unless you do...
 repo_id: sriramsk/libero_lerobot_singleTask_heatmapGoal
+use_subgoals: False
 
 max_depth: 2.0 # Filter out PCD beyond this depth
 

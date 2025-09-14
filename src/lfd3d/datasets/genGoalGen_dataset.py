@@ -146,6 +146,9 @@ class GenGoalGenDataset(BaseDataset):
         return rgb_embed, text_embed
 
     def __getitem__(self, index):
+        raise NotImplementedError(
+            "needs to be updated."
+        )
         item = self.data_files[index]
         image_path, caption = item["image"], item["action"]
 

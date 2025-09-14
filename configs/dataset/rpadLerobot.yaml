@@ -6,6 +6,7 @@ name: rpadLerobot
 # # Overriding this means you have to do LEROBOT_HOME / repo_id directly in data_dir.
 data_dir: null # don't want to override automatic computation, unless you do...
 repo_id: beisner/aloha_plate_placement_goal
+use_subgoals: False
 
 # Camera keys in the dataset
 color_key: "observation.images.cam_azure_kinect.color"

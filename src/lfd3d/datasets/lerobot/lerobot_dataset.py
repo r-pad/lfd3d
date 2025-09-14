@@ -9,13 +9,25 @@ import torchdatasets as td
 from lerobot.common.datasets.lerobot_dataset import (
     LeRobotDataset,
     LeRobotDatasetMetadata,
+    MultiHomogeneousLeRobotDataset,
 )
 from lerobot.common.datasets.utils import get_episode_data_index
 from lfd3d.datasets.base_data import BaseDataModule, BaseDataset
 from lfd3d.datasets.rgb_text_featurizer import RGBTextFeaturizer
-from lfd3d.datasets.rpad_foxglove.rpad_foxglove_dataset import RpadFoxgloveDataset
 from PIL import Image
 from tqdm import tqdm
+
+
+def make_dataset(repo_id, root):
+    if isinstance(repo_id, str):
+        lerobot_dataset = LeRobotDataset(repo_id=repo_id, root=root, tolerance_s=0.0004)
+    else:
+        datasets = []
+        for dataset_id in repo_id:
+            ds = LeRobotDataset(repo_id=dataset_id, root=root, tolerance_s=0.0004)
+            datasets.append(ds)
+        lerobot_dataset = MultiHomogeneousLeRobotDataset(datasets)
+    return lerobot_dataset
 
 
 class RpadLeRobotDataset(BaseDataset):
@@ -29,10 +41,7 @@ class RpadLeRobotDataset(BaseDataset):
         super().__init__()
         repo_id = dataset_cfg.repo_id
 
-        self.lerobot_dataset = LeRobotDataset(
-            repo_id=repo_id, root=root, tolerance_s=0.0004
-        )
-        self.lerobot_metadata = LeRobotDatasetMetadata(repo_id=repo_id, root=root)
+        self.lerobot_dataset = make_dataset(repo_id, root)
 
         # Store the same dataset configuration...
         self.cache_dir = dataset_cfg.cache_dir
@@ -57,11 +66,17 @@ class RpadLeRobotDataset(BaseDataset):
             "libero_franka": np.array([0, 1, 2]),
         }
 
+    def extract_goal(self, item):
+        if self.dataset_cfg.use_subgoals:
+            return item["subgoal"]
+        else:
+            return item["task"]
+
     def load_transition(
         self, idx
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, str, str]:
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, str, str]:
         start_item = self.lerobot_dataset[idx]
-        task = start_item["task"]
+        task = self.extract_goal(start_item)
         episode_index = start_item["episode_index"]
         # The next_event_idx is relative to the episode, so we calculate the absolute index
         end_idx = (
@@ -146,7 +161,7 @@ class RpadLeRobotDataset(BaseDataset):
         )
 
         K = self._load_camera_params(data_source)
-        K_ = RpadFoxgloveDataset.get_scaled_intrinsics(K, orig_shape, self.target_shape)
+        K_ = BaseDataset.get_scaled_intrinsics(K, orig_shape, self.target_shape)
 
         start_tracks, end_tracks = gripper_pcds[0], gripper_pcds[1]
         actual_caption = caption
@@ -192,6 +207,7 @@ class RpadLeRobotDataset(BaseDataset):
             "augment_t": augment_tf["t"],
             "augment_C": augment_tf["C"],
             "actual_caption": actual_caption,
+            "data_source": data_source,
         }
         return item
 
@@ -220,16 +236,21 @@ class RpadLeRobotDataModule(BaseDataModule):
 
     def _generate_episode_splits(self):
         """Generate train/val splits based on episodes using LeRobot's episode_data_index."""
-        # Load metadata to get episode information
-        temp_meta = LeRobotDatasetMetadata(
-            repo_id=self.dataset_cfg.repo_id, root=self.root
-        )
+        # Handle multiple datasets
+        if isinstance(self.dataset_cfg.repo_id, str):
+            # Load metadata to get episode information
+            temp_meta = LeRobotDatasetMetadata(
+                repo_id=self.dataset_cfg.repo_id, root=self.root
+            )
 
-        # Get episode data index which maps episodes to their frame ranges
-        episode_data_index = get_episode_data_index(temp_meta.episodes)
-
-        # Get all episode indices
-        episode_list = list(temp_meta.episodes.keys())
+            # Get episode data index which maps episodes to their frame ranges
+            episode_data_index = get_episode_data_index(temp_meta.episodes)
+            # Get all episode indices
+            episode_list = list(temp_meta.episodes.keys())
+        else:
+            tmp_multi_dataset = make_dataset(self.dataset_cfg.repo_id, self.root)
+            episode_data_index = tmp_multi_dataset.episode_data_index
+            episode_list = list(range(tmp_multi_dataset.num_episodes))
 
         # Sample episodes for validation
         num_val_episodes = max(1, int(len(episode_list) * self.val_episode_ratio))
