@@ -6,6 +6,7 @@ from pathlib import Path
 import numpy as np
 import torch
 import torchdatasets as td
+import torchvision.transforms as T
 from lerobot.common.datasets.lerobot_dataset import (
     LeRobotDataset,
     LeRobotDatasetMetadata,
@@ -49,6 +50,7 @@ class RpadLeRobotDataset(BaseDataset):
         self.num_points = dataset_cfg.num_points
         self.max_depth = dataset_cfg.max_depth
         self.split = split
+        self.pixel_score = dataset_cfg.pixel_score
 
         self.split_indices = split_indices
         self.color_key = dataset_cfg.color_key
@@ -57,6 +59,13 @@ class RpadLeRobotDataset(BaseDataset):
 
         self.rgb_text_featurizer = RGBTextFeaturizer(
             target_shape=self.target_shape, rgb_feat=self.dataset_cfg.rgb_feat
+        )
+
+        self.rgb_normalizer = T.Compose(
+            [
+                T.ToTensor(),
+                T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+            ]
         )
 
         # indexes of selected gripper points -> handpicked
@@ -148,6 +157,112 @@ class RpadLeRobotDataset(BaseDataset):
 
         return demo_type
 
+    def load_pixel_score(self, idx, rgbs):
+        """
+        Load pixel score data
+        """
+        start_item = self.lerobot_dataset[idx]
+        task = self.extract_goal(start_item)
+        episode_index = start_item["episode_index"]
+        # The next_event_idx is relative to the episode, so we calculate the absolute index
+        end_idx = (
+            start_item["next_event_idx"] - start_item["frame_index"] + idx
+        ).item()
+
+        # Off-by-one error in the data generation code on lerobot side
+        # Fixed, but this change remains here because I don't want to regenerate
+        # the datasets. Can probably be removed at some later point.
+        if (end_idx == len(self.lerobot_dataset)) or (
+            self.lerobot_dataset[end_idx]["episode_index"]
+            != start_item["episode_index"]
+        ):
+            end_idx = end_idx - 1
+
+        end_item = self.lerobot_dataset[end_idx]
+
+        normalized_rgbs = np.array(
+            [self.rgb_normalizer(rgbs[0]), self.rgb_normalizer(rgbs[1])]
+        )
+
+        PIXEL_SCORE_KEY = self.pixel_score_key
+        pixel_score_init = (
+            start_item[PIXEL_SCORE_KEY].permute(1, 2, 0).numpy() * 255
+        ).astype(np.uint8)  # H W 3
+        pixel_score_end = (
+            end_item[PIXEL_SCORE_KEY].permute(1, 2, 0).numpy() * 255
+        ).astype(np.uint8)
+
+        # origin shape
+        pixel_score_orig_shape = pixel_score_init.shape[:2]
+        # Reshape
+        pixel_score_init = Image.fromarray(pixel_score_init)
+        pixel_score_init = np.asarray(
+            self.depth_preprocess(pixel_score_init)
+        )  # Use Nearest neighbor
+        pixel_score_end = Image.fromarray(pixel_score_end)
+        pixel_score_end = np.asarray(self.depth_preprocess(pixel_score_end))
+
+        # Use only the grasp center channel for pixel score
+        pixel_score_init = np.stack(
+            [pixel_score_init[:, :, 0]] * 3,
+            axis=-1,
+        )
+
+        pixel_score_end = np.stack(
+            [pixel_score_end[:, :, 0]] * 3,
+            axis=-1,
+        )
+
+        pixel_score_vis = np.array(
+            [np.copy(pixel_score_init), np.copy(pixel_score_end)]
+        )
+
+        # Get pixel score (distance)
+        pixel_score_target_shape = pixel_score_init.shape[:2]
+        target_height, target_width = pixel_score_target_shape
+        max_distance = np.sqrt(target_height**2 + target_width**2)
+
+        normalized_pixel_scores = np.array(
+            [
+                np.transpose((pixel_score_init / 255).astype(np.float64), (2, 0, 1)),
+                np.transpose((pixel_score_end / 255).astype(np.float64), (2, 0, 1)),
+            ]
+        )  # Normalize to [0,1], H W 3 -> 3 H W
+        pixel_score_init = (
+            (pixel_score_init / 255).astype(np.float64)
+        ) ** 2 * max_distance  # Square to align with original distance
+        pixel_score_end = (
+            (pixel_score_end / 255).astype(np.float64)
+        ) ** 2 * max_distance
+
+        pixel_score_init = np.asarray(pixel_score_init)
+        pixel_score_end = np.asarray(pixel_score_end)
+
+        pixel_score_dist = np.array([pixel_score_init, pixel_score_end])  # H W 3
+
+        h_idx, w_idx = np.unravel_index(
+            np.argmin(pixel_score_end[:, :, 0]), pixel_score_end[:, :, 0].shape
+        )
+
+        pixel_score_label = np.zeros((target_height, target_width))
+        pixel_score_label[h_idx, w_idx] = 1.0
+        pixel_score_label = np.stack([pixel_score_label.astype(np.uint8)] * 3, axis=2)
+        pixel_score_label = Image.fromarray(pixel_score_label)
+        pixel_score_label = np.asarray(pixel_score_label)
+        pixel_score_label = np.transpose(pixel_score_label, (2, 0, 1)).astype(float)
+
+        pixel_coord = np.array([h_idx, w_idx])
+
+        return {
+            "pixel_score_dist": pixel_score_dist,
+            "pixel_score_orig_shape": pixel_score_orig_shape,
+            "normalized_pixel_scores": normalized_pixel_scores,
+            "pixel_score_label": pixel_score_label,
+            "pixel_score_vis": pixel_score_vis,
+            "pixel_coord": pixel_coord,
+            "normalized_rgbs": normalized_rgbs,
+        }
+
     def __getitem__(self, index):
         # Map the dataset index to the actual LeRobot dataset index using split_indices
         actual_index = self.split_indices[index]
@@ -209,6 +324,11 @@ class RpadLeRobotDataset(BaseDataset):
             "actual_caption": actual_caption,
             "data_source": data_source,
         }
+
+        if self.pixel_score:
+            pixel_dict = self.load_pixel_score(actual_index, rgbs)
+            item.update(pixel_dict)
+
         return item
 
     def __len__(self):

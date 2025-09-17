@@ -92,6 +92,7 @@ def main(cfg):
         job_type=cfg.job_type,
         save_code=True,  # This just has the main script.
         group=group,
+        name=cfg.wandb.name,
     )
 
     ######################################################################

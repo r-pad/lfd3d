@@ -18,7 +18,12 @@ from lfd3d.datasets import (
     SynthBlockDataModule,
 )
 from lfd3d.datasets.lerobot.lerobot_dataset import RpadLeRobotDataModule
-from lfd3d.models.articubot import ArticubotNetwork, GoalRegressionModule
+from lfd3d.models.articubot import (
+    ArticubotNetwork,
+    GoalPixelScoreModule,
+    GoalRegressionModule,
+    PixelScoreNetwork,
+)
 from lfd3d.models.diptv3 import DiPTv3, DiPTv3Adapter
 from lfd3d.models.tax3d import (
     CrossDisplacementModule,
@@ -65,6 +70,9 @@ def create_model(cfg):
     elif cfg.model.name == "articubot":
         network_fn = ArticubotNetwork
         module_fn = GoalRegressionModule
+    elif cfg.model.name == "pixelscore":
+        network_fn = PixelScoreNetwork
+        module_fn = GoalPixelScoreModule
     else:
         raise NotImplementedError(cfg.model.name)
 

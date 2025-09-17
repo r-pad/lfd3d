@@ -29,6 +29,20 @@ def project_pcd_on_image(pcd, mask, image, K, color):
     return viz_image
 
 
+def project_pcd(pcd, K, image_shape):
+    """
+    Project point cloud, normalized 2D coordinates
+    """
+    height, width, ch = image_shape
+    projected_points = K @ pcd.T
+    projected_points = projected_points[:2, :] / projected_points[2, :]
+    projected_image_coords = projected_points.T.round().astype(np.float32)
+    coords = np.clip(projected_image_coords, 0, [width - 1, height - 1])
+    coords[:, 0] = coords[:, 0] / (width - 1)
+    coords[:, 1] = coords[:, 1] / (height - 1)
+    return coords
+
+
 def get_img_pcd(image, depth, K, max_depth, num_points):
     height, width = depth.shape
     # Create pixel coordinate grid

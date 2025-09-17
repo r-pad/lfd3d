@@ -79,6 +79,10 @@ gxx = "11.*"
 setuptools = "==65.5.0"
 protobuf = ">=4.21,<6"
 ffmpeg = ">=6,<8"
+c-compiler = { version = ">=1.5.2,<2", channel = "conda-forge" }
+cxx-compiler = { version = ">=1.5.2,<2", channel = "conda-forge" }
+ninja = { version = ">=1.13.1,<2", channel = "conda-forge" }
+cmake = { version = ">=4.1.1,<5", channel = "conda-forge" }
 
 # PyPI-specific dependencies
 [tool.pixi.pypi-dependencies]
