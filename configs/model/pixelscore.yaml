@@ -1,3 +1,4 @@
 name: pixelscore
 
 use_text_embedding: True
+loss_fn: "cross_entropy" #mse
