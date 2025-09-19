@@ -67,7 +67,6 @@ class RpadLeRobotDataset(BaseDataset):
                 T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
             ]
         )
-
         # indexes of selected gripper points -> handpicked
         self.GRIPPER_IDX = {
             "aloha": np.array([6, 197, 174]),

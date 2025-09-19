@@ -1947,7 +1947,7 @@ class GoalPixelScoreModule(pl.LightningModule):
 
         gt_pixel_score_img_list = [
             wandb.Image(
-                np.stack([gt_pixel_score[i][:,:,0]]*3, axis = -1),
+                np.stack([gt_pixel_score[i][:, :, 0]] * 3, axis=-1),
                 caption="Ground Truth Pixel Score",
             )
             for i in range(self.batch_size)
