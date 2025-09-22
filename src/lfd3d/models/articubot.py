@@ -1983,7 +1983,7 @@ class GoalPixelScoreModule(pl.LightningModule):
         val_tag = self.trainer.datamodule.val_tags[dataloader_idx]
         with torch.no_grad():
             pred_dict = {}
-            coord_dist, pred_pixel_score, logits = self.predict(batch)
+            coord_dist, pred_pixel_score, logits, logits = self.predict(batch)
             pred_dict["pred"] = pred_pixel_score
             pred_dict["coord_dist"] = coord_dist
 
@@ -2044,6 +2044,7 @@ class GoalPixelScoreModule(pl.LightningModule):
         eval_tag = self.trainer.datamodule.eval_tags[dataloader_idx]
         pred_dict = {}
         with torch.no_grad():
+            _, pred_pixel_score, logits = self.predict(batch)
             _, pred_pixel_score, logits = self.predict(batch)
             pred_dict["pred"] = pred_pixel_score
 

@@ -102,9 +102,7 @@ class RpadLeRobotDataset(BaseDataset):
 
         end_item = self.lerobot_dataset[end_idx]
         COLOR_KEY = self.color_key
-        rgb_init = (start_item[COLOR_KEY].permute(1, 2, 0).numpy() * 255).astype(
-            np.uint8
-        )
+        rgb_init = (start_item[COLOR_KEY].permute(1, 2, 0).numpy() * 255).astype(np.uint8)
         orig_shape = rgb_init.shape[:2]
 
         rgb_init = Image.fromarray(rgb_init)
