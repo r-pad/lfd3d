@@ -137,13 +137,19 @@ def main(cfg):
     ######################################################################
 
     # Upload output to wandb
-    wandb.init(entity="r-pad", project="lfd3d", id=cfg.checkpoint.run_id, resume="must")
+    wandb.init(
+        entity="hz2851-carnegie-mellon-university",
+        project="lfd3d",
+        id=cfg.checkpoint.run_id,
+        resume="must",
+    )
 
     eval_datamodule = get_eval_datamodule(datamodule, cfg.inference)
     preds = trainer.predict(model, datamodule=eval_datamodule)
     preds_dict = {tag: {} for tag in eval_datamodule.eval_tags}
 
     # Keys to iterate over
+    breakpoint()
     keys = preds[0][0].keys()
     for i, pred_split in enumerate(preds_dict.keys()):
         # Flatten the predictions for each split separately and store in preds_dict

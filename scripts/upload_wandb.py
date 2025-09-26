@@ -25,7 +25,12 @@ parser.add_argument(
 args = parser.parse_args()
 
 # Initialize wandb and upload artifact
-wandb.init(entity="r-pad", project="lfd3d", id=args.run_id, resume="must")
+wandb.init(
+    entity="hz2851-carnegie-mellon-university",
+    project="lfd3d",
+    id=args.run_id,
+    resume="must",
+)
 
 artifact = wandb.Artifact(
     f"best_{args.artifact_type}_model-{args.run_id}", type="model"

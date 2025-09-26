@@ -26,21 +26,7 @@ def project_pcd_on_image(pcd, mask, image, K, color):
     for point in coords:
         cv2.circle(viz_image, point, color=color, thickness=-1, radius=1)
 
-    return viz_image
-
-
-def project_pcd(pcd, K, image_shape):
-    """
-    Project point cloud, normalized 2D coordinates
-    """
-    height, width, ch = image_shape
-    projected_points = K @ pcd.T
-    projected_points = projected_points[:2, :] / projected_points[2, :]
-    projected_image_coords = projected_points.T.round().astype(np.float32)
-    coords = np.clip(projected_image_coords, 0, [width - 1, height - 1])
-    coords[:, 0] = coords[:, 0] / (width - 1)
-    coords[:, 1] = coords[:, 1] / (height - 1)
-    return coords
+    return coords, viz_image
 
 
 def get_img_pcd(image, depth, K, max_depth, num_points):
@@ -153,7 +139,6 @@ def get_action_anchor_pcd(
         np.array(action_pcd_color),
         np.array(anchor_pcd_color),
     )
-    eps = 1e-7
 
     action_pcd_color = np.repeat(action_pcd_color[None, :], action_pcd.shape[0], axis=0)
     anchor_pcd_color = np.repeat(anchor_pcd_color[None, :], anchor_pcd.shape[0], axis=0)
