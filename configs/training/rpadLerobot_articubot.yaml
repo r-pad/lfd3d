@@ -13,3 +13,12 @@ additional_train_logging_period: 100 # Global step period to log additional trai
 
 n_samples_wta: 5 # number of samples for evaluating coverage
 save_wta_to_disk: False # save to disk for further examination
+
+# ModelCheckpoint configurations
+checkpoints:
+  rmse:
+    monitor: val/rmse
+    mode: min
+  rmse_and_std_combi:
+    monitor: val/rmse_and_std_combi
+    mode: min

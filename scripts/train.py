@@ -16,6 +16,34 @@ from lfd3d.utils.script_utils import (
 from pytorch_lightning.loggers import WandbLogger
 
 
+def create_checkpoint_callbacks(cfg, experiment_id):
+    """Create ModelCheckpoint callbacks based on config."""
+    callbacks = []
+
+    # Get checkpoint configs from config file, with defaults
+    checkpoint_configs = cfg.training.checkpoints
+
+    for name, config in checkpoint_configs.items():
+        monitor = config["monitor"]
+        mode = config.get("mode", "min")
+
+        # Extract metric name for filename (remove val/ prefix if present)
+        metric_name = monitor.replace("val/", "")
+
+        callback = ModelCheckpointExplicit(
+            artifact_name=f"best_{name}_model-{experiment_id}",
+            dirpath=cfg.lightning.checkpoint_dir,
+            filename="{epoch}-{step}-{" + monitor + ":.3f}",
+            monitor=monitor,
+            mode=mode,
+            save_weights_only=False,
+            save_last=False,
+        )
+        callbacks.append(callback)
+
+    return callbacks
+
+
 @hydra.main(config_path="../configs", config_name="train", version_base="1.3")
 def main(cfg):
     ######################################################################
@@ -113,26 +141,7 @@ def main(cfg):
         check_val_every_n_epoch=cfg.training.check_val_every_n_epochs,
         gradient_clip_val=cfg.training.grad_clip_norm,
         use_distributed_sampler=use_distributed_sampler,
-        callbacks=[
-            ModelCheckpointExplicit(
-                artifact_name=f"best_rmse_model-{logger.experiment.id}",
-                dirpath=cfg.lightning.checkpoint_dir,
-                filename="{epoch}-{step}-{val/rmse:.3f}",
-                monitor="val/rmse",
-                mode="min",
-                save_weights_only=False,
-                save_last=False,
-            ),
-            ModelCheckpointExplicit(
-                artifact_name=f"best_rmse_and_std_combi_model-{logger.experiment.id}",
-                dirpath=cfg.lightning.checkpoint_dir,
-                filename="{epoch}-{step}-{val/rmse_and_std_combi:.3f}",
-                monitor="val/rmse_and_std_combi",
-                mode="min",
-                save_weights_only=False,
-                save_last=False,
-            ),
-        ],
+        callbacks=create_checkpoint_callbacks(cfg, logger.experiment.id),
         num_sanity_val_steps=0,
     )
 

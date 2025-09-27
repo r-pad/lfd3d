@@ -13,3 +13,12 @@ additional_train_logging_period: 100 # Global step period to log additional trai
 
 n_samples_wta: 5 # number of samples for evaluating coverage
 save_wta_to_disk: False # save to disk for further examination
+
+# ModelCheckpoint configurations
+checkpoints:
+  pix_dist:
+    monitor: val/pix_dist
+    mode: min
+  normalized_pix_dist:
+    monitor: val/normalized_pix_dist
+    mode: min
