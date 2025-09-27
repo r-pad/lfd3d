@@ -8,10 +8,8 @@ import torch
 import torchdatasets as td
 from lerobot.common.datasets.lerobot_dataset import (
     LeRobotDataset,
-    LeRobotDatasetMetadata,
     MultiHomogeneousLeRobotDataset,
 )
-from lerobot.common.datasets.utils import get_episode_data_index
 from lfd3d.datasets.base_data import BaseDataModule, BaseDataset
 from lfd3d.datasets.rgb_text_featurizer import RGBTextFeaturizer
 from PIL import Image
@@ -28,6 +26,28 @@ def make_dataset(repo_id, root):
             datasets.append(ds)
         lerobot_dataset = MultiHomogeneousLeRobotDataset(datasets)
     return lerobot_dataset
+
+
+def source_of_data(item):
+    """
+    Return the source of the current demo i.e. where the data is from
+    """
+    # Currently identifying demo type by checking number of vertices
+    # For human data, we have 778 vertices from the MANO mesh
+    # For aloha data, we're sampling 500 points from the mesh.
+    # For libero data, we have 4 points calculated analytically
+    # HACK: This is pretty hacky, should find a better way to do this.
+    n_points = item["observation.points.gripper_pcds"].shape[0]
+    if n_points == 778:
+        demo_type = "human"
+    elif n_points == 500:
+        demo_type = "aloha"
+    elif n_points == 4:
+        demo_type = "libero_franka"
+    else:
+        raise NotImplementedError
+
+    return demo_type
 
 
 class RpadLeRobotDataset(BaseDataset):
@@ -83,15 +103,6 @@ class RpadLeRobotDataset(BaseDataset):
             start_item["next_event_idx"] - start_item["frame_index"] + idx
         ).item()
 
-        # Off-by-one error in the data generation code on lerobot side
-        # Fixed, but this change remains here because I don't want to regenerate
-        # the datasets. Can probably be removed at some later point.
-        if (end_idx == len(self.lerobot_dataset)) or (
-            self.lerobot_dataset[end_idx]["episode_index"]
-            != start_item["episode_index"]
-        ):
-            end_idx = end_idx - 1
-
         end_item = self.lerobot_dataset[end_idx]
         COLOR_KEY = self.color_key
         rgb_init = (start_item[COLOR_KEY].permute(1, 2, 0).numpy() * 255).astype(
@@ -126,32 +137,10 @@ class RpadLeRobotDataset(BaseDataset):
         )
         return np.loadtxt(file_path)
 
-    def source_of_data(self, idx):
-        """
-        Return the source of the current demo i.e. where the data is from
-        """
-        item = self.lerobot_dataset[idx]
-        # Currently identifying demo type by checking number of vertices
-        # For human data, we have 778 vertices from the MANO mesh
-        # For aloha data, we're sampling 500 points from the mesh.
-        # For libero data, we have 4 points calculated analytically
-        # HACK: This is pretty hacky, should find a better way to do this.
-        n_points = item["observation.points.gripper_pcds"].shape[0]
-        if n_points == 778:
-            demo_type = "human"
-        elif n_points == 500:
-            demo_type = "aloha"
-        elif n_points == 4:
-            demo_type = "libero_franka"
-        else:
-            raise NotImplementedError
-
-        return demo_type
-
     def __getitem__(self, index):
         # Map the dataset index to the actual LeRobot dataset index using split_indices
         actual_index = self.split_indices[index]
-        data_source = self.source_of_data(actual_index)
+        data_source = source_of_data(self.lerobot_dataset[actual_index])
 
         start2end = torch.eye(4)  # Static camera
 
@@ -227,7 +216,7 @@ class RpadLeRobotDataModule(BaseDataModule):
         val_episode_ratio=0.1,
     ):
         super().__init__(batch_size, val_batch_size, num_workers, dataset_cfg, seed)
-        self.val_tags = ["lerobot"]
+        self.val_tags = ["human", "aloha", "libero_franka"]
         # Subset of train to use for eval
         self.TRAIN_SUBSET_SIZE = 20
         self.val_episode_ratio = val_episode_ratio
@@ -235,50 +224,59 @@ class RpadLeRobotDataModule(BaseDataModule):
         self.val_indices = None
 
     def _generate_episode_splits(self):
-        """Generate train/val splits based on episodes using LeRobot's episode_data_index."""
-        # Handle multiple datasets
-        if isinstance(self.dataset_cfg.repo_id, str):
-            # Load metadata to get episode information
-            temp_meta = LeRobotDatasetMetadata(
-                repo_id=self.dataset_cfg.repo_id, root=self.root
-            )
+        """Generate train/val splits based on episodes and data sources using LeRobot's episode_data_index."""
+        tmp_dataset = make_dataset(self.dataset_cfg.repo_id, self.root)
+        episode_data_index = tmp_dataset.episode_data_index
+        episode_list = list(range(tmp_dataset.num_episodes))
 
-            # Get episode data index which maps episodes to their frame ranges
-            episode_data_index = get_episode_data_index(temp_meta.episodes)
-            # Get all episode indices
-            episode_list = list(temp_meta.episodes.keys())
-        else:
-            tmp_multi_dataset = make_dataset(self.dataset_cfg.repo_id, self.root)
-            episode_data_index = tmp_multi_dataset.episode_data_index
-            episode_list = list(range(tmp_multi_dataset.num_episodes))
+        # Group episodes by data source
+        episodes_by_source = {}
+        for ep_idx in episode_list:
+            # Get first frame of episode to determine data source
+            start_frame = episode_data_index["from"][ep_idx].item()
+            data_source = source_of_data(tmp_dataset[start_frame])
 
-        # Sample episodes for validation
-        num_val_episodes = max(1, int(len(episode_list) * self.val_episode_ratio))
-        val_episodes = random.sample(episode_list, num_val_episodes)
-        train_episodes = [ep for ep in episode_list if ep not in val_episodes]
+            if data_source not in episodes_by_source:
+                episodes_by_source[data_source] = []
+            episodes_by_source[data_source].append(ep_idx)
 
-        # Get frame indices for train and val episodes using episode_data_index
+        # Split each data source independently
+        train_episodes_by_source = {}
+        val_episodes_by_source = {}
+
+        for data_source, episodes in episodes_by_source.items():
+            num_val_episodes = max(1, int(len(episodes) * self.val_episode_ratio))
+            val_episodes = random.sample(episodes, num_val_episodes)
+            train_episodes = [ep for ep in episodes if ep not in val_episodes]
+
+            train_episodes_by_source[data_source] = train_episodes
+            val_episodes_by_source[data_source] = val_episodes
+
+        # Collect train indices (concatenated from all sources)
         train_indices = []
-        val_indices = []
+        for data_source, episodes in train_episodes_by_source.items():
+            for ep_idx in episodes:
+                start_frame = episode_data_index["from"][ep_idx].item()
+                end_frame = episode_data_index["to"][ep_idx].item()
+                train_indices.extend(range(start_frame, end_frame))
 
-        for ep_idx in train_episodes:
-            start_frame = episode_data_index["from"][ep_idx].item()
-            end_frame = episode_data_index["to"][ep_idx].item()
-            train_indices.extend(range(start_frame, end_frame))
+        # Collect val indices by source (kept separate for independent validation)
+        val_indices_dict = {}
+        for data_source, episodes in val_episodes_by_source.items():
+            val_indices_dict[data_source] = []
+            for ep_idx in episodes:
+                start_frame = episode_data_index["from"][ep_idx].item()
+                end_frame = episode_data_index["to"][ep_idx].item()
+                val_indices_dict[data_source].extend(range(start_frame, end_frame))
 
-        for ep_idx in val_episodes:
-            start_frame = episode_data_index["from"][ep_idx].item()
-            end_frame = episode_data_index["to"][ep_idx].item()
-            val_indices.extend(range(start_frame, end_frame))
-
-        return sorted(train_indices), sorted(val_indices)
+        return train_indices, val_indices_dict
 
     def setup(self, stage: str = "fit"):
         self.stage = stage
         self.val_datasets = {}
         self.test_datasets = {}
 
-        self.train_indices, self.val_indices = self._generate_episode_splits()
+        self.train_indices, self.val_indices_dict = self._generate_episode_splits()
         self.train_dataset = RpadLeRobotDataset(
             dataset_cfg=self.dataset_cfg,
             root=self.root,
@@ -286,15 +284,19 @@ class RpadLeRobotDataModule(BaseDataModule):
             split_indices=self.train_indices,
         )
         for tag in self.val_tags:
+            val_indices_for_tag = self.val_indices_dict.get(tag, [])
+            if len(val_indices_for_tag) == 0:
+                continue
+
             dataset_cfg = self.dataset_cfg.copy()
             self.val_datasets[tag] = RpadLeRobotDataset(
                 dataset_cfg=dataset_cfg,
                 root=self.root,
                 split="val",
-                split_indices=self.val_indices,
+                split_indices=val_indices_for_tag,
             )
             self.test_datasets[tag] = RpadLeRobotDataset(
-                dataset_cfg=dataset_cfg, split="test", split_indices=self.val_indices
+                dataset_cfg=dataset_cfg, split="test", split_indices=val_indices_for_tag
             )
 
         if self.train_dataset.cache_dir:
@@ -304,7 +306,7 @@ class RpadLeRobotDataModule(BaseDataModule):
                 seed=self.seed,
             )
             self.train_dataset.cache(invalidating_cacher)
-            for tag in self.val_tags:
+            for tag in self.val_datasets:
                 self.val_datasets[tag].cache(
                     td.cachers.HDF5(Path(self.train_dataset.cache_dir) / f"val_{tag}")
                 )
