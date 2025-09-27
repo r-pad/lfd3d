@@ -154,14 +154,21 @@ class DinoHeatmapNetwork(nn.Module):
 
         # DPT-style decoder
         self.decoder = nn.Sequential(
-            nn.ConvTranspose2d(hidden_dim, 256, 4, 2, 1),  # 16x16 -> 32x32
+            # 16x16 -> 32x32
+            nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False),
+            nn.Conv2d(hidden_dim, 256, 3, 1, 1),
             nn.ReLU(),
-            nn.ConvTranspose2d(256, 128, 4, 2, 1),  # 32x32 -> 64x64
+            # 32x32 -> 64x64
+            nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False),
+            nn.Conv2d(256, 128, 3, 1, 1),
             nn.ReLU(),
-            nn.ConvTranspose2d(128, 64, 4, 2, 1),  # 64x64 -> 128x128
+            # 64x64 -> 128x128
+            nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False),
+            nn.Conv2d(128, 64, 3, 1, 1),
             nn.ReLU(),
-            nn.Upsample(size=(224, 224), mode="bilinear"),  # 128x128 -> 224x224
-            nn.Conv2d(64, 1, 3, 1, 1),  # refine
+            # 128x128 -> 224x224
+            nn.Upsample(size=(224, 224), mode="bilinear", align_corners=False),
+            nn.Conv2d(64, 1, 3, 1, 1),
         )
 
     def forward(self, image, gripper_pcd=None, text_embedding=None):
@@ -313,6 +320,25 @@ class HeatmapSamplerModule(pl.LightningModule):
         mask[batch_idx, y_coords, x_coords] = 1
         return mask
 
+    def create_gaussian_target(self, coords, H, W, sigma=3.0):
+        """Create smooth Gaussian blob around target pixel coordinates"""
+        device = coords.device
+        y_grid, x_grid = torch.meshgrid(
+            torch.arange(H, device=device, dtype=torch.float32),
+            torch.arange(W, device=device, dtype=torch.float32),
+            indexing="ij",
+        )
+
+        # coords is (B, 2) -> (x, y)
+        dx = x_grid[None] - coords[:, 0, None, None]  # (B, H, W)
+        dy = y_grid[None] - coords[:, 1, None, None]  # (B, H, W)
+
+        dist_sq = dx**2 + dy**2
+        target_dist = torch.exp(-dist_sq / (2 * sigma**2))
+
+        # Normalize to probability distribution
+        return target_dist / target_dist.sum(dim=(2, 3), keepdim=True)
+
     def forward(self, batch):
         _, gt = self.extract_gt_4_points(batch)
         gt_mask = self.compute_gt_mask(batch, gt)
@@ -326,16 +352,48 @@ class HeatmapSamplerModule(pl.LightningModule):
             text_embedding=text_embedding,
         )
 
-        # Flatten heatmap for cross entropy loss
-        logits = outputs.flatten(2).squeeze(1)  # (B, H*W)
+        # TODO: Make configurable
+        loss_type = "cross_entropy"
 
-        # Create target indices from gt_mask
-        # Find the pixel with value 1 in gt_mask
-        gt_flat = gt_mask.flatten(1, 2)  # (B, H*W)
-        target_idx = gt_flat.argmax(dim=1).squeeze()  # (B,) - index of the target pixel
+        if loss_type == "cross_entropy":
+            # Flatten heatmap for cross entropy
+            logits = outputs.flatten(2).squeeze(1)  # (B, H*W)
 
-        loss = F.cross_entropy(logits, target_idx)
+            # Create target indices from gt_mask
+            # Find the pixel with value 1 in gt_mask
+            gt_flat = gt_mask.flatten(1, 2)  # (B, H*W)
+            target_idx = gt_flat.argmax(
+                dim=1
+            ).squeeze()  # (B, ) - index of target pixel
+            loss = F.cross_entropy(logits, target_idx)
+        elif loss_type == "kl_div":
+            B, _, H, W = outputs.shape
 
+            # Get target pixel coordinates
+            gt_flat = gt_mask.flatten(1, 2)  # (B, H*W)
+            target_flat_idx = gt_flat.argmax(dim=1)  # (B,) - flat index of target pixel
+
+            # Convert to 2D coordinates
+            target_y = target_flat_idx // W
+            target_x = target_flat_idx % W
+            target_coords = torch.stack(
+                [target_x, target_y], dim=1
+            ).float()  # (B, 2) [x, y]
+
+            # Create smooth Gaussian target distribution
+            target_dist = self.create_gaussian_target(
+                target_coords, H, W, sigma=3.0
+            )  # (B, H, W)
+
+            # Flatten for softmax, then reshape back
+            logits_flat = outputs.squeeze(1).flatten(1)  # (B, H*W)
+            pred_dist_flat = F.softmax(logits_flat, dim=1)  # (B, H*W)
+            pred_dist = pred_dist_flat.view(B, H, W)  # (B, H, W)
+
+            # KL divergence loss
+            loss = F.kl_div(pred_dist.log(), target_dist, reduction="batchmean")
+        else:
+            raise NotImplementedError
         return None, loss
 
     def training_step(self, batch, batch_idx):
