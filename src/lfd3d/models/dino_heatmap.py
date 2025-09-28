@@ -134,17 +134,20 @@ class DinoHeatmapNetwork(nn.Module):
                 1152, self.encoded_text_dim
             )  # SIGLIP input dim
 
-        # Cross-attention fusion
-        self.text_cross_attn = (
-            nn.MultiheadAttention(hidden_dim, 8, batch_first=True)
-            if self.use_text_embedding
-            else None
-        )
-        self.point_cross_attn = (
-            nn.MultiheadAttention(hidden_dim, 8, batch_first=True)
-            if self.use_gripper_pcd
-            else None
-        )
+        # Cross-attention fusion with layer norm for stability
+        if self.use_text_embedding:
+            self.text_cross_attn = nn.MultiheadAttention(
+                hidden_dim, 8, batch_first=True
+            )
+            self.text_norm_pre = nn.LayerNorm(hidden_dim)
+            self.text_norm_post = nn.LayerNorm(hidden_dim)
+
+        if self.use_gripper_pcd:
+            self.point_cross_attn = nn.MultiheadAttention(
+                hidden_dim, 8, batch_first=True
+            )
+            self.point_norm_pre = nn.LayerNorm(hidden_dim)
+            self.point_norm_post = nn.LayerNorm(hidden_dim)
 
         # Project conditioning features to hidden_dim
         if self.use_text_embedding:
@@ -171,6 +174,21 @@ class DinoHeatmapNetwork(nn.Module):
             nn.Conv2d(64, 1, 3, 1, 1),
         )
 
+        # Initialize cross-attention weights for stability
+        self._init_cross_attention_weights()
+
+    def _init_cross_attention_weights(self):
+        """Initialize cross-attention layers with smaller weights for training stability"""
+        if self.use_text_embedding:
+            # Scale down attention weights
+            nn.init.xavier_uniform_(self.text_cross_attn.in_proj_weight, gain=0.1)
+            nn.init.xavier_uniform_(self.text_cross_attn.out_proj.weight, gain=0.1)
+
+        if self.use_gripper_pcd:
+            # Scale down attention weights
+            nn.init.xavier_uniform_(self.point_cross_attn.in_proj_weight, gain=0.1)
+            nn.init.xavier_uniform_(self.point_cross_attn.out_proj.weight, gain=0.1)
+
     def forward(self, image, gripper_pcd=None, text_embedding=None):
         # Extract features from Dino
         with torch.no_grad():
@@ -191,7 +209,11 @@ class DinoHeatmapNetwork(nn.Module):
             text_feat = text_feat.unsqueeze(1)  # (B, 1, hidden_dim)
 
             # Cross-attention: query=visual_features, key/value=text_features
-            fused, _ = self.text_cross_attn(fused, text_feat, text_feat)
+            normed_fused = self.text_norm_pre(fused)
+            attn_out, _ = self.text_cross_attn(normed_fused, text_feat, text_feat)
+            fused = self.text_norm_post(fused + attn_out)  # Residual connection
+
+            # fused, _ = self.text_cross_attn(fused, text_feat, text_feat)
 
         # Point cross-attention
         if self.use_gripper_pcd and gripper_pcd is not None:
@@ -200,7 +222,11 @@ class DinoHeatmapNetwork(nn.Module):
             point_feat = point_feat.unsqueeze(1)  # (B, 1, hidden_dim)
 
             # Cross-attention: query=visual_features, key/value=point_features
-            fused, _ = self.point_cross_attn(fused, point_feat, point_feat)
+            normed_fused = self.point_norm_pre(fused)
+            attn_out, _ = self.point_cross_attn(normed_fused, point_feat, point_feat)
+            fused = self.point_norm_post(fused + attn_out)  # Residual connection
+
+            # fused, _ = self.point_cross_attn(fused, point_feat, point_feat)
 
         # Reshape to spatial format (assuming square patches)
         h = w = int(L**0.5)
@@ -353,7 +379,7 @@ class HeatmapSamplerModule(pl.LightningModule):
         )
 
         # TODO: Make configurable
-        loss_type = "cross_entropy"
+        loss_type = "kl_div"
 
         if loss_type == "cross_entropy":
             # Flatten heatmap for cross entropy
@@ -380,9 +406,12 @@ class HeatmapSamplerModule(pl.LightningModule):
                 [target_x, target_y], dim=1
             ).float()  # (B, 2) [x, y]
 
+            # Random sigma for robustness (1-3 pixel tolerance)
+            sigma = 1.0 + torch.rand(1).item() * 2.0  # Random between 1.0-3.0
+
             # Create smooth Gaussian target distribution
             target_dist = self.create_gaussian_target(
-                target_coords, H, W, sigma=3.0
+                target_coords, H, W, sigma=sigma
             )  # (B, H, W)
 
             # Flatten for softmax, then reshape back
