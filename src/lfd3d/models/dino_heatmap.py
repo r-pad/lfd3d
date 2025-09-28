@@ -268,6 +268,7 @@ class HeatmapSamplerModule(pl.LightningModule):
             self.additional_train_logging_period = (
                 self.run_cfg.additional_train_logging_period
             )
+            self.loss_type = self.run_cfg.loss_type
         elif self.mode == "eval":
             self.run_cfg = cfg.inference
         else:
@@ -378,10 +379,7 @@ class HeatmapSamplerModule(pl.LightningModule):
             text_embedding=text_embedding,
         )
 
-        # TODO: Make configurable
-        loss_type = "kl_div"
-
-        if loss_type == "cross_entropy":
+        if self.loss_type == "cross_entropy":
             # Flatten heatmap for cross entropy
             logits = outputs.flatten(2).squeeze(1)  # (B, H*W)
 
@@ -392,7 +390,7 @@ class HeatmapSamplerModule(pl.LightningModule):
                 dim=1
             ).squeeze()  # (B, ) - index of target pixel
             loss = F.cross_entropy(logits, target_idx)
-        elif loss_type == "kl_div":
+        elif self.loss_type == "kl_div":  # Goes to NaN?
             B, _, H, W = outputs.shape
 
             # Get target pixel coordinates
