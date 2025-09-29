@@ -216,7 +216,7 @@ class RpadLeRobotDataModule(BaseDataModule):
         val_episode_ratio=0.1,
     ):
         super().__init__(batch_size, val_batch_size, num_workers, dataset_cfg, seed)
-        self.val_tags = ["human", "aloha", "libero_franka"]
+        self.val_tags = [] # populated in _generate_episode_splits
         # Subset of train to use for eval
         self.TRAIN_SUBSET_SIZE = 20
         self.val_episode_ratio = val_episode_ratio
@@ -238,6 +238,7 @@ class RpadLeRobotDataModule(BaseDataModule):
 
             if data_source not in episodes_by_source:
                 episodes_by_source[data_source] = []
+                self.val_tags.append(data_source)
             episodes_by_source[data_source].append(ep_idx)
 
         # Split each data source independently

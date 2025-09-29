@@ -634,7 +634,7 @@ class HeatmapSamplerModule(pl.LightningModule):
                 [x[metric_name].mean() for x in self.train_outputs if metric_name in x]
             ).mean()
 
-        if any("pix" in x for x in self.train_outputs):
+        if any("pix_dist" in x for x in self.train_outputs):
             log_dictionary["train/pix_dist"] = mean_metric("pix_dist")
             log_dictionary["train/wta_pix_dist"] = mean_metric("wta_pix_dist")
             log_dictionary["train/normalized_pix_dist"] = mean_metric(
@@ -687,7 +687,7 @@ class HeatmapSamplerModule(pl.LightningModule):
         gt_mask = self.compute_gt_mask(batch, gt)
         # Find the pixel with value 1 in gt_mask and convert to 2D coords
         gt_flat = gt_mask.flatten(1, 2)  # (B, H*W)
-        flat_idx = gt_flat.argmax(dim=1).squeeze()  # (B,) - flat index of target pixel
+        flat_idx = gt_flat.argmax(dim=1).squeeze(1)  # (B,) - flat index of target pixel
         H, W = gt_mask.shape[1], gt_mask.shape[2]
         y_coords = flat_idx // W
         x_coords = flat_idx % W
