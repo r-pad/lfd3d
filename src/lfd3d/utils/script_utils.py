@@ -22,8 +22,9 @@ from lfd3d.models.articubot import (
     ArticubotNetwork,
     GoalRegressionModule,
 )
-from lfd3d.models.pixelscore import PixelScoreNetwork, GoalPixelScoreModule
 from lfd3d.models.diptv3 import DiPTv3, DiPTv3Adapter
+from lfd3d.models.pixelscore import GoalPixelScoreModule, PixelScoreNetwork
+from lfd3d.models.dino_heatmap import HeatmapSamplerModule, DinoHeatmapNetwork
 from lfd3d.models.tax3d import (
     CrossDisplacementModule,
     DiffusionTransformerNetwork,
@@ -72,6 +73,9 @@ def create_model(cfg):
     elif cfg.model.name == "pixelscore":
         network_fn = PixelScoreNetwork
         module_fn = GoalPixelScoreModule
+    elif cfg.model.name == "dino_heatmap":
+        network_fn = DinoHeatmapNetwork
+        module_fn = HeatmapSamplerModule
     else:
         raise NotImplementedError(cfg.model.name)
 
