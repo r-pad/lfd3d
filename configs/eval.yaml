@@ -45,3 +45,5 @@ wandb:
   # nicely in the UI. But you might have a one-off eval or something.
   group: ???
   logger_enabled: True
+
+episode_idx: [0]

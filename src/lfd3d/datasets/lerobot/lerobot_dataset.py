@@ -388,6 +388,67 @@ class RpadLeRobotDataModule(BaseDataModule):
                     td.cachers.HDF5(Path(self.train_dataset.cache_dir) / f"test_{tag}")
                 )
 
+class InferenceLeRoBotDataModule(BaseDataModule):
+    def __init__(
+        self,
+        batch_size,
+        val_batch_size,
+        num_workers,
+        dataset_cfg,
+        seed,
+    ):
+        super().__init__(batch_size, val_batch_size,  num_workers, dataset_cfg, seed)
+        self.dataset_cfg = dataset_cfg
+        self.val_tags = ["lerobot"]
+        self.val_indices = []
+        self.test_datasets = []
+
+    def setup(self, stage: str = "fit"):
+        
+        self.stage = stage
+        self.val_datasets = {}
+        
+        if isinstance(self.dataset_cfg.repo_id, str):
+            # Load metadata to get episode information
+            temp_meta = LeRobotDatasetMetadata(
+                repo_id=self.dataset_cfg.repo_id, root=self.root
+            )
+            
+            # Get episode data index which maps episodes to their frame ranges
+            episode_data_index = get_episode_data_index(temp_meta.episodes)
+            # Get all episode indices
+            episode_list = list(temp_meta.episodes.keys())
+        else:
+            tmp_multi_dataset = make_dataset(self.dataset_cfg.repo_id, self.root)
+            episode_data_index = tmp_multi_dataset.episode_data_index
+            episode_list = list(range(tmp_multi_dataset.num_episodes))
+
+        for ep_idx in episode_list:
+            indices = []
+            start_frame = episode_data_index["from"][ep_idx].item()
+            end_frame = episode_data_index["to"][ep_idx].item()
+            self.val_indices.extend(range(start_frame, end_frame))
+            indices.extend(range(start_frame, end_frame))
+        
+            self.test_datasets.append( RpadLeRobotDataset(
+                dataset_cfg=self.dataset_cfg, root = self.root, split="val", split_indices= indices
+                )
+            )
+
+        self.val_datasets["lerobot"] = RpadLeRobotDataset(
+                dataset_cfg=self.dataset_cfg, root = self.root, split="val", split_indices= self.val_indices
+        )
+
+    def test_dataloader(self, eps_idx):
+        return {
+            "lerobot": data.DataLoader(
+                self.test_datasets[eps_idx],
+                batch_size=1,
+                shuffle=False,
+                num_workers=self.num_workers,
+                collate_fn=collate_pcd_fn,
+            )
+        }
 
 
 if __name__ == "__main__":
