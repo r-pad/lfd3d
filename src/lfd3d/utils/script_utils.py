@@ -20,10 +20,9 @@ from lfd3d.datasets import (
 from lfd3d.datasets.lerobot.lerobot_dataset import RpadLeRobotDataModule
 from lfd3d.models.articubot import (
     ArticubotNetwork,
-    GoalPixelScoreModule,
     GoalRegressionModule,
-    PixelScoreNetwork,
 )
+from lfd3d.models.pixelscore import PixelScoreNetwork, GoalPixelScoreModule
 from lfd3d.models.diptv3 import DiPTv3, DiPTv3Adapter
 from lfd3d.models.tax3d import (
     CrossDisplacementModule,

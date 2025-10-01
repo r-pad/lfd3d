@@ -13,3 +13,9 @@ additional_train_logging_period: 100 # Global step period to log additional trai
 
 n_samples_wta: 5 # number of samples for evaluating coverage
 save_wta_to_disk: False # save to disk for further examination
+
+checkpoints:
+  coord_dist:
+    monitor: "val/coord_dist"
+    mode: "min"
+    filename: "{epoch:02d}-{val/pix_dist:.4f}"

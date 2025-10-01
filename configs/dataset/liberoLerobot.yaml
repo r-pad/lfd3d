@@ -15,5 +15,6 @@ color_key: "observation.images.agentview"
 depth_key: "observation.images.agentview_depth"
 gripper_pcd_key: "observation.points.gripper_pcds"
 pixel_score_key: "observation.images.agentview_goal_gripper_proj"
+pixel_score: True
 
 rgb_feat: False # If true, compute DINOv2 features, else just return RGB

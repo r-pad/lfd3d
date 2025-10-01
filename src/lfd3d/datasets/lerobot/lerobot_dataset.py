@@ -15,8 +15,11 @@ from lerobot.common.datasets.lerobot_dataset import (
 from lerobot.common.datasets.utils import get_episode_data_index
 from lfd3d.datasets.base_data import BaseDataModule, BaseDataset
 from lfd3d.datasets.rgb_text_featurizer import RGBTextFeaturizer
+from lfd3d.utils.viz_utils import generate_heatmap_from_points, project_pcd_on_image
 from PIL import Image
 from tqdm import tqdm
+from torch.utils import data
+from lfd3d.utils.data_utils import collate_pcd_fn
 
 
 def make_dataset(repo_id, root):
@@ -49,8 +52,8 @@ class RpadLeRobotDataset(BaseDataset):
         self.dataset_cfg = dataset_cfg
         self.num_points = dataset_cfg.num_points
         self.max_depth = dataset_cfg.max_depth
-        self.split = split
         self.pixel_score = dataset_cfg.pixel_score
+        self.split = split
 
         self.split_indices = split_indices
         self.color_key = dataset_cfg.color_key
@@ -73,6 +76,8 @@ class RpadLeRobotDataset(BaseDataset):
             "human": np.array([343, 763, 60]),
             "libero_franka": np.array([0, 1, 2]),
         }
+
+        self.GRIPPER_PCD_IDX = {"top": 0, "left": 1, "right": 2, "grasp_center": 3}
 
     def extract_goal(self, item):
         if self.dataset_cfg.use_subgoals:
@@ -102,7 +107,9 @@ class RpadLeRobotDataset(BaseDataset):
 
         end_item = self.lerobot_dataset[end_idx]
         COLOR_KEY = self.color_key
-        rgb_init = (start_item[COLOR_KEY].permute(1, 2, 0).numpy() * 255).astype(np.uint8)
+        rgb_init = (start_item[COLOR_KEY].permute(1, 2, 0).numpy() * 255).astype(
+            np.uint8
+        )
         orig_shape = rgb_init.shape[:2]
 
         rgb_init = Image.fromarray(rgb_init)
@@ -153,112 +160,6 @@ class RpadLeRobotDataset(BaseDataset):
             raise NotImplementedError
 
         return demo_type
-
-    def load_pixel_score(self, idx, rgbs):
-        """
-        Load pixel score data
-        """
-        start_item = self.lerobot_dataset[idx]
-        task = self.extract_goal(start_item)
-        episode_index = start_item["episode_index"]
-        # The next_event_idx is relative to the episode, so we calculate the absolute index
-        end_idx = (
-            start_item["next_event_idx"] - start_item["frame_index"] + idx
-        ).item()
-
-        # Off-by-one error in the data generation code on lerobot side
-        # Fixed, but this change remains here because I don't want to regenerate
-        # the datasets. Can probably be removed at some later point.
-        if (end_idx == len(self.lerobot_dataset)) or (
-            self.lerobot_dataset[end_idx]["episode_index"]
-            != start_item["episode_index"]
-        ):
-            end_idx = end_idx - 1
-
-        end_item = self.lerobot_dataset[end_idx]
-
-        normalized_rgbs = np.array(
-            [self.rgb_normalizer(rgbs[0]), self.rgb_normalizer(rgbs[1])]
-        )
-
-        PIXEL_SCORE_KEY = self.pixel_score_key
-        pixel_score_init = (
-            start_item[PIXEL_SCORE_KEY].permute(1, 2, 0).numpy() * 255
-        ).astype(np.uint8)  # H W 3
-        pixel_score_end = (
-            end_item[PIXEL_SCORE_KEY].permute(1, 2, 0).numpy() * 255
-        ).astype(np.uint8)
-
-        # origin shape
-        pixel_score_orig_shape = pixel_score_init.shape[:2]
-        # Reshape
-        pixel_score_init = Image.fromarray(pixel_score_init)
-        pixel_score_init = np.asarray(
-            self.depth_preprocess(pixel_score_init)
-        )  # Use Nearest neighbor
-        pixel_score_end = Image.fromarray(pixel_score_end)
-        pixel_score_end = np.asarray(self.depth_preprocess(pixel_score_end))
-
-        # Use only the grasp center channel for pixel score
-        pixel_score_init = np.stack(
-            [pixel_score_init[:, :, 0]] * 3,
-            axis=-1,
-        )
-
-        pixel_score_end = np.stack(
-            [pixel_score_end[:, :, 0]] * 3,
-            axis=-1,
-        )
-
-        pixel_score_vis = np.array(
-            [np.copy(pixel_score_init), np.copy(pixel_score_end)]
-        )
-
-        # Get pixel score (distance)
-        pixel_score_target_shape = pixel_score_init.shape[:2]
-        target_height, target_width = pixel_score_target_shape
-        max_distance = np.sqrt(target_height**2 + target_width**2)
-
-        normalized_pixel_scores = np.array(
-            [
-                np.transpose((pixel_score_init / 255).astype(np.float64), (2, 0, 1)),
-                np.transpose((pixel_score_end / 255).astype(np.float64), (2, 0, 1)),
-            ]
-        )  # Normalize to [0,1], H W 3 -> 3 H W
-        pixel_score_init = (
-            (pixel_score_init / 255).astype(np.float64)
-        ) ** 2 * max_distance  # Square to align with original distance
-        pixel_score_end = (
-            (pixel_score_end / 255).astype(np.float64)
-        ) ** 2 * max_distance
-
-        pixel_score_init = np.asarray(pixel_score_init)
-        pixel_score_end = np.asarray(pixel_score_end)
-
-        pixel_score_dist = np.array([pixel_score_init, pixel_score_end])  # H W 3
-
-        h_idx, w_idx = np.unravel_index(
-            np.argmin(pixel_score_end[:, :, 0]), pixel_score_end[:, :, 0].shape
-        )
-
-        pixel_score_label = np.zeros((target_height, target_width))
-        pixel_score_label[h_idx, w_idx] = 1.0
-        pixel_score_label = np.stack([pixel_score_label.astype(np.uint8)] * 3, axis=2)
-        pixel_score_label = Image.fromarray(pixel_score_label)
-        pixel_score_label = np.asarray(pixel_score_label)
-        pixel_score_label = np.transpose(pixel_score_label, (2, 0, 1)).astype(float)
-
-        pixel_coord = np.array([h_idx, w_idx])
-
-        return {
-            "pixel_score_dist": pixel_score_dist,
-            "pixel_score_orig_shape": pixel_score_orig_shape,
-            "normalized_pixel_scores": normalized_pixel_scores,
-            "pixel_score_label": pixel_score_label,
-            "pixel_score_vis": pixel_score_vis,
-            "pixel_coord": pixel_coord,
-            "normalized_rgbs": normalized_rgbs,
-        }
 
     def __getitem__(self, index):
         # Map the dataset index to the actual LeRobot dataset index using split_indices
@@ -323,7 +224,64 @@ class RpadLeRobotDataset(BaseDataset):
         }
 
         if self.pixel_score:
-            pixel_dict = self.load_pixel_score(actual_index, rgbs)
+            pixel_dict = {}
+
+            # CNN input
+            normalized_rgbs = np.array(
+                [self.rgb_normalizer(rgbs[0]), self.rgb_normalizer(rgbs[1])]
+            )
+
+            # Get Last channel coords as pixel score label Grasp Center
+            grasp_mask = np.array([False, False, False, False])
+            grasp_mask[self.GRIPPER_PCD_IDX["grasp_center"]] = True
+
+            init_track_2d, _ = project_pcd_on_image(
+                gripper_pcds[0],
+                grasp_mask,
+                rgbs[0],
+                K_,
+                color=(0, 255, 0),
+                return_coords=True,
+            )
+            end_track_2d, pixel_score_vis = project_pcd_on_image(
+                gripper_pcds[1],
+                grasp_mask,
+                rgbs[0],
+                K_,
+                color=(255, 255, 0),
+                return_coords=True,
+            )
+
+            pixel_score_init = generate_heatmap_from_points(
+                np.stack([init_track_2d] * 3, axis=0),
+                np.array([self.target_shape, self.target_shape]),
+            )
+            pixel_score_end = generate_heatmap_from_points(
+                np.stack([end_track_2d] * 3, axis=0),
+                np.array([self.target_shape, self.target_shape]),
+            )
+
+            # For mse loss
+            normalized_pixel_scores = np.array(
+                [
+                    np.transpose(
+                        (pixel_score_init / 255).astype(np.float64), (2, 0, 1)
+                    ),
+                    np.transpose((pixel_score_end / 255).astype(np.float64), (2, 0, 1)),
+                ]
+            )  # Normalize to [0,1], H W 3 -> 3 H W
+
+            pixel_score_label = np.zeros((self.target_shape, self.target_shape, 3))
+            pixel_score_label[end_track_2d[:, 1], end_track_2d[:, 0], :] = 1.0
+
+            pixel_dict["normalized_rgbs"] = normalized_rgbs  # 2 3 H W
+            pixel_dict["normalized_pixel_scores"] = normalized_pixel_scores  # 2 3 H W
+            pixel_dict["pixel_score_label"] = np.transpose(
+                pixel_score_label, (2, 0, 1)
+            ).astype(float)  # 3 H W
+            pixel_dict["pixel_score_vis"] = pixel_score_vis  # H W 3
+            pixel_dict["pixel_coord"] = end_track_2d.reshape(-1)
+
             item.update(pixel_dict)
 
         return item
@@ -396,6 +354,7 @@ class RpadLeRobotDataModule(BaseDataModule):
         self.test_datasets = {}
 
         self.train_indices, self.val_indices = self._generate_episode_splits()
+       
         self.train_dataset = RpadLeRobotDataset(
             dataset_cfg=self.dataset_cfg,
             root=self.root,
@@ -428,6 +387,7 @@ class RpadLeRobotDataModule(BaseDataModule):
                 self.test_datasets[tag].cache(
                     td.cachers.HDF5(Path(self.train_dataset.cache_dir) / f"test_{tag}")
                 )
+
 
 
 if __name__ == "__main__":

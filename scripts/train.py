@@ -16,6 +16,23 @@ from lfd3d.utils.script_utils import (
 from pytorch_lightning.loggers import WandbLogger
 
 
+def checkpoint_callback(cfg, experiment_id):
+    call_backs = []
+    for metric_name, metric in cfg.training.checkpoints.items():
+        call_backs.append(
+            ModelCheckpointExplicit(
+                artifact_name=f"best_{metric_name}_model-{experiment_id}",
+                dirpath=cfg.lightning.checkpoint_dir,
+                filename="{epoch}-{step}-{" + metric_name + ":.3f}",
+                monitor=metric.monitor,
+                mode=metric.mode,
+                save_weights_only=False,
+                save_last=False,
+            )
+        )
+    return call_backs
+
+
 @hydra.main(config_path="../configs", config_name="train", version_base="1.3")
 def main(cfg):
     ######################################################################
@@ -114,26 +131,7 @@ def main(cfg):
         check_val_every_n_epoch=cfg.training.check_val_every_n_epochs,
         gradient_clip_val=cfg.training.grad_clip_norm,
         use_distributed_sampler=use_distributed_sampler,
-        callbacks=[
-            ModelCheckpointExplicit(
-                artifact_name=f"best_rmse_model-{logger.experiment.id}",
-                dirpath=cfg.lightning.checkpoint_dir,
-                filename="{epoch}-{step}-{val/rmse:.3f}",
-                monitor="val/rmse",
-                mode="min",
-                save_weights_only=False,
-                save_last=False,
-            ),
-            ModelCheckpointExplicit(
-                artifact_name=f"best_rmse_and_std_combi_model-{logger.experiment.id}",
-                dirpath=cfg.lightning.checkpoint_dir,
-                filename="{epoch}-{step}-{val/rmse_and_std_combi:.3f}",
-                monitor="val/rmse_and_std_combi",
-                mode="min",
-                save_weights_only=False,
-                save_last=False,
-            ),
-        ],
+        callbacks=checkpoint_callback(cfg, logger.experiment.id),
         num_sanity_val_steps=0,
     )
 

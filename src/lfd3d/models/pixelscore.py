@@ -9,6 +9,8 @@ import wandb
 from diffusers import get_cosine_schedule_with_warmup
 from torch import nn
 
+from lfd3d.utils.viz_utils import generate_heatmap_from_points
+
 
 class GoalPixelScoreModule(pl.LightningModule):
     def __init__(self, network, cfg):
@@ -21,6 +23,13 @@ class GoalPixelScoreModule(pl.LightningModule):
         self.val_outputs: defaultdict[str, list[dict]] = defaultdict(list)
         self.train_outputs: list[dict] = []
         self.predict_outputs: defaultdict[str, list[dict]] = defaultdict(list)
+
+        assert self.loss_fn in [
+            "mse",
+            "ce",
+            "bce",
+            "kldiv",
+        ], "Must be MSE or cross_entropy"
 
         if self.mode == "train":
             self.run_cfg = cfg.training
@@ -88,9 +97,10 @@ class GoalPixelScoreModule(pl.LightningModule):
             },
             gt_pred_dist,
             pred_pixel_score,
+            pred_coord,
         )
 
-    def sample_pixel(self, batch, deterministic=True, channel_idx=0):
+    def sample_pixel(self, batch, deterministic=True, channel_idx=0, tau=0.2):
         """
         Input:
             Batch: predict_pixel_score B, C, H, W
@@ -105,25 +115,23 @@ class GoalPixelScoreModule(pl.LightningModule):
         if deterministic:
             idx = torch.argmin(batch.view(batch_size, C, -1), dim=-1)  # B, C
         else:
-            batch = batch[:, channel_idx]  # B, H, W
-            probs = F.softmax(batch.view(batch_size, -1), dim=-1)
-            idx = torch.multinomial(probs, num_samples=1)
-            idx = idx.squeeze(-1)  # B,
+            # flat = batch.reshape(batch_size, C, H * W)       # (B, C, HW)
+            # idx = flat.argmax(dim=-1).long()              # (B, C) long; Indices in [0, HW)
+            probs = F.softmax(batch.view(batch_size, C, -1) / tau, dim=-1)
+            idx = torch.stack(
+                [torch.multinomial(probs[:, i], num_samples=1) for i in range(C)], dim=1
+            )  # B,C,1
+            idx = idx.squeeze(-1)  # B, C
 
         h, w = torch.unravel_index(idx, (H, W))
         coord = torch.stack([h, w], dim=-1)  # B, 2
-
-        return coord  # B, 2
+        assert (
+            coord.shape[0] == batch_size and coord.shape[1] == C and coord.shape[2] == 2
+        )
+        return coord[:, channel_idx]  # B, 2
 
     def sample_pixel_scores(self, predicted_pixel_score):
         batch_size, C, H, W = predicted_pixel_score.shape
-
-        assert self.loss_fn in [
-            "mse",
-            "ce",
-            "bce",
-            "kldiv",
-        ], "Must be MSE or cross_entropy"
 
         if self.loss_fn in ("ce", "bce", "kldiv"):
             coord = self.sample_pixel(predicted_pixel_score, deterministic=False).to(
@@ -133,23 +141,16 @@ class GoalPixelScoreModule(pl.LightningModule):
         else:  # mse
             coord = self.sample_pixel(predicted_pixel_score).to(torch.float32)  # B, 2
 
-        # Build pixel grid (rows = y, cols = x)
-        rows = torch.arange(H, device=self.device)
-        cols = torch.arange(W, device=self.device)
-        yy, xx = torch.meshgrid(rows, cols, indexing="ij")  # (H, W), (H, W)
-        pixel_coord = torch.stack([yy, xx], dim=-1).to(torch.float32)  # (H, W, 2)
-        pixel_coord = pixel_coord.unsqueeze(0).expand(
-            batch_size, -1, -1, -1
-        )  # (B, H, W, 2)
+        pixel_score = [
+            generate_heatmap_from_points(
+                torch.stack([coord[i], coord[i], coord[i]], dim=0).cpu().numpy(),
+                np.array([H, W]),
+            )
+            for i in range(batch_size)
+        ]  # B, H, W, 3
 
-        # Euclidean distance to the sampled coord per batch
-        pixel_score = torch.norm(
-            pixel_coord - coord.view(batch_size, 1, 1, 2), dim=-1
-        )  # (B, H, W)
-
-        return coord, torch.stack(
-            [pixel_score, pixel_score, pixel_score], dim=-1
-        )  # B H W 3
+        pixel_score = np.stack(pixel_score, axis=0)
+        return coord, torch.from_numpy(pixel_score).to(self.device)  # B H W 3
 
     def training_step(self, batch, batch_idx):
         self.train()
@@ -164,7 +165,7 @@ class GoalPixelScoreModule(pl.LightningModule):
             self.eval()
             with torch.no_grad():
                 pred_dict = {}
-                _, coord_dist, pred_pixel_score = self.predict(batch)
+                _, coord_dist, pred_pixel_score, pred_coord = self.predict(batch)
                 pred_dict["pred"] = pred_pixel_score
                 pred_dict["coord_dist"] = coord_dist
 
@@ -288,23 +289,35 @@ class GoalPixelScoreModule(pl.LightningModule):
             tag: the tag to use for logging
         """
 
-        gt_pixel_score = batch["pixel_score_vis"][:, 1].cpu().numpy()
+        gt_pixel_score_vis = batch["pixel_score_vis"].cpu().numpy()
+        gt_heatmap_vis = np.transpose(
+            (batch["normalized_pixel_scores"][:, 1] * 255)
+            .cpu()
+            .numpy()
+            .astype(np.uint8),
+            (0, 2, 3, 1),
+        )  # B H W 3
 
-        rgbs = batch["rgbs"][:, 1].cpu().numpy()  # rgb_end B H W 3
+        rgbs = batch["rgbs"][:, 0].cpu().numpy()  # rgb_end B H W 3
 
         pred_pixel_score = pred_dict["pred"].cpu().numpy()  # B H W 3
 
         batch_size, h, w, _ = pred_pixel_score.shape
 
-        assert batch_size == gt_pixel_score.shape[0] == rgbs.shape[0]
+        assert batch_size == gt_pixel_score_vis.shape[0] == rgbs.shape[0]
 
-        max_distance = np.sqrt(h**2 + w**2)
+        average_gt_pred_dict = pred_dict["coord_dist"].mean().item()
 
-        pred_pixel_score = np.sqrt(pred_pixel_score / max_distance) * 255
-        pred_pixel_score = np.clip(pred_pixel_score, 0, 255).astype(np.uint8)
         gt_pixel_score_img_list = [
             wandb.Image(
-                gt_pixel_score[i],
+                gt_pixel_score_vis[i],
+                caption="Ground Truth Pixel Score",
+            )
+            for i in range(batch_size)
+        ]
+        gt_pixel_heatmap_img_list = [
+            wandb.Image(
+                gt_heatmap_vis[i],
                 caption="Ground Truth Pixel Score",
             )
             for i in range(batch_size)
@@ -331,6 +344,8 @@ class GoalPixelScoreModule(pl.LightningModule):
             f"{tag}/ground_truth_pixel_score": gt_pixel_score_img_list,
             f"{tag}/predicted_pixel_score": predict_pixel_score_img_list,
             f"{tag}/rgba_pixel_score": rgba_pixel_score_img_list,
+            f"{tag}/ground_truth_heatmap": gt_pixel_heatmap_img_list,
+            f"{tag}/average_coord_dist": average_gt_pred_dict,
             "trainer/global_step": self.global_step,
         }
         wandb.log(viz_dict)
@@ -340,7 +355,7 @@ class GoalPixelScoreModule(pl.LightningModule):
         val_tag = self.trainer.datamodule.val_tags[dataloader_idx]
         with torch.no_grad():
             pred_dict = {}
-            _, coord_dist, pred_pixel_score = self.predict(batch)
+            _, coord_dist, pred_pixel_score, pred_coord = self.predict(batch)
             pred_dict["pred"] = pred_pixel_score
             pred_dict["coord_dist"] = coord_dist
 
@@ -401,9 +416,10 @@ class GoalPixelScoreModule(pl.LightningModule):
         eval_tag = self.trainer.datamodule.eval_tags[dataloader_idx]
         with torch.no_grad():
             pred_dict = {}
-            _, coord_dist, pred_pixel_score = self.predict(batch)
+            _, coord_dist, pred_pixel_score, pred_coord = self.predict(batch)
             pred_dict["pred"] = pred_pixel_score
             pred_dict["coord_dist"] = coord_dist
+            pred_dict["pred_coord"] = pred_coord
 
         self.predict_outputs[eval_tag].append(pred_dict)
         self.log_viz_to_wandb(batch, pred_dict, f"predict_{eval_tag}")
@@ -411,6 +427,7 @@ class GoalPixelScoreModule(pl.LightningModule):
             "pred": pred_dict["pred"],
             "coord_dist": pred_dict["coord_dist"],
             "caption": batch["caption"],
+            "pred_coord": pred_dict["pred_coord"],
         }
 
     def on_predict_epoch_end(self):
@@ -423,10 +440,13 @@ class GoalPixelScoreModule(pl.LightningModule):
                 "coord_dist": [],
             }
             pred_dict = {"pred": [], "coord_dist": []}
-            vis_batch = {"pixel_score_vis": [], "rgbs": []}
+            vis_batch = {
+                "pixel_score_vis": [],
+                "rgbs": [],
+                "normalized_pixel_scores": [],
+            }
 
             pred_outputs = self.predict_outputs[eval_tag]
-            torch.cat([x["pred"] for x in pred_outputs])
             coord_dist = torch.cat([x["coord_dist"] for x in pred_outputs])
             dataloader = self.trainer.predict_dataloaders[dataloader_idx]
             total_batches = len(dataloader)
@@ -443,11 +463,18 @@ class GoalPixelScoreModule(pl.LightningModule):
                 pred_dict["coord_dist"].append(pred_output["coord_dist"])
                 vis_batch["rgbs"].append(batch["rgbs"])
                 vis_batch["pixel_score_vis"].append(batch["pixel_score_vis"])
+                vis_batch["normalized_pixel_scores"].append(
+                    batch["normalized_pixel_scores"]
+                )
 
             vis_batch["rgbs"] = torch.cat(vis_batch["rgbs"], dim=0)
             vis_batch["pixel_score_vis"] = torch.cat(
                 vis_batch["pixel_score_vis"], dim=0
             )
+            vis_batch["normalized_pixel_scores"] = torch.cat(
+                vis_batch["normalized_pixel_scores"], dim=0
+            )
+
             pred_dict["pred"] = torch.cat(pred_dict["pred"], dim=0)
             pred_dict["coord_dist"] = torch.cat(pred_dict["coord_dist"], dim=0)
 
@@ -456,13 +483,7 @@ class GoalPixelScoreModule(pl.LightningModule):
                 pred_dict,
                 eval_tag,
             )
-
-        # self.log_dict(
-        #     log_dict,
-        #     add_dataloader_idx=False,
-        #     sync_dist=True,
-        # )
-        self.logger.log_metrics(log_dict, step=int(self.global_step))
+        # self.logger.log_metrics(log_dict, step=int(self.global_step))
         self.predict_outputs.clear()
 
 
