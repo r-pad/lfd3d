@@ -9,37 +9,10 @@ import torch
 import torch.nn.functional as F
 import wandb
 from diffusers import get_cosine_schedule_with_warmup
-from matplotlib import cm
 from torch import nn, optim
 from transformers import AutoImageProcessor, AutoModel
 
-
-def get_heatmap_viz(rgb_image, heatmap, alpha=0.4):
-    """
-    Overlay heatmap on RGB image with transparency.
-
-    Args:
-        rgb_image: (H, W, 3) RGB image
-        heatmap: (1, H, W) predicted heatmap
-        alpha: transparency factor for heatmap overlay
-
-    Returns:
-        wandb.Image: RGB image with heatmap overlay
-    """
-    # Get single heatmap
-    heatmap = heatmap.squeeze().cpu().numpy()  # (H, W)
-
-    # Normalize heatmap to 0-1
-    heatmap = (heatmap - heatmap.min()) / (heatmap.max() - heatmap.min() + 1e-8)
-
-    # Convert to colormap (jet colormap)
-    colormap = cm.jet(heatmap)[:, :, :3]  # (H, W, 3)
-    colormap = (colormap * 255).astype(np.uint8)
-
-    # Blend with original image
-    overlay = cv2.addWeighted(rgb_image, 1 - alpha, colormap, alpha, 0)
-
-    return wandb.Image(overlay)
+from lfd3d.utils.viz_utils import get_heatmap_viz
 
 
 def calc_pix_metrics(pred_dict, gt_idx, all_pred_idx, img_shape):
@@ -611,7 +584,7 @@ class HeatmapSamplerModule(pl.LightningModule):
         )
         ###
 
-        wandb_heatmap_img = get_heatmap_viz(rgb_end, heatmap_)
+        wandb_heatmap_img = wandb.Image(get_heatmap_viz(rgb_end, heatmap_))
 
         viz_dict = {
             f"{tag}/track_projected_to_rgb": wandb_pix_img,
@@ -748,13 +721,20 @@ class HeatmapSamplerModule(pl.LightningModule):
         self.val_outputs.clear()
 
     def predict_step(self, batch, batch_idx, dataloader_idx=0):
-        """
-        Prediction step for model evaluation.
-        """
-        raise NotImplementedError("TBD after referring to articubot.py")
+        eval_tag = self.trainer.datamodule.eval_tags[dataloader_idx]
+        with torch.no_grad():
+            pred_dict = {}
+            pred_coord, outputs = self.predict(batch)
+            pred_dict["pred_coord"] = pred_coord[self.prediction_type]["pred"]
+            pred_dict["outputs"] = outputs
+        self.predict_outputs[eval_tag].append(pred_dict)
+        return {
+            "pred_coord": pred_dict["pred_coord"],
+            "outputs": outputs,
+        }
 
     def on_predict_epoch_end(self):
         """
-        Visualize random 5 batches in the test sets.
+        Stub. To be implemented referring to articubot.py
         """
-        raise NotImplementedError("TBD after referring to articubot.py")
+        pass
