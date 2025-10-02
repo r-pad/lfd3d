@@ -23,9 +23,10 @@ class RGBTextFeaturizer:
         self.siglip_processor = AutoProcessor.from_pretrained(
             "google/siglip-so400m-patch14-384"
         )
-        self.dinov2 = torch.hub.load("facebookresearch/dinov2", "dinov2_vitl14_reg").to(
-            "cpu"
-        )
+        if self.rgb_feat:
+            self.dinov2 = torch.hub.load(
+                "facebookresearch/dinov2", "dinov2_vitl14_reg"
+            ).to("cpu")
 
     def compute_rgb_text_feat(self, rgb, text):
         """
