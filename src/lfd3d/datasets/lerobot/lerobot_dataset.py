@@ -294,7 +294,6 @@ class RpadLeRobotDataModule(BaseDataModule):
             val_indices_for_tag = self.val_indices_dict.get(tag, [])
             if len(val_indices_for_tag) == 0:
                 continue
-            test_datasets = {}
 
             dataset_cfg = self.dataset_cfg.copy()
             self.val_datasets[tag] = RpadLeRobotDataset(
@@ -303,15 +302,8 @@ class RpadLeRobotDataModule(BaseDataModule):
                 split="val",
                 split_indices=val_indices_for_tag,
             )
-            for ep_id, indices in self.test_indices_dict.items():
-                test_datasets[ep_id] = RpadLeRobotDataset(
-                    dataset_cfg=dataset_cfg,
-                    root=self.root,
-                    split="test",
-                    split_indices=indices,
-                )
-
-            self.test_datasets[tag] = test_datasets
+            # Store metadata for lazy test dataset creation
+            self.test_datasets[tag] = {}
 
         if self.train_dataset.cache_dir:
             invalidating_cacher = td.cachers.ProbabilisticCacherWrapper(
@@ -324,31 +316,50 @@ class RpadLeRobotDataModule(BaseDataModule):
                 self.val_datasets[tag].cache(
                     td.cachers.HDF5(Path(self.train_dataset.cache_dir) / f"val_{tag}")
                 )
-                for ep_id, test_dataset in self.test_datasets[tag].items():
-                    test_dataset.cache(
-                        td.cachers.HDF5(
-                            Path(self.train_dataset.cache_dir) / f"test_{tag}"
-                        )
-                    )
+
+    def _create_test_dataset(self, ep_id, indices):
+        """Lazily create a test dataset for a single episode."""
+        dataset_cfg = self.dataset_cfg.copy()
+        test_dataset = RpadLeRobotDataset(
+            dataset_cfg=dataset_cfg,
+            root=self.root,
+            split="test",
+            split_indices=indices,
+        )
+        if self.train_dataset.cache_dir:
+            # Get the tag for this episode
+            tmp_dataset = make_dataset(self.dataset_cfg.repo_id, self.root)
+            start_frame = indices[0]
+            data_source = source_of_data(tmp_dataset[start_frame])
+            test_dataset.cache(
+                td.cachers.HDF5(
+                    Path(self.train_dataset.cache_dir) / f"test_{data_source}"
+                )
+            )
+        return test_dataset
 
     def test_dataloader(self):
         if not hasattr(self, "test_datasets"):
             raise AttributeError(
                 "test_datasets has not been set. Make sure to call setup() first."
             )
-        return {
-            tag: {
-                id: data.DataLoader(
-                    episode,
+
+        # Lazily create test datasets only when test_dataloader is called
+        test_dataloaders = {}
+        for tag in self.test_datasets.keys():
+            test_dataloaders[tag] = {}
+            for ep_id, indices in self.test_indices_dict.items():
+                # Create dataset on-demand
+                episode_dataset = self._create_test_dataset(ep_id, list(indices))
+                test_dataloaders[tag][ep_id] = data.DataLoader(
+                    episode_dataset,
                     batch_size=self.val_batch_size,
                     shuffle=False,
                     num_workers=self.num_workers,
                     collate_fn=collate_pcd_fn,
                 )
-                for id, episode in dataset.items()
-            }
-            for tag, dataset in self.test_datasets.items()
-        }
+
+        return test_dataloaders
 
 
 if __name__ == "__main__":
