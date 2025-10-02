@@ -109,6 +109,11 @@ python scripts/eval.py checkpoint.run_id=<wandb-run-id> dataset.data_dir=<path/t
 
 If the model was trained on the cluster, `dataset.cache_dir` needs to be overridden and set to null.
 
+Evaluation on LeRobot independently for each episode:
+```
+python scripts/eval_lerobot_episode.py checkpoint.run_id=gcrbgmsf dataset=rpadLerobot dataset.repo_id="[sriramsk/fold_onesie_20250831_subsampled_heatmapGoal, sriramsk/fold_shirt_20250918_subsampled_heatmapGoal, sriramsk/fold_towel_20250919_subsampled_heatmapGoal, sriramsk/fold_bottoms_20250919_human_heatmapGoal]" model=dino_heatmap checkpoint.type=pix_dist
+```
+
 ## Docker
 
 Build the docker image:

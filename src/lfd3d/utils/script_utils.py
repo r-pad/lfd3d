@@ -19,6 +19,7 @@ from lfd3d.datasets import (
 )
 from lfd3d.datasets.lerobot.lerobot_dataset import RpadLeRobotDataModule
 from lfd3d.models.articubot import ArticubotNetwork, GoalRegressionModule
+from lfd3d.models.dino_heatmap import DinoHeatmapNetwork, HeatmapSamplerModule
 from lfd3d.models.diptv3 import DiPTv3, DiPTv3Adapter
 from lfd3d.models.tax3d import (
     CrossDisplacementModule,
@@ -65,6 +66,9 @@ def create_model(cfg):
     elif cfg.model.name == "articubot":
         network_fn = ArticubotNetwork
         module_fn = GoalRegressionModule
+    elif cfg.model.name == "dino_heatmap":
+        network_fn = DinoHeatmapNetwork
+        module_fn = HeatmapSamplerModule
     else:
         raise NotImplementedError(cfg.model.name)
 
