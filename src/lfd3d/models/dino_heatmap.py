@@ -392,6 +392,15 @@ class HeatmapSamplerModule(pl.LightningModule):
 
             # KL divergence loss
             loss = F.kl_div(pred_dist.log(), target_dist, reduction="batchmean")
+
+        elif self.loss_type == "mse":
+            # Flatten heatmap for cross entropy
+            logits = outputs.flatten(2).squeeze(1)  # (B, H*W)
+
+            # Create target indices from gt_mask
+            gt_flat = gt_mask.flatten(1, 2).squeeze(-1)  # (B, H*W)
+            loss = F.mse_loss(logits, gt_flat)
+        
         else:
             raise NotImplementedError
         return None, loss
@@ -501,11 +510,16 @@ class HeatmapSamplerModule(pl.LightningModule):
 
         # Flatten spatial dimensions and apply softmax
         logits = heatmap.squeeze(1).flatten(1)  # (B, H*W)
-        probs = F.softmax(logits, dim=1)
+        if self.loss_type == "cross_entropy" or self.loss_type == "kl_div":
+            probs = F.softmax(logits, dim=1)
 
-        # Multinomial sampling
-        sampled_indices = torch.multinomial(probs, 1).squeeze(1)  # (B,)
-
+            # Multinomial sampling
+            sampled_indices = torch.multinomial(probs, 1).squeeze(1)  # (B,)
+        elif self.loss_type == "mse":
+            sampled_indices = torch.argmax(logits, dim=1) # (B,)
+        else:
+            raise NotImplementedError
+        
         # Convert flat indices back to 2D coordinates
         y_coords = sampled_indices // W
         x_coords = sampled_indices % W
