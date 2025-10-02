@@ -1,0 +1,8 @@
+name: dino_3dgp
+
+# Model settings
+type: cross_displacement # Type of model
+use_text_embedding: True # If true, expects (siglip) text embedding to be provided as input
+use_gripper_pcd: True # Processes gripper pcd with a PointNet
+
+dino_model: 'facebook/dinov2-base'

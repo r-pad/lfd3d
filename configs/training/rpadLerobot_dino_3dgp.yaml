@@ -1,0 +1,24 @@
+lr: 1e-4
+lr_warmup_steps: 100
+weight_decay: 1e-5
+epochs: 100
+precision: 32
+batch_size: 8
+val_batch_size: 8
+grad_clip_norm: 0.3
+num_training_steps: None # Set by the training loop.
+
+check_val_every_n_epochs: 10
+additional_train_logging_period: 100 # Global step period to log additional training metrics
+
+n_samples_wta: 5 # number of samples for evaluating coverage
+save_wta_to_disk: False # save to disk for further examination
+
+# ModelCheckpoint configurations
+checkpoints:
+  rmse:
+    monitor: val/rmse
+    mode: min
+  rmse_and_std_combi:
+    monitor: val/rmse_and_std_combi
+    mode: min
