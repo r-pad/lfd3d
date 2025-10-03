@@ -117,6 +117,8 @@ def create_datamodule(cfg):
         num_workers=cfg.resources.num_workers,
         dataset_cfg=cfg.dataset,
         seed=cfg.seed,
+        augment_train=job_cfg.augment_train,
+        augment_cfg=job_cfg.augment_cfg,
     )
     datamodule.setup(stage)
 

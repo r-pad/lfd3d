@@ -59,8 +59,10 @@ class RpadLeRobotDataset(BaseDataset):
         root: str | None = None,
         split: str = "train",
         split_indices: list = [],
+        augment_train: bool = True,
+        augment_cfg: dict = None,
     ):
-        super().__init__()
+        super().__init__(augment_train=augment_train, augment_cfg=augment_cfg)
         repo_id = dataset_cfg.repo_id
 
         self.lerobot_dataset = make_dataset(repo_id, root)
@@ -216,8 +218,18 @@ class RpadLeRobotDataModule(BaseDataModule):
         dataset_cfg,
         seed,
         val_episode_ratio=0.1,
+        augment_train=True,
+        augment_cfg=None,
     ):
-        super().__init__(batch_size, val_batch_size, num_workers, dataset_cfg, seed)
+        super().__init__(
+            batch_size,
+            val_batch_size,
+            num_workers,
+            dataset_cfg,
+            seed,
+            augment_train,
+            augment_cfg,
+        )
         self.val_tags = []  # populated in _generate_episode_splits
         # Subset of train to use for eval
         self.TRAIN_SUBSET_SIZE = 20
@@ -289,6 +301,8 @@ class RpadLeRobotDataModule(BaseDataModule):
             root=self.root,
             split="train",
             split_indices=self.train_indices,
+            augment_train=self.augment_train,
+            augment_cfg=self.augment_cfg,
         )
         for tag in self.val_tags:
             val_indices_for_tag = self.val_indices_dict.get(tag, [])
@@ -301,6 +315,8 @@ class RpadLeRobotDataModule(BaseDataModule):
                 root=self.root,
                 split="val",
                 split_indices=val_indices_for_tag,
+                augment_train=False,  # Never augment validation
+                augment_cfg=self.augment_cfg,
             )
             # Store metadata for lazy test dataset creation
             self.test_datasets[tag] = {}

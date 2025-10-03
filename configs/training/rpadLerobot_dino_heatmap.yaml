@@ -1,3 +1,9 @@
+defaults:
+  - base_train
+
+# Override augment_train to False for dino heatmap
+augment_train: False
+
 lr: 1e-4
 lr_warmup_steps: 100
 weight_decay: 1e-5

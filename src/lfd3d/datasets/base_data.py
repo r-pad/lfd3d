@@ -15,7 +15,7 @@ from lfd3d.utils.data_utils import collate_pcd_fn
 
 
 class BaseDataset(td.Dataset):
-    def __init__(self):
+    def __init__(self, augment_train=True, augment_cfg=None):
         super().__init__()
         # Target shape of images (same as DINOv2)
         self.target_shape = 224
@@ -37,6 +37,8 @@ class BaseDataset(td.Dataset):
                 transforms.CenterCrop(self.target_shape),
             ]
         )
+        self.augment_train = augment_train
+        self.augment_cfg = augment_cfg
 
     def add_gaussian_noise(self, points, noise_magnitude=0.01):
         # points: (N, 3) array
@@ -81,11 +83,11 @@ class BaseDataset(td.Dataset):
 
         if (
             self.split == "train"
-            and self.dataset_cfg.augment_train
-            and random.random() < self.dataset_cfg.augment_cfg.augment_prob
+            and self.augment_train
+            and random.random() < self.augment_cfg.augment_prob
         ):
             scene_pcd, scene_feat_pcd, augment_tf = self.augment_scene_pcd(
-                scene_pcd, feat_flat, self.dataset_cfg.augment_cfg
+                scene_pcd, feat_flat, self.augment_cfg
             )
         else:  # Just FPS
             scene_pcd, scene_feat_pcd = self.get_fps_pcd(
@@ -265,7 +267,16 @@ class BaseDataset(td.Dataset):
 
 
 class BaseDataModule(pl.LightningDataModule):
-    def __init__(self, batch_size, val_batch_size, num_workers, dataset_cfg, seed):
+    def __init__(
+        self,
+        batch_size,
+        val_batch_size,
+        num_workers,
+        dataset_cfg,
+        seed,
+        augment_train=True,
+        augment_cfg=None,
+    ):
         super().__init__()
         self.batch_size = batch_size
         self.val_batch_size = val_batch_size
@@ -273,6 +284,8 @@ class BaseDataModule(pl.LightningDataModule):
         self.stage = None
         self.dataset_cfg = dataset_cfg
         self.seed = seed
+        self.augment_train = augment_train
+        self.augment_cfg = augment_cfg if augment_cfg is not None else {}
 
         # setting root directory based on dataset type
         try:

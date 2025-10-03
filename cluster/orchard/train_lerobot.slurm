@@ -19,7 +19,7 @@ pixi run python scripts/train.py \
 	model=articubot \
 	dataset=liberoLerobot \
 	dataset.repo_id=sriramsk/libero_lerobot_all_heatmapGoal \
-	dataset.augment_train=True \
+	training.augment_train=True \
 	dataset.cache_dir=/tmp/libero_all_cache \
 	model.use_rgb=True \
 	model.in_channels=7 \
