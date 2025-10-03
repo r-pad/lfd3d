@@ -1,0 +1,14 @@
+augment_train: "pcd" # Options: "pcd", "image", or null
+augment_cfg:
+  pcd:
+    augment_prob: 0.75 # Probability of augmentation (the actual augmentation prob also depends on cache_invalidation_rate)
+    augment_transform: True
+    pcd_sample: ["voxel", "fps"]
+    fps_num_points: [4096, 8192]
+    voxel_size: [0.01, 0.02]
+  image:
+    color_jitter: True
+    brightness: 0.2
+    contrast: 0.2
+    saturation: 0.2
+    hue: 0.1

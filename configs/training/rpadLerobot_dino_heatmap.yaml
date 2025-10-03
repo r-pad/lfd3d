@@ -1,8 +1,8 @@
 defaults:
   - base_train
 
-# Override augment_train to False for dino heatmap
-augment_train: False
+# Override augment_train to image for dino heatmap
+augment_train: "image"
 
 lr: 1e-4
 lr_warmup_steps: 100

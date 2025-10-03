@@ -1,8 +1,8 @@
 defaults:
   - base_train
 
-# Override augment_train to False for dino 3dgp
-augment_train: False
+# Override augment_train to image for dino 3dgp
+augment_train: "image"
 
 lr: 1e-4
 lr_warmup_steps: 100

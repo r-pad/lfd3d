@@ -83,11 +83,11 @@ class BaseDataset(td.Dataset):
 
         if (
             self.split == "train"
-            and self.augment_train
-            and random.random() < self.augment_cfg.augment_prob
+            and self.augment_train == "pcd"
+            and random.random() < self.augment_cfg["pcd"].augment_prob
         ):
             scene_pcd, scene_feat_pcd, augment_tf = self.augment_scene_pcd(
-                scene_pcd, feat_flat, self.augment_cfg
+                scene_pcd, feat_flat, self.augment_cfg["pcd"]
             )
         else:  # Just FPS
             scene_pcd, scene_feat_pcd = self.get_fps_pcd(
