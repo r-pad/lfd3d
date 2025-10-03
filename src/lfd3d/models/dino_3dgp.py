@@ -9,6 +9,7 @@ import torch
 import torch.nn.functional as F
 import wandb
 from diffusers import get_cosine_schedule_with_warmup
+from pytorch3d.transforms import matrix_to_rotation_6d
 from torch import nn, optim
 from transformers import AutoImageProcessor, AutoModel
 
@@ -68,7 +69,7 @@ class Dino3DGPNetwork(nn.Module):
         self.use_gripper_token = model_cfg.use_gripper_token
         if self.use_gripper_token:
             self.gripper_encoder = nn.Sequential(
-                nn.Linear(7, 128),
+                nn.Linear(10, 128),
                 nn.ReLU(),
                 nn.Linear(128, self.hidden_dim),
             )
@@ -189,14 +190,14 @@ class Dino3DGPNetwork(nn.Module):
         )  # (B, 256, hidden_dim)
 
         # Add language token
-        if self.use_text_embedding and text_embedding is not None:
+        if self.use_text_embedding:
             lang_token = self.text_encoder(text_embedding).unsqueeze(
                 1
             )  # (B, 1, hidden_dim)
             tokens = torch.cat([tokens, lang_token], dim=1)  # (B, 257, hidden_dim)
 
         # Add gripper token
-        if self.use_gripper_token and gripper_token is not None:
+        if self.use_gripper_token:
             grip_token = self.gripper_encoder(gripper_token).unsqueeze(
                 1
             )  # (B, 1, hidden_dim)
@@ -303,17 +304,42 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
         init = torch.cat([init_primary_points, init_extra_point[:, None, :]], dim=1)
         return init, gt
 
-    def get_gripper_token(self, batch):
+    def gripper_points_to_rotation(self, gripper_center, palm_point, finger_point):
+        # Always use palm->gripper as primary axis (more stable)
+        forward = gripper_center - palm_point
+        x_axis = forward / torch.linalg.norm(forward, dim=1, keepdim=True)
+
+        # Use finger relative to the forward direction for secondary axis
+        finger_vec = gripper_center - finger_point
+
+        # Project finger vector onto plane perpendicular to forward
+        finger_projected = (
+            finger_vec - torch.sum(finger_vec * x_axis, dim=1, keepdim=True) * x_axis
+        )
+        y_axis = finger_projected / torch.linalg.norm(
+            finger_projected, dim=1, keepdim=True
+        )
+
+        # Z completes the frame
+        z_axis = torch.cross(x_axis, y_axis)
+
+        return torch.stack([x_axis, y_axis, z_axis], dim=-1)
+
+    def get_gripper_token(self, gripper_points):
         """
         Extract gripper state as a token (6DoF pose + gripper width).
-        TODO: Implement proper 6DoF pose extraction, for now use placeholder.
         """
-        B = batch["action_pcd"].points_padded().shape[0]
-        device = batch["action_pcd"].points_padded().device
+        gripper_pos = (gripper_points[:, 0, :] + gripper_points[:, 1, :]) / 2
+        gripper_width = torch.linalg.norm(
+            gripper_points[:, 0, :] - gripper_points[:, 1, :], dim=1
+        )[:, None]
+        # eef pose, base, right finger
+        gripper_rot = self.gripper_points_to_rotation(
+            gripper_pos, gripper_points[:, 2, :], gripper_points[:, 0, :]
+        )
+        gripper_rot6d = matrix_to_rotation_6d(gripper_rot)
 
-        # Placeholder: return zeros for now
-        # TODO: Extract proper 6DoF pose from action_pcd or batch
-        gripper_token = torch.zeros(B, 7, device=device)
+        gripper_token = torch.cat([gripper_pos, gripper_rot6d, gripper_width], dim=-1)
         return gripper_token
 
     def nll_loss(
@@ -361,11 +387,11 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
 
     def forward(self, batch):
         """Forward pass with GMM loss"""
-        initial_gripper = batch["action_pcd"].points_padded()
         text_embedding = batch["text_embed"]
+        init, gt = self.extract_gt_4_points(batch)
 
-        # Get gripper token (6DoF + width)
-        gripper_token = self.get_gripper_token(batch)
+        # Get gripper token (6DoF pose + gripper width)
+        gripper_token = self.get_gripper_token(init)
 
         # RGBs is [B, 2, H, W, 3], depths is [B, 2, H, W]
         # Use the first image/depth for prediction
@@ -385,7 +411,6 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
 
         # outputs: (B, 256, 13) - last dim is [12 coords + 1 weight]
         B, num_components, _ = outputs.shape
-        init, gt = self.extract_gt_4_points(batch)
 
         # Parse outputs
         pred_displacement = outputs[:, :, :-1].reshape(
@@ -502,9 +527,9 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
         Predict 3D goal points using GMM sampling.
         Returns displacement from initial gripper position.
         """
-        initial_gripper = batch["action_pcd"].points_padded()
         text_embedding = batch["text_embed"]
-        gripper_token = self.get_gripper_token(batch)
+        init, gt = self.extract_gt_4_points(batch)
+        gripper_token = self.get_gripper_token(init)
 
         # Get inputs
         rgb = batch["rgbs"][:, 0].permute(0, 3, 1, 2)
@@ -519,8 +544,6 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
             gripper_token=gripper_token,
             text_embedding=text_embedding,
         )
-
-        init, gt = self.extract_gt_4_points(batch)
 
         if self.is_gmm:
             pred = self.sample_from_gmm(outputs, patch_coords)
