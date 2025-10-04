@@ -1,4 +1,0 @@
-batch_size: 32
-val_batch_size: 32
-n_samples_wta: 5
-save_wta_to_disk: True

@@ -935,7 +935,30 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
             weighted_displacement.cpu()
         )
 
+        # Project 3D predictions to 2D pixel coordinates for visualization
+        pred_3d = (
+            init + pred_dict[self.prediction_type]["pred"]
+        )  # (B, 4, 3) absolute positions
+        pred_3d_first3 = pred_3d[:, :3, :]  # (B, 3, 3) first 3 points
+
+        # Project to 2D using camera intrinsics
+        intrinsics = batch["intrinsics"]  # (B, 3, 3)
+        fx = intrinsics[:, 0, 0].unsqueeze(1)  # (B, 1)
+        fy = intrinsics[:, 1, 1].unsqueeze(1)
+        cx = intrinsics[:, 0, 2].unsqueeze(1)
+        cy = intrinsics[:, 1, 2].unsqueeze(1)
+
+        # Project: [x, y, z] -> [u, v] for all 3 points
+        u = (
+            pred_3d_first3[:, :, 0] * fx / pred_3d_first3[:, :, 2] + cx
+        ).long()  # (B, 3)
+        v = (
+            pred_3d_first3[:, :, 1] * fy / pred_3d_first3[:, :, 2] + cy
+        ).long()  # (B, 3)
+        pred_coord = torch.stack([u, v], dim=2)  # (B, 3, 2)
+
         return {
+            "pred_coord": pred_coord,
             "rmse": pred_dict["rmse"],
             "chamfer_dist": pred_dict["chamfer_dist"],
             "wta_rmse": pred_dict["wta_rmse"],

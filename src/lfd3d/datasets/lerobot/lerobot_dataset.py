@@ -284,11 +284,12 @@ class RpadLeRobotDataModule(BaseDataModule):
         test_indices_dict = {}
         for data_source, episodes in val_episodes_by_source.items():
             val_indices_dict[data_source] = []
+            test_indices_dict[data_source] = {}
             for ep_idx in episodes:
                 start_frame = episode_data_index["from"][ep_idx].item()
                 end_frame = episode_data_index["to"][ep_idx].item()
                 val_indices_dict[data_source].extend(range(start_frame, end_frame))
-                test_indices_dict[ep_idx] = range(start_frame, end_frame)
+                test_indices_dict[data_source][ep_idx] = range(start_frame, end_frame)
 
         return train_indices, val_indices_dict, test_indices_dict
 
@@ -368,7 +369,7 @@ class RpadLeRobotDataModule(BaseDataModule):
         test_dataloaders = {}
         for tag in self.test_datasets.keys():
             test_dataloaders[tag] = {}
-            for ep_id, indices in self.test_indices_dict.items():
+            for ep_id, indices in self.test_indices_dict[tag].items():
                 # Create dataset on-demand
                 episode_dataset = self._create_test_dataset(ep_id, list(indices))
                 test_dataloaders[tag][ep_id] = data.DataLoader(
@@ -378,6 +379,7 @@ class RpadLeRobotDataModule(BaseDataModule):
                     num_workers=self.num_workers,
                     collate_fn=collate_pcd_fn,
                 )
+                break  # HACK: Eval only one episode
 
         return test_dataloaders
 
