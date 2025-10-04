@@ -75,6 +75,27 @@ class SimplePointNet(nn.Module):
         return x
 
 
+class SimplePixelNet(nn.Module):
+    def __init__(self, input_dim, output_dim):
+        super(SimplePointNet, self).__init__()
+        self.conv1 = nn.Conv1d(input_dim, 64, 1)
+        self.conv2 = nn.Conv1d(64, 128, 1)
+        self.conv3 = nn.Conv1d(128, output_dim, 1)
+        self.bn1 = nn.BatchNorm1d(64)
+        self.bn2 = nn.BatchNorm1d(128)
+
+    def forward(self, x):
+        # x: (B, N, input_dim) -> (B, input_dim, N)
+        x = x.transpose(1, 2)
+
+        x = F.relu(self.bn1(self.conv1(x)))
+        x = F.relu(self.bn2(self.conv2(x)))
+        x = self.conv3(x)
+        # Global max pooling
+        x = torch.max(x, 2)[0]  # (B, output_dim)
+        return x
+
+
 class DinoHeatmapNetwork(nn.Module):
     """
     Dino + DPT network for dense heatmap prediction
@@ -94,10 +115,15 @@ class DinoHeatmapNetwork(nn.Module):
         hidden_dim = self.backbone.config.hidden_size
 
         # Point encoder for hand/gripper poses
-        self.use_gripper_pcd = model_cfg.use_gripper_pcd
+        self.use_gripper_point = model_cfg.use_gripper_point
+        self.gripper_point_type = model_cfg.gripper_point_type
         self.encoded_point_dim = 128
-        if self.use_gripper_pcd:
-            self.point_encoder = SimplePointNet(3, self.encoded_point_dim)
+
+        if self.use_gripper_point:
+            if self.gripper_point_type == "3D":
+                self.point_encoder = SimplePointNet(3, self.encoded_point_dim)
+            elif self.gripper_point_type == "2D":
+                self.point_encoder = SimplePixelNet(3, self.encoded_point_dim)
 
         # Language conditioning
         self.use_text_embedding = model_cfg.use_text_embedding
@@ -115,7 +141,7 @@ class DinoHeatmapNetwork(nn.Module):
             self.text_norm_pre = nn.LayerNorm(hidden_dim)
             self.text_norm_post = nn.LayerNorm(hidden_dim)
 
-        if self.use_gripper_pcd:
+        if self.use_gripper_point:
             self.point_cross_attn = nn.MultiheadAttention(
                 hidden_dim, 8, batch_first=True
             )
@@ -125,7 +151,7 @@ class DinoHeatmapNetwork(nn.Module):
         # Project conditioning features to hidden_dim
         if self.use_text_embedding:
             self.text_proj = nn.Linear(self.encoded_text_dim, hidden_dim)
-        if self.use_gripper_pcd:
+        if self.use_gripper_point:
             self.point_proj = nn.Linear(self.encoded_point_dim, hidden_dim)
 
         # DPT-style decoder
@@ -157,12 +183,12 @@ class DinoHeatmapNetwork(nn.Module):
             nn.init.xavier_uniform_(self.text_cross_attn.in_proj_weight, gain=0.1)
             nn.init.xavier_uniform_(self.text_cross_attn.out_proj.weight, gain=0.1)
 
-        if self.use_gripper_pcd:
+        if self.use_gripper_point:
             # Scale down attention weights
             nn.init.xavier_uniform_(self.point_cross_attn.in_proj_weight, gain=0.1)
             nn.init.xavier_uniform_(self.point_cross_attn.out_proj.weight, gain=0.1)
 
-    def forward(self, image, gripper_pcd=None, text_embedding=None):
+    def forward(self, image, gripper_point=None, text_embedding=None):
         # Extract features from Dino
         with torch.no_grad():
             inputs = self.backbone_processor(images=image, return_tensors="pt")
@@ -189,8 +215,8 @@ class DinoHeatmapNetwork(nn.Module):
             # fused, _ = self.text_cross_attn(fused, text_feat, text_feat)
 
         # Point cross-attention
-        if self.use_gripper_pcd and gripper_pcd is not None:
-            point_feat = self.point_encoder(gripper_pcd)  # (B, 128)
+        if self.use_gripper_point and gripper_point is not None:
+            point_feat = self.point_encoder(gripper_point)  # (B, 128)
             point_feat = self.point_proj(point_feat)  # (B, hidden_dim)
             point_feat = point_feat.unsqueeze(1)  # (B, 1, hidden_dim)
 
@@ -229,6 +255,7 @@ class HeatmapSamplerModule(pl.LightningModule):
         if self.prediction_type != "heatmap":
             raise ValueError(f"Invalid prediction type: {self.prediction_type}")
         self.label_key = "heatmap"
+        self.gripper_point_type = self.model_cfg.gripper_point_type
 
         # mode-specific processing
         if self.mode == "train":
@@ -244,6 +271,9 @@ class HeatmapSamplerModule(pl.LightningModule):
             self.loss_type = self.run_cfg.loss_type
         elif self.mode == "eval":
             self.run_cfg = cfg.inference
+            self.loss_type = (
+                self.run_cfg.loss_type
+            )  # mse sample differently from ce and kl div
         else:
             raise ValueError(f"Invalid mode: {self.mode}")
 
@@ -318,9 +348,29 @@ class HeatmapSamplerModule(pl.LightningModule):
         x_coords = coords[..., 0].long()
 
         mask[batch_idx, y_coords, x_coords] = 1
-        return mask
+        normalized_y_coords = y_coords / height
+        normalized_x_coords = x_coords / width
 
-    def create_gaussian_target(self, coords, H, W, sigma=3.0):
+        return mask, torch.cat(
+            [normalized_y_coords, normalized_x_coords], dim=1
+        )  # B, 2
+
+    def compute_normalized_gripper_width(self, batch, gripper_max_distance=0.1):
+        device = batch["rgbs"].device
+        initial_gripper = batch["action_pcd"].points_padded()  # B 4 3
+        gripper_left = initial_gripper[:, 1, :]  # B 4 3 - > B 3
+        gripper_right = initial_gripper[:, 2, :]
+
+        gripper_width = torch.norm(gripper_left - gripper_right, dim=-1)  # B,
+        gripper_width = torch.clamp(
+            gripper_width,
+            torch.tensor([0], device=device),
+            torch.tensor([gripper_max_distance], device=device),
+        )
+
+        return gripper_width / gripper_max_distance
+
+    def create_gaussian_target(self, coords, H, W, sigma=0.5):
         """Create smooth Gaussian blob around target pixel coordinates"""
         device = coords.device
         y_grid, x_grid = torch.meshgrid(
@@ -330,8 +380,8 @@ class HeatmapSamplerModule(pl.LightningModule):
         )
 
         # coords is (B, 2) -> (x, y)
-        dx = x_grid[None] - coords[:, 0, None, None]  # (B, H, W)
-        dy = y_grid[None] - coords[:, 1, None, None]  # (B, H, W)
+        dx = x_grid[None] - coords[:, 0, None, None]  # (B, 1, H, W)
+        dy = y_grid[None] - coords[:, 1, None, None]  # (B, 1, H, W)
 
         dist_sq = dx**2 + dy**2
         target_dist = torch.exp(-dist_sq / (2 * sigma**2))
@@ -341,16 +391,35 @@ class HeatmapSamplerModule(pl.LightningModule):
 
     def forward(self, batch):
         _, gt = self.extract_gt_4_points(batch)
-        gt_mask = self.compute_gt_mask(batch, gt)
+        gt_mask, normalized_coords = self.compute_gt_mask(batch, gt)  # B, H, W  |  B, 2
 
         text_embedding = batch["text_embed"]
 
         # RGBs is [B, 2, H, W, 3] -> [B, 3, H, W], we only use the first image
-        outputs = self.network(
-            batch["rgbs"][:, 0].permute(0, 3, 1, 2),
-            gripper_pcd=batch["action_pcd"].points_padded(),
-            text_embedding=text_embedding,
-        )
+        if self.gripper_point_type == "3D":
+            outputs = self.network(
+                batch["rgbs"][:, 0].permute(0, 3, 1, 2),
+                gripper_point=batch["action_pcd"].points_padded(),
+                text_embedding=text_embedding,
+            )
+        elif self.gripper_point_type == "2D":
+            gripper_width = self.compute_normalized_gripper_width(batch)  # B,
+            gripper_points = torch.cat(
+                [normalized_coords, gripper_width[:, None]], dim=1
+            )  # B, 3
+
+            outputs = self.network(
+                batch["rgbs"][:, 0].permute(0, 3, 1, 2),
+                gripper_point=gripper_points[:, None, :],  # B, 1, 3
+                text_embedding=text_embedding,
+            )
+
+        else:
+            outputs = self.network(
+                batch["rgbs"][:, 0].permute(0, 3, 1, 2),
+                gripper_point=None,
+                text_embedding=text_embedding,
+            )
 
         if self.loss_type == "cross_entropy":
             # Flatten heatmap for cross entropy
@@ -365,6 +434,7 @@ class HeatmapSamplerModule(pl.LightningModule):
             loss = F.cross_entropy(logits, target_idx)
         elif self.loss_type == "kl_div":  # Goes to NaN?
             B, _, H, W = outputs.shape
+            alpha = 0.5
 
             # Get target pixel coordinates
             gt_flat = gt_mask.flatten(1, 2)  # (B, H*W)
@@ -377,8 +447,8 @@ class HeatmapSamplerModule(pl.LightningModule):
                 [target_x, target_y], dim=1
             ).float()  # (B, 2) [x, y]
 
-            # Random sigma for robustness (1-3 pixel tolerance)
-            sigma = 1.0 + torch.rand(1).item() * 2.0  # Random between 1.0-3.0
+            # 0.6 on one pixel + 4 other pixel with 0.1 prob
+            sigma = 0.5
 
             # Create smooth Gaussian target distribution
             target_dist = self.create_gaussian_target(
@@ -390,8 +460,12 @@ class HeatmapSamplerModule(pl.LightningModule):
             pred_dist_flat = F.softmax(logits_flat, dim=1)  # (B, H*W)
             pred_dist = pred_dist_flat.view(B, H, W)  # (B, H, W)
 
-            # KL divergence loss
-            loss = F.kl_div(pred_dist.log(), target_dist, reduction="batchmean")
+            # KL divergence loss (Forward KL + Reverse KL)
+            loss = alpha * F.kl_div(
+                pred_dist.log(), target_dist, reduction="batchmean"
+            ) + (1 - alpha) * F.kl_div(
+                target_dist.log(), pred_dist, reduction="batchmean"
+            )
 
         elif self.loss_type == "mse":
             # Flatten heatmap for cross entropy
@@ -400,7 +474,7 @@ class HeatmapSamplerModule(pl.LightningModule):
             # Create target indices from gt_mask
             gt_flat = gt_mask.flatten(1, 2).squeeze(-1)  # (B, H*W)
             loss = F.mse_loss(logits, gt_flat)
-        
+
         else:
             raise NotImplementedError
         return None, loss
@@ -444,7 +518,7 @@ class HeatmapSamplerModule(pl.LightningModule):
             self.train()  # Switch back to training mode
 
             _, gt = self.extract_gt_4_points(batch)
-            gt_mask = self.compute_gt_mask(batch, gt)
+            gt_mask, _ = self.compute_gt_mask(batch, gt)
             # Find the pixel with value 1 in gt_mask and convert to 2D coords
             gt_flat = gt_mask.flatten(1, 2)  # (B, H*W)
             flat_idx = gt_flat.argmax(
@@ -482,14 +556,14 @@ class HeatmapSamplerModule(pl.LightningModule):
             progress: whether to show progress bar
         """
         _, gt = self.extract_gt_4_points(batch)
-        gt_mask = self.compute_gt_mask(batch, gt)
+        gt_mask, _ = self.compute_gt_mask(batch, gt)
 
         text_embedding = batch["text_embed"]
 
         # RGBs is [B, 2, H, W, 3] -> [B, 3, H, W], we only use the first image
         outputs = self.network(
             batch["rgbs"][:, 0].permute(0, 3, 1, 2),
-            gripper_pcd=batch["action_pcd"].points_padded(),
+            gripper_point=batch["action_pcd"].points_padded(),
             text_embedding=text_embedding,
         )
 
@@ -516,10 +590,10 @@ class HeatmapSamplerModule(pl.LightningModule):
             # Multinomial sampling
             sampled_indices = torch.multinomial(probs, 1).squeeze(1)  # (B,)
         elif self.loss_type == "mse":
-            sampled_indices = torch.argmax(logits, dim=1) # (B,)
+            sampled_indices = torch.argmax(logits, dim=1)  # (B,)
         else:
             raise NotImplementedError
-        
+
         # Convert flat indices back to 2D coordinates
         y_coords = sampled_indices // W
         x_coords = sampled_indices % W
@@ -568,7 +642,7 @@ class HeatmapSamplerModule(pl.LightningModule):
 
         # Get GT pixel coordinates
         _, gt = self.extract_gt_4_points(batch)
-        gt_mask = self.compute_gt_mask(batch, gt)
+        gt_mask, _ = self.compute_gt_mask(batch, gt)
         gt_flat = gt_mask.flatten(1, 2)
         flat_idx = gt_flat.argmax(dim=1)
         H, W = gt_mask.shape[1], gt_mask.shape[2]
@@ -671,7 +745,7 @@ class HeatmapSamplerModule(pl.LightningModule):
             ).permute(1, 0, 2)
 
         _, gt = self.extract_gt_4_points(batch)
-        gt_mask = self.compute_gt_mask(batch, gt)
+        gt_mask, _ = self.compute_gt_mask(batch, gt)
         # Find the pixel with value 1 in gt_mask and convert to 2D coords
         gt_flat = gt_mask.flatten(1, 2)  # (B, H*W)
         flat_idx = gt_flat.argmax(dim=1).squeeze(1)  # (B,) - flat index of target pixel
