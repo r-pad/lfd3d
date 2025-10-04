@@ -5,11 +5,14 @@ import numpy as np
 import pytorch_lightning as pl
 import torch
 import torchdatasets as td
+from PIL import Image, ImageFilter
 from pytorch3d.ops import sample_farthest_points
 from torch.utils import data
 from torch_cluster import grid_cluster
 from torch_scatter import scatter_mean
 from torchvision import transforms
+from torchvision.transforms import ColorJitter
+from torchvision.transforms import functional as TF
 
 from lfd3d.utils.data_utils import collate_pcd_fn
 
@@ -39,6 +42,70 @@ class BaseDataset(td.Dataset):
         )
         self.augment_train = augment_train
         self.augment_cfg = augment_cfg
+
+    def apply_image_augmentation(
+        self, rgbs, depths, start_tracks, end_tracks, augment_cfg
+    ):
+        """
+        Apply image augmentations (and modify corresponding 3D GT if necessary)
+        Args:
+            rgbs: np.ndarray (2, H, W, 3) uint8
+            depths: np.ndarray (2, H, W) float32
+            start_tracks: np.ndarray (N, 3)
+            end_tracks: np.ndarray (N, 3)
+            augment_cfg: dict with augment_cfg["image"] config
+        Returns:
+            tuple: (rgbs_aug, depths, start_tracks, end_tracks)
+                Currently depths and tracks are returned unchanged.
+        """
+        if not (self.split == "train" and self.augment_train == "image"):
+            return rgbs, depths, start_tracks, end_tracks
+
+        img_cfg = augment_cfg["image"]
+        rgb_pils = [Image.fromarray(rgbs[i]) for i in [0, 1]]
+
+        # ColorJitter
+        if random.random() < img_cfg.color_jitter_prob:
+            color_jitter = ColorJitter(
+                brightness=img_cfg.brightness,
+                contrast=img_cfg.contrast,
+                saturation=img_cfg.saturation,
+                hue=img_cfg.hue,
+            )
+            params = color_jitter.get_params(
+                color_jitter.brightness,
+                color_jitter.contrast,
+                color_jitter.saturation,
+                color_jitter.hue,
+            )
+            fn_idx, brightness_f, contrast_f, saturation_f, hue_f = params
+
+            for i in range(len(rgb_pils)):
+                for fn_id in fn_idx:
+                    if fn_id == 0:
+                        rgb_pils[i] = TF.adjust_brightness(rgb_pils[i], brightness_f)
+                    elif fn_id == 1:
+                        rgb_pils[i] = TF.adjust_contrast(rgb_pils[i], contrast_f)
+                    elif fn_id == 2:
+                        rgb_pils[i] = TF.adjust_saturation(rgb_pils[i], saturation_f)
+                    elif fn_id == 3:
+                        rgb_pils[i] = TF.adjust_hue(rgb_pils[i], hue_f)
+
+        # Random grayscale
+        if random.random() < img_cfg.grayscale_prob:
+            rgb_pils = [
+                TF.rgb_to_grayscale(pil, num_output_channels=3) for pil in rgb_pils
+            ]
+
+        # Gaussian blur
+        if random.random() < img_cfg.blur_prob:
+            rgb_pils = [
+                pil.filter(ImageFilter.GaussianBlur(radius=img_cfg.blur_kernel_size))
+                for pil in rgb_pils
+            ]
+
+        rgbs_aug = np.stack([np.asarray(pil) for pil in rgb_pils])
+        return rgbs_aug, depths, start_tracks, end_tracks
 
     def add_gaussian_noise(self, points, noise_magnitude=0.01):
         # points: (N, 3) array
@@ -84,7 +151,7 @@ class BaseDataset(td.Dataset):
         if (
             self.split == "train"
             and self.augment_train == "pcd"
-            and random.random() < self.augment_cfg["pcd"].augment_prob
+            and random.random() < self.augment_cfg.augment_prob
         ):
             scene_pcd, scene_feat_pcd, augment_tf = self.augment_scene_pcd(
                 scene_pcd, feat_flat, self.augment_cfg["pcd"]
@@ -285,7 +352,7 @@ class BaseDataModule(pl.LightningDataModule):
         self.dataset_cfg = dataset_cfg
         self.seed = seed
         self.augment_train = augment_train
-        self.augment_cfg = augment_cfg if augment_cfg is not None else {}
+        self.augment_cfg = augment_cfg
 
         # setting root directory based on dataset type
         try:

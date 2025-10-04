@@ -159,6 +159,10 @@ class RpadLeRobotDataset(BaseDataset):
         start_tracks, end_tracks = gripper_pcds[0], gripper_pcds[1]
         actual_caption = caption
 
+        rgbs, depths, start_tracks, end_tracks = self.apply_image_augmentation(
+            rgbs, depths, start_tracks, end_tracks, self.augment_cfg
+        )
+
         rgb_embed, text_embed = self.rgb_text_featurizer.compute_rgb_text_feat(
             rgbs[0], caption
         )
