@@ -7,6 +7,8 @@ use_gripper_token: True # Adds an additional gripper token
 num_transformer_layers: 4 # num blocks for self atttention
 dino_model: 'facebook/dinov2-base'
 
+dropout: 0.1
+
 # Positional encoding settings
 use_fourier_pe: False # If true, use Fourier positional encoding instead of MLP
 fourier_num_frequencies: 21 # Number of frequency bands for Fourier encoding (only used if use_fourier_pe=True)

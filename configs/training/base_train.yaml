@@ -1,3 +1,21 @@
+# Common training parameters
+lr: 1e-4
+lr_warmup_steps: 100
+weight_decay: 1e-5
+epochs: 250
+precision: 32
+batch_size: 8
+val_batch_size: 8
+grad_clip_norm: 0.3
+num_training_steps: None # Set by the training loop.
+
+check_val_every_n_epochs: 10
+additional_train_logging_period: 100 # Global step period to log additional training metrics
+
+n_samples_wta: 5 # number of samples for evaluating coverage
+save_wta_to_disk: False # save to disk for further examination
+
+# Augmentation settings
 augment_train: "pcd" # Options: "pcd", "image", or null
 augment_cfg:
   augment_prob: 0.75 # Probability of augmentation (the actual augmentation prob also depends on cache_invalidation_rate)
@@ -15,3 +33,12 @@ augment_cfg:
     grayscale_prob: 0.1
     blur_prob: 0.1
     blur_kernel_size: 1
+
+# ModelCheckpoint configurations
+checkpoints:
+  rmse:
+    monitor: val/rmse
+    mode: min
+  rmse_and_std_combi:
+    monitor: val/rmse_and_std_combi
+    mode: min

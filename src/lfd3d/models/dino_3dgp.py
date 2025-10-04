@@ -149,7 +149,7 @@ class Dino3DGPNetwork(nn.Module):
                     d_model=self.hidden_dim,
                     nhead=8,
                     dim_feedforward=self.hidden_dim * 4,
-                    dropout=0.1,
+                    dropout=model_cfg.dropout,
                     batch_first=True,
                 )
                 for _ in range(self.num_layers)
