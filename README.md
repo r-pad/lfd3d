@@ -52,12 +52,18 @@ Test split generated using [sriramsk1999/general-flow](https://github.com/sriram
 - With your collected lerobot dataset, run upgrade_dataset.py from the lerobot repo to generate a [repo_id]_goal repo
 - Run a training job like this:
 ```python
-python scripts/train.py model=articubot dataset=rpadLerobot dataset.repo_id=beisner/aloha_plate_placement_goal dataset.augment_train=True dataset.data_sources="[aloha]" resources.num_workers=16 dataset.cache_dir=/data/lfd3d_dataloading_cache
+python scripts/train.py model=articubot dataset=rpadLerobot dataset.repo_id=beisner/aloha_plate_placement_goal training.augment_train=True dataset.data_sources="[aloha]" resources.num_workers=16 dataset.cache_dir=/data/lfd3d_dataloading_cache
 ```
 
 - For LIBERO:
 ```python
-python scripts/train.py model=articubot dataset=liberoLerobot dataset.repo_id=sriramsk/libero_lerobot_singleTask_heatmapGoal dataset.augment_train=True dataset.cache_dir=libero_cache model.use_rgb=True model.in_channels=7 training.batch_size=4
+python scripts/train.py model=articubot dataset=liberoLerobot dataset.repo_id=sriramsk/libero_lerobot_singleTask_heatmapGoal training.augment_train=True dataset.cache_dir=libero_cache model.use_rgb=True model.in_channels=7 training.batch_size=4
+```
+
+- Some more examples:
+
+``` bash
+nohup python scripts/train.py model=dino_3dgp dataset=rpadLerobot dataset.repo_id="[sriramsk/fold_onesie_20250831_subsampled_heatmapGoal, sriramsk/fold_shirt_20250918_subsampled_heatmapGoal, sriramsk/fold_towel_20250919_subsampled_heatmapGoal, sriramsk/fold_bottoms_20250919_human_heatmapGoal]"  resources.num_workers=32 training.batch_size=128 training.augment_train=False dataset.cache_dir=/home/sriram/Desktop/lfd3d/dino_3dgp_multifold_cache training.epochs=500 training.check_val_every_n_epochs=5 > dino_3dgp_multifold.out &
 ```
 
 ### RT-1

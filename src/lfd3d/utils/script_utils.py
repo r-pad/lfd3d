@@ -19,6 +19,7 @@ from lfd3d.datasets import (
 )
 from lfd3d.datasets.lerobot.lerobot_dataset import RpadLeRobotDataModule
 from lfd3d.models.articubot import ArticubotNetwork, GoalRegressionModule
+from lfd3d.models.dino_3dgp import Dino3DGPGoalRegressionModule, Dino3DGPNetwork
 from lfd3d.models.dino_heatmap import DinoHeatmapNetwork, HeatmapSamplerModule
 from lfd3d.models.diptv3 import DiPTv3, DiPTv3Adapter
 from lfd3d.models.tax3d import (
@@ -69,6 +70,9 @@ def create_model(cfg):
     elif cfg.model.name == "dino_heatmap":
         network_fn = DinoHeatmapNetwork
         module_fn = HeatmapSamplerModule
+    elif cfg.model.name == "dino_3dgp":
+        network_fn = Dino3DGPNetwork
+        module_fn = Dino3DGPGoalRegressionModule
     else:
         raise NotImplementedError(cfg.model.name)
 
@@ -113,6 +117,8 @@ def create_datamodule(cfg):
         num_workers=cfg.resources.num_workers,
         dataset_cfg=cfg.dataset,
         seed=cfg.seed,
+        augment_train=job_cfg.augment_train,
+        augment_cfg=job_cfg.augment_cfg,
     )
     datamodule.setup(stage)
 
