@@ -21,6 +21,56 @@ from lfd3d.utils.viz_utils import (
 )
 
 
+class FourierPositionalEncoding(nn.Module):
+    """Fourier feature positional encoding for 3D coordinates"""
+
+    def __init__(self, input_dim=3, num_frequencies=64, include_input=True):
+        super().__init__()
+        self.input_dim = input_dim
+        self.num_frequencies = num_frequencies
+        self.include_input = include_input
+
+        # Frequency bands (geometric progression)
+        freq_bands = 2.0 ** torch.linspace(0, num_frequencies - 1, num_frequencies)
+        self.register_buffer("freq_bands", freq_bands)
+
+        # Output dimension: input_dim * num_frequencies * 2 (sin + cos) + input_dim (if include_input)
+        self.output_dim = input_dim * num_frequencies * 2
+        if include_input:
+            self.output_dim += input_dim
+
+    def forward(self, coords):
+        """
+        Args:
+            coords: (..., input_dim) 3D coordinates
+        Returns:
+            encoded: (..., output_dim) Fourier encoded features
+        """
+        # coords: (..., 3)
+        # freq_bands: (num_frequencies,)
+
+        # Compute angular frequencies
+        # (..., 3, 1) * (num_frequencies,) -> (..., 3, num_frequencies)
+        scaled = coords.unsqueeze(-1) * self.freq_bands
+
+        # Apply sin and cos
+        sin_features = torch.sin(2 * np.pi * scaled)  # (..., 3, num_frequencies)
+        cos_features = torch.cos(2 * np.pi * scaled)  # (..., 3, num_frequencies)
+
+        # Interleave and flatten
+        fourier_features = torch.cat(
+            [sin_features, cos_features], dim=-1
+        )  # (..., 3, 2*num_frequencies)
+        fourier_features = fourier_features.reshape(
+            *coords.shape[:-1], -1
+        )  # (..., 3*2*num_frequencies)
+
+        if self.include_input:
+            fourier_features = torch.cat([coords, fourier_features], dim=-1)
+
+        return fourier_features
+
+
 class Dino3DGPNetwork(nn.Module):
     """
     DINOv2 + 3D positional encoding + Transformer for 3D goal prediction
@@ -48,13 +98,30 @@ class Dino3DGPNetwork(nn.Module):
         self.patch_size = self.backbone.config.patch_size
         self.num_components = 256  # Fixed number of GMM components
 
-        # 3D Positional encoding MLP
-        # Input: (x, y, z) coordinates, output: hidden_dim
-        self.pos_encoder = nn.Sequential(
-            nn.Linear(3, 128),
-            nn.ReLU(),
-            nn.Linear(128, self.pos_encoding_dim),
-        )
+        # 3D Positional encoding
+        if model_cfg.use_fourier_pe:
+            # Fourier positional encoding
+            fourier_encoder = FourierPositionalEncoding(
+                input_dim=3,
+                num_frequencies=model_cfg.fourier_num_frequencies,
+                include_input=model_cfg.fourier_include_input,
+            )
+            fourier_dim = fourier_encoder.output_dim
+            # Fourier encoder + MLP projection
+            self.pos_encoder = nn.Sequential(
+                fourier_encoder,
+                nn.Linear(fourier_dim, 256),
+                nn.ReLU(),
+                nn.Linear(256, self.pos_encoding_dim),
+            )
+        else:
+            # 3D Positional encoding MLP
+            # Input: (x, y, z) coordinates, output: hidden_dim
+            self.pos_encoder = nn.Sequential(
+                nn.Linear(3, 128),
+                nn.ReLU(),
+                nn.Linear(128, self.pos_encoding_dim),
+            )
 
         # Language token encoder
         self.use_text_embedding = model_cfg.use_text_embedding
