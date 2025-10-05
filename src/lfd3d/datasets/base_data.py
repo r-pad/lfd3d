@@ -44,7 +44,7 @@ class BaseDataset(td.Dataset):
         self.augment_cfg = augment_cfg
 
     def apply_image_augmentation(
-        self, rgbs, depths, start_tracks, end_tracks, augment_cfg
+        self, rgbs, depths, start_tracks, end_tracks, K, augment_cfg
     ):
         """
         Apply image augmentations (and modify corresponding 3D GT if necessary)
@@ -53,16 +53,95 @@ class BaseDataset(td.Dataset):
             depths: np.ndarray (2, H, W) float32
             start_tracks: np.ndarray (N, 3)
             end_tracks: np.ndarray (N, 3)
+            K: np.ndarray (3, 3) camera intrinsics
             augment_cfg: dict with augment_cfg["image"] config
         Returns:
-            tuple: (rgbs_aug, depths, start_tracks, end_tracks)
-                Currently depths and tracks are returned unchanged.
+            tuple: (rgbs, depths, start_tracks, end_tracks, K)
         """
-        if not (self.split == "train" and self.augment_train == "image"):
-            return rgbs, depths, start_tracks, end_tracks
+        if not (
+            self.split == "train"
+            and self.augment_train == "image"
+            and random.random() < self.augment_cfg.augment_prob
+        ):
+            return rgbs, depths, start_tracks, end_tracks, K
 
         img_cfg = augment_cfg["image"]
         rgb_pils = [Image.fromarray(rgbs[i]) for i in [0, 1]]
+        depth_pils = [Image.fromarray(depths[i]) for i in [0, 1]]
+
+        # Random Crop and Resize
+        if random.random() < img_cfg.crop_resize_prob:
+            H, W = rgb_pils[0].size[1], rgb_pils[0].size[0]
+
+            # Random crop size (e.g., 192-224 for 224x224 image)
+            crop_size = random.randint(
+                img_cfg.crop_size_range[0], img_cfg.crop_size_range[1]
+            )
+            new_H, new_W = crop_size, crop_size
+
+            # Random crop location
+            top = random.randint(0, H - new_H)
+            left = random.randint(0, W - new_W)
+
+            # Crop RGB and depth
+            rgb_pils = [TF.crop(pil, top, left, new_H, new_W) for pil in rgb_pils]
+            depth_pils = [TF.crop(pil, top, left, new_H, new_W) for pil in depth_pils]
+
+            # Resize back to original size
+            rgb_pils = [
+                TF.resize(pil, (H, W), interpolation=TF.InterpolationMode.BILINEAR)
+                for pil in rgb_pils
+            ]
+            depth_pils = [
+                TF.resize(pil, (H, W), interpolation=TF.InterpolationMode.NEAREST)
+                for pil in depth_pils
+            ]
+
+            # Update intrinsics
+            # After crop: shift principal point
+            K = K.copy()
+            K[0, 2] -= left  # cx
+            K[1, 2] -= top  # cy
+
+            # After resize: scale everything
+            scale_x = W / new_W
+            scale_y = H / new_H
+            K[0, :] *= scale_x  # fx, cx
+            K[1, :] *= scale_y  # fy, cy
+
+        # Rotation
+        if random.random() < img_cfg.rotate_prob:
+            # Sample rotation angle in degrees
+            angle = random.uniform(-30, 30)
+
+            # Rotate RGB and depth images
+            rgb_pils = [
+                TF.rotate(pil, angle, interpolation=TF.InterpolationMode.BILINEAR)
+                for pil in rgb_pils
+            ]
+            depth_pils = [
+                TF.rotate(pil, angle, interpolation=TF.InterpolationMode.NEAREST)
+                for pil in depth_pils
+            ]
+
+            # Rotate 3D tracks around Z-axis (camera optical axis)
+            # TF.rotate rotates clockwise for positive angles, so negate for 3D rotation
+            angle_rad = -np.deg2rad(angle)
+            cos_a = np.cos(angle_rad)
+            sin_a = np.sin(angle_rad)
+            R_z = np.array([[cos_a, -sin_a, 0], [sin_a, cos_a, 0], [0, 0, 1]])
+
+            # Apply rotation to tracks
+            start_tracks[:] = start_tracks @ R_z.T
+            end_tracks[:] = end_tracks @ R_z.T
+
+        # Horizontal Flip
+        if random.random() < img_cfg.hflip_prob:
+            rgb_pils = [TF.hflip(pil) for pil in rgb_pils]
+            depth_pils = [TF.hflip(pil) for pil in depth_pils]
+            # Flip x coordinate in 3D
+            start_tracks[:, 0] = -start_tracks[:, 0]
+            end_tracks[:, 0] = -end_tracks[:, 0]
 
         # ColorJitter
         if random.random() < img_cfg.color_jitter_prob:
@@ -104,8 +183,9 @@ class BaseDataset(td.Dataset):
                 for pil in rgb_pils
             ]
 
-        rgbs_aug = np.stack([np.asarray(pil) for pil in rgb_pils])
-        return rgbs_aug, depths, start_tracks, end_tracks
+        rgbs = np.stack([np.asarray(pil) for pil in rgb_pils])
+        depths = np.stack([np.asarray(pil) for pil in depth_pils])
+        return rgbs, depths, start_tracks, end_tracks, K
 
     def add_gaussian_noise(self, points, noise_magnitude=0.01):
         # points: (N, 3) array

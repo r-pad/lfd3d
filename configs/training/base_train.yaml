@@ -25,12 +25,19 @@ augment_cfg:
     fps_num_points: [4096, 8192]
     voxel_size: [0.01, 0.02]
   image:
-    color_jitter_prob: 0.5
+    hflip_prob: 0.5
+    rotate_prob: 0.3
+    crop_resize_prob: 0.3
+    crop_size_range: [192, 224]
+
+    color_jitter_prob: 0.3
     brightness: 0.2
     contrast: 0.2
     saturation: 0.2
     hue: 0.1
+
     grayscale_prob: 0.1
+
     blur_prob: 0.1
     blur_kernel_size: 1
 
