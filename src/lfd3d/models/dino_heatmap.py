@@ -384,10 +384,10 @@ class HeatmapSamplerModule(pl.LightningModule):
         dy = y_grid[None] - coords[:, 1, None, None]  # (B, 1, H, W)
 
         dist_sq = dx**2 + dy**2
-        target_dist = torch.exp(-dist_sq / (2 * sigma**2))
+        target_dist = -dist_sq / (2 * sigma**2)
 
-        # Normalize to probability distribution
-        return target_dist / target_dist.sum(dim=(2, 3), keepdim=True)
+        # return prob directly
+        return F.log_softmax(target_dist.flatten(1), dim=1)
 
     def forward(self, batch):
         _, gt = self.extract_gt_4_points(batch)
@@ -434,7 +434,7 @@ class HeatmapSamplerModule(pl.LightningModule):
             loss = F.cross_entropy(logits, target_idx)
         elif self.loss_type == "kl_div":  # Goes to NaN?
             B, _, H, W = outputs.shape
-            alpha = 0.5
+            alpha = 1 - 5e-4
 
             # Get target pixel coordinates
             gt_flat = gt_mask.flatten(1, 2)  # (B, H*W)
@@ -447,24 +447,22 @@ class HeatmapSamplerModule(pl.LightningModule):
                 [target_x, target_y], dim=1
             ).float()  # (B, 2) [x, y]
 
-            # 0.6 on one pixel + 4 other pixel with 0.1 prob
-            sigma = 0.5
+            sigma = 0.4 + torch.rand(1).item() * 0.2  # Random between 0.4- 0.6
 
             # Create smooth Gaussian target distribution
             target_dist = self.create_gaussian_target(
                 target_coords, H, W, sigma=sigma
-            )  # (B, H, W)
+            )  # (B, H*W) Probability sum = 1 for H*W
 
             # Flatten for softmax, then reshape back
             logits_flat = outputs.squeeze(1).flatten(1)  # (B, H*W)
-            pred_dist_flat = F.softmax(logits_flat, dim=1)  # (B, H*W)
-            pred_dist = pred_dist_flat.view(B, H, W)  # (B, H, W)
+            pred_dist_flat = F.log_softmax(logits_flat, dim=1)  # (B, H*W)
 
             # KL divergence loss (Forward KL + Reverse KL)
             loss = alpha * F.kl_div(
-                pred_dist.log(), target_dist, reduction="batchmean"
+                pred_dist_flat, target_dist, reduction="batchmean", log_target=True
             ) + (1 - alpha) * F.kl_div(
-                target_dist.log(), pred_dist, reduction="batchmean"
+                target_dist, pred_dist_flat, reduction="batchmean", log_target=True
             )
 
         elif self.loss_type == "mse":
