@@ -1,6 +1,6 @@
 import json
-
 import random
+
 import hydra
 import numpy as np
 import omegaconf
@@ -20,10 +20,12 @@ from lfd3d.utils.viz_utils import (
 )
 from tqdm import tqdm
 
+
 def random_episode(episode_idx, n):
     if n > len(episode_idx) or n is None:
         return episode_idx
     return random.sample(episode_idx, n)
+
 
 class EvalDataModule(pl.LightningDataModule):
     def __init__(self, dataloaders, tags, inference_cfg):
@@ -54,7 +56,7 @@ def get_eval_datamodule_episode(datamodule, inference_cfg, episode_num=None):
     #     eval_dataloaders.append(loader)
     #     eval_tags.append(f"val_{tag}")
 
-    random_id = random_episode(list(range(0,len(episode_idx))), episode_num)
+    random_id = random_episode(list(range(0, len(episode_idx))), episode_num)
     eval_dataloaders = [eval_dataloaders[i] for i in random_id]
     eval_tags = [eval_tags[i] for i in random_id]
     episode_idx = [episode_idx[i] for i in random_id]
@@ -174,7 +176,7 @@ def main(cfg):
         heatmaps = []
         raw_heatmaps = []
 
-        for pred, batch in tqdm(zip(preds, loader[i]), total=len(loader[i])):
+        for pred, batch in tqdm(zip(preds[i], loader[i]), total=len(loader[i])):
             rgb = batch["rgbs"][:, 0].cpu().numpy()  # B, H, W, 3
             batch_size = rgb.shape[0]
 

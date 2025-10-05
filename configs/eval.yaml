@@ -39,4 +39,4 @@ wandb:
   # nicely in the UI. But you might have a one-off eval or something.
   group: ???
 
-n_eval_episode: 1
+n_eval_episode: 3
