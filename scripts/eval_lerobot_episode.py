@@ -163,6 +163,10 @@ def main(cfg):
     for i, episode_id in enumerate(episode_idx):
         heatmaps = []
         raw_heatmaps = []
+        metrics = {"pix_dist": []}
+
+        if len(episode_idx) == 1:
+            preds = [preds]
 
         for pred, batch in tqdm(zip(preds[i], loader[i]), total=len(loader[i])):
             rgb = batch["rgbs"][:, 0].cpu().numpy()  # B, H, W, 3
@@ -171,6 +175,7 @@ def main(cfg):
             if cfg.model.name == "dino_heatmap":
                 pred_coord = pred["pred_coord"].cpu().numpy().astype(int)  # B, 2
                 raw_heatmap = pred["outputs"]  # B, 1, H, W
+                metrics["pix_dist"].append(pred["pix_dist"])
 
                 for j in range(batch_size):
                     heatmap_gray = generate_heatmap_from_points(
@@ -204,6 +209,10 @@ def main(cfg):
             f"{cfg.log_dir}/episode_{episode_id}_heatmap_{cfg.model.name}.mp4",
             frames=heatmaps,
         )
+
+        metrics["pix_dist"] = torch.cat(metrics["pix_dist"])
+        print("Mean pixel distance:", metrics["pix_dist"].mean().item())
+        print("Std. pixel distance:", metrics["pix_dist"].std().item())
 
 
 if __name__ == "__main__":

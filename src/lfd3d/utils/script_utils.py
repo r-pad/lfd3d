@@ -168,6 +168,7 @@ def load_checkpoint_config_from_wandb(
     run_id,
     keys_to_preserve=[
         "dataset.data_dir",
+        "dataset.repo_id",
         "dataset.cache_dir",
         "dataset.name",
         "dataset.additional_img_dir",

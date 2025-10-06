@@ -1,6 +1,6 @@
 # Common inference parameters
-batch_size: 8
-val_batch_size: 8
+batch_size: 16
+val_batch_size: 16
 n_samples_wta: 5 # number of samples for evaluating coverage
 save_wta_to_disk: False # save to disk for further examination
 

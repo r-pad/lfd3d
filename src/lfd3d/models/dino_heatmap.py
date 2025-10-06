@@ -816,10 +816,28 @@ class HeatmapSamplerModule(pl.LightningModule):
             pred_coord, outputs = self.predict(batch)
             pred_dict["pred_coord"] = pred_coord[self.prediction_type]["pred"]
             pred_dict["outputs"] = outputs
+
+        _, gt = self.extract_gt_4_points(batch)
+        gt_mask = self.compute_gt_mask(batch, gt)
+        # Find the pixel with value 1 in gt_mask and convert to 2D coords
+        gt_flat = gt_mask.flatten(1, 2)  # (B, H*W)
+        flat_idx = gt_flat.argmax(dim=1).squeeze()  # (B,) - flat index of target pixel
+        H, W = gt_mask.shape[1], gt_mask.shape[2]
+        y_coords = flat_idx // W
+        x_coords = flat_idx % W
+        target_idx = torch.stack([x_coords, y_coords], dim=1)  # (B, 2) [x, y]
+        pred_dict = calc_pix_metrics(
+            pred_dict,
+            target_idx,
+            pred_dict["pred_coord"].unsqueeze(1),
+            (H, W),
+        )
+
         self.predict_outputs[eval_tag].append(pred_dict)
         return {
             "pred_coord": pred_dict["pred_coord"],
             "outputs": outputs,
+            "pix_dist": pred_dict["pix_dist"],
         }
 
     def on_predict_epoch_end(self):
