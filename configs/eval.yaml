@@ -38,4 +38,3 @@ wandb:
   # The group ***should*** be the same as the training group (so it can be bundled)
   # nicely in the UI. But you might have a one-off eval or something.
   group: ???
-

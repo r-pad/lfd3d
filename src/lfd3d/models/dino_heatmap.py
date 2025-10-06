@@ -392,7 +392,9 @@ class HeatmapSamplerModule(pl.LightningModule):
 
     def forward(self, batch):
         _, gt = self.extract_gt_4_points(batch)
-        gt_mask, normalized_coords = self.compute_gt_mask(batch, gt)  # B, H, W  |  B, 2 in X Y format
+        gt_mask, normalized_coords = self.compute_gt_mask(
+            batch, gt
+        )  # B, H, W  |  B, 2 in X Y format
 
         text_embedding = batch["text_embed"]
 

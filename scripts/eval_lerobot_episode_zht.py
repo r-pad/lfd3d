@@ -1,6 +1,6 @@
 import json
-import random
 import os
+import random
 from datetime import datetime
 
 import hydra
@@ -22,6 +22,7 @@ from lfd3d.utils.viz_utils import (
 )
 from tqdm import tqdm
 
+
 def save_path(cfg, episode_id):
     date_str = datetime.now().strftime("%Y-%m-%d")
     time_str = datetime.now().strftime("%H-%M-%S")
@@ -34,6 +35,7 @@ def save_path(cfg, episode_id):
     os.makedirs(episode_dir, exist_ok=True)
 
     return episode_dir
+
 
 def random_episode(episode_idx, n):
     if n > len(episode_idx) or n is None:
