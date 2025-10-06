@@ -33,11 +33,11 @@ def create_checkpoint_callbacks(cfg, experiment_id):
         callback = ModelCheckpointExplicit(
             artifact_name=f"best_{name}_model-{experiment_id}",
             dirpath=cfg.lightning.checkpoint_dir,
-            filename=name + "{epoch}-{step}-{" + monitor + ":.3f}",
+            filename="{epoch}-{step}-{" + monitor + ":.3f}",
             monitor=monitor,
             mode=mode,
             save_weights_only=False,
-            save_last=True,
+            save_last=False,
         )
         callbacks.append(callback)
 
@@ -201,9 +201,8 @@ def main(cfg):
         model = apply_lora(model, cfg.lora)
 
     trainer.fit(model, datamodule=datamodule)
-    wandb.run.finish()  # Sometimes the job didn't finish after max epochs reaches
+    wandb.run.finish()
     wandb.finish()
-
 
 if __name__ == "__main__":
     main()

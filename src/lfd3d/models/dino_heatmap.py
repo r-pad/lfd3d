@@ -85,6 +85,7 @@ class SimplePixelNet(nn.Module):
         self.bn2 = nn.BatchNorm1d(128)
 
     def forward(self, x):
+        # remove translation since x is normalized
         # x: (B, N, input_dim) -> (B, input_dim, N)
         x = x.transpose(1, 2)
 
@@ -352,8 +353,8 @@ class HeatmapSamplerModule(pl.LightningModule):
         normalized_x_coords = x_coords / width
 
         return mask, torch.cat(
-            [normalized_y_coords, normalized_x_coords], dim=1
-        )  # B, 2
+            [normalized_x_coords, normalized_y_coords], dim=1
+        )  # B, 2 format in X Y
 
     def compute_normalized_gripper_width(self, batch, gripper_max_distance=0.1):
         device = batch["rgbs"].device
@@ -391,7 +392,7 @@ class HeatmapSamplerModule(pl.LightningModule):
 
     def forward(self, batch):
         _, gt = self.extract_gt_4_points(batch)
-        gt_mask, normalized_coords = self.compute_gt_mask(batch, gt)  # B, H, W  |  B, 2
+        gt_mask, normalized_coords = self.compute_gt_mask(batch, gt)  # B, H, W  |  B, 2 in X Y format
 
         text_embedding = batch["text_embed"]
 
