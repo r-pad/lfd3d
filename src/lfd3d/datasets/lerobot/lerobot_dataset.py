@@ -59,8 +59,10 @@ class RpadLeRobotDataset(BaseDataset):
         root: str | None = None,
         split: str = "train",
         split_indices: list = [],
+        augment_train: bool = True,
+        augment_cfg: dict = None,
     ):
-        super().__init__()
+        super().__init__(augment_train=augment_train, augment_cfg=augment_cfg)
         repo_id = dataset_cfg.repo_id
 
         self.lerobot_dataset = make_dataset(repo_id, root)
@@ -157,6 +159,10 @@ class RpadLeRobotDataset(BaseDataset):
         start_tracks, end_tracks = gripper_pcds[0], gripper_pcds[1]
         actual_caption = caption
 
+        rgbs, depths, start_tracks, end_tracks = self.apply_image_augmentation(
+            rgbs, depths, start_tracks, end_tracks, self.augment_cfg
+        )
+
         rgb_embed, text_embed = self.rgb_text_featurizer.compute_rgb_text_feat(
             rgbs[0], caption
         )
@@ -216,8 +222,18 @@ class RpadLeRobotDataModule(BaseDataModule):
         dataset_cfg,
         seed,
         val_episode_ratio=0.1,
+        augment_train=True,
+        augment_cfg=None,
     ):
-        super().__init__(batch_size, val_batch_size, num_workers, dataset_cfg, seed)
+        super().__init__(
+            batch_size,
+            val_batch_size,
+            num_workers,
+            dataset_cfg,
+            seed,
+            augment_train,
+            augment_cfg,
+        )
         self.val_tags = []  # populated in _generate_episode_splits
         # Subset of train to use for eval
         self.TRAIN_SUBSET_SIZE = 20
@@ -268,11 +284,12 @@ class RpadLeRobotDataModule(BaseDataModule):
         test_indices_dict = {}
         for data_source, episodes in val_episodes_by_source.items():
             val_indices_dict[data_source] = []
+            test_indices_dict[data_source] = {}
             for ep_idx in episodes:
                 start_frame = episode_data_index["from"][ep_idx].item()
                 end_frame = episode_data_index["to"][ep_idx].item()
                 val_indices_dict[data_source].extend(range(start_frame, end_frame))
-                test_indices_dict[ep_idx] = range(start_frame, end_frame)
+                test_indices_dict[data_source][ep_idx] = range(start_frame, end_frame)
 
         return train_indices, val_indices_dict, test_indices_dict
 
@@ -289,12 +306,13 @@ class RpadLeRobotDataModule(BaseDataModule):
             root=self.root,
             split="train",
             split_indices=self.train_indices,
+            augment_train=self.augment_train,
+            augment_cfg=self.augment_cfg,
         )
         for tag in self.val_tags:
             val_indices_for_tag = self.val_indices_dict.get(tag, [])
             if len(val_indices_for_tag) == 0:
                 continue
-            test_datasets = {}
 
             dataset_cfg = self.dataset_cfg.copy()
             self.val_datasets[tag] = RpadLeRobotDataset(
@@ -302,16 +320,11 @@ class RpadLeRobotDataModule(BaseDataModule):
                 root=self.root,
                 split="val",
                 split_indices=val_indices_for_tag,
+                augment_train=False,  # Never augment validation
+                augment_cfg=self.augment_cfg,
             )
-            for ep_id, indices in self.test_indices_dict.items():
-                test_datasets[ep_id] = RpadLeRobotDataset(
-                    dataset_cfg=dataset_cfg,
-                    root=self.root,
-                    split="test",
-                    split_indices=indices,
-                )
-
-            self.test_datasets[tag] = test_datasets
+            # Store metadata for lazy test dataset creation
+            self.test_datasets[tag] = {}
 
         if self.train_dataset.cache_dir:
             invalidating_cacher = td.cachers.ProbabilisticCacherWrapper(
@@ -324,31 +337,51 @@ class RpadLeRobotDataModule(BaseDataModule):
                 self.val_datasets[tag].cache(
                     td.cachers.HDF5(Path(self.train_dataset.cache_dir) / f"val_{tag}")
                 )
-                for ep_id, test_dataset in self.test_datasets[tag].items():
-                    test_dataset.cache(
-                        td.cachers.HDF5(
-                            Path(self.train_dataset.cache_dir) / f"test_{tag}"
-                        )
-                    )
+
+    def _create_test_dataset(self, ep_id, indices):
+        """Lazily create a test dataset for a single episode."""
+        dataset_cfg = self.dataset_cfg.copy()
+        test_dataset = RpadLeRobotDataset(
+            dataset_cfg=dataset_cfg,
+            root=self.root,
+            split="test",
+            split_indices=indices,
+        )
+        if self.train_dataset.cache_dir:
+            # Get the tag for this episode
+            tmp_dataset = make_dataset(self.dataset_cfg.repo_id, self.root)
+            start_frame = indices[0]
+            data_source = source_of_data(tmp_dataset[start_frame])
+            test_dataset.cache(
+                td.cachers.HDF5(
+                    Path(self.train_dataset.cache_dir) / f"test_{data_source}"
+                )
+            )
+        return test_dataset
 
     def test_dataloader(self):
         if not hasattr(self, "test_datasets"):
             raise AttributeError(
                 "test_datasets has not been set. Make sure to call setup() first."
             )
-        return {
-            tag: {
-                id: data.DataLoader(
-                    episode,
+
+        # Lazily create test datasets only when test_dataloader is called
+        test_dataloaders = {}
+        for tag in self.test_datasets.keys():
+            test_dataloaders[tag] = {}
+            for ep_id, indices in self.test_indices_dict[tag].items():
+                # Create dataset on-demand
+                episode_dataset = self._create_test_dataset(ep_id, list(indices))
+                test_dataloaders[tag][ep_id] = data.DataLoader(
+                    episode_dataset,
                     batch_size=self.val_batch_size,
                     shuffle=False,
                     num_workers=self.num_workers,
                     collate_fn=collate_pcd_fn,
                 )
-                for id, episode in dataset.items()
-            }
-            for tag, dataset in self.test_datasets.items()
-        }
+                break  # HACK: Eval only one episode
+
+        return test_dataloaders
 
 
 if __name__ == "__main__":

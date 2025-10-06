@@ -1,0 +1,9 @@
+defaults:
+  - base_train
+
+# Override augment_train to image for dino 3dgp
+augment_train: "image"
+
+epochs: 100
+batch_size: 128
+val_batch_size: 128

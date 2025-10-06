@@ -1,6 +1,7 @@
 import json
 import random
 
+import cv2
 import hydra
 import numpy as np
 import omegaconf
@@ -193,14 +194,25 @@ def main(cfg):
 
                     heatmaps.append(heatmap)
                     raw_heatmaps.append(raw_heatmap_viz)
+            elif cfg.model.name == "dino_3dgp":
+                pred_coord = pred["pred_coord"].cpu().numpy().astype(int)  # B, 2
 
+                for j in range(batch_size):
+                    heatmap_ = generate_heatmap_from_points(
+                        pred_coord[j], rgb[j].shape
+                    )  # H, W, 3
+                    alpha = 0.8
+                    # Blend with original image
+                    heatmap = cv2.addWeighted(rgb[j], 1 - alpha, heatmap_, alpha, 0)
+                    heatmaps.append(heatmap)
             else:
                 raise NotImplementedError
 
-        save_video(
-            f"{cfg.log_dir}/episode_{episode_id}_raw_heatmaps_{cfg.model.name}.mp4",
-            frames=raw_heatmaps,
-        )
+        if len(raw_heatmaps) > 0:
+            save_video(
+                f"{cfg.log_dir}/episode_{episode_id}_raw_heatmaps_{cfg.model.name}.mp4",
+                frames=raw_heatmaps,
+            )
         save_video(
             f"{cfg.log_dir}/episode_{episode_id}_heatmap_{cfg.model.name}.mp4",
             frames=heatmaps,
