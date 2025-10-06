@@ -40,3 +40,4 @@ lora:
 wandb:
   # Assume no group provided, we will create a default one.
   group: Null
+  name: Null

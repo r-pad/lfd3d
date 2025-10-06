@@ -21,11 +21,25 @@ parser.add_argument(
     help="Name of artifact (e.g. rmse, rmse_and_std_combi)",
 )
 
+parser.add_argument(
+    "--entity",
+    type=str,
+    default="r-pad",
+    help="Name of entity (e.g. rmse, rmse_and_std_combi)",
+)
+
+parser.add_argument(
+    "--project",
+    type=str,
+    default="lfd3d",
+    help="Name of project (e.g. rmse, rmse_and_std_combi)",
+)
+
 # Parse arguments
 args = parser.parse_args()
 
 # Initialize wandb and upload artifact
-wandb.init(entity="r-pad", project="lfd3d", id=args.run_id, resume="must")
+wandb.init(entity=args.entity, project=args.project, id=args.run_id, resume="must")
 
 artifact = wandb.Artifact(
     f"best_{args.artifact_type}_model-{args.run_id}", type="model"

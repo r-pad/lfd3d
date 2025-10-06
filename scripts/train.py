@@ -120,6 +120,7 @@ def main(cfg):
         job_type=cfg.job_type,
         save_code=True,  # This just has the main script.
         group=group,
+        name=cfg.wandb.name,
     )
 
     ######################################################################
@@ -200,7 +201,8 @@ def main(cfg):
         model = apply_lora(model, cfg.lora)
 
     trainer.fit(model, datamodule=datamodule)
-
+    wandb.run.finish()
+    wandb.finish()
 
 if __name__ == "__main__":
     main()

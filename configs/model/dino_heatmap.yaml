@@ -3,6 +3,7 @@ name: dino_heatmap
 # Model settings
 type: heatmap # Type of model
 use_text_embedding: True # If true, expects (siglip) text embedding to be provided as input
-use_gripper_pcd: True # Processes gripper pcd with a PointNet
+use_gripper_point: True # Processes gripper pcd with a PointNet
+gripper_point_type: "3D" # 2D, 1D
 
 dino_model: 'facebook/dinov2-base'
