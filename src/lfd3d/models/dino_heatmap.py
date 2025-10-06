@@ -504,31 +504,15 @@ class HeatmapSamplerModule(pl.LightningModule):
             n_samples_wta = self.run_cfg.n_samples_wta
             self.eval()
             with torch.no_grad():
-                all_pred_dict = []
-                for i in range(n_samples_wta):
-                    all_pred_dict.append(self.predict(batch))
-                pred_dict, heatmap = all_pred_dict[0]
-
-                # Store all sample preds for viz
-                pred_dict[self.prediction_type]["all_pred"] = [
-                    i[0][self.prediction_type]["pred"] for i in all_pred_dict
-                ]
-                pred_dict[self.prediction_type]["all_pred"] = torch.stack(
-                    pred_dict[self.prediction_type]["all_pred"]
-                ).permute(1, 0, 2)
+                pred_dict, heatmap = self.collect_multiple_predictions(
+                    batch, n_samples_wta
+                )
             self.train()  # Switch back to training mode
 
             _, gt = self.extract_gt_4_points(batch)
             gt_mask, _ = self.compute_gt_mask(batch, gt)
-            # Find the pixel with value 1 in gt_mask and convert to 2D coords
-            gt_flat = gt_mask.flatten(1, 2)  # (B, H*W)
-            flat_idx = gt_flat.argmax(
-                dim=1
-            ).squeeze()  # (B,) - flat index of target pixel
+            target_idx = self.extract_pixel_coords_from_mask(gt_mask)
             H, W = gt_mask.shape[1], gt_mask.shape[2]
-            y_coords = flat_idx // W
-            x_coords = flat_idx % W
-            target_idx = torch.stack([x_coords, y_coords], dim=1)  # (B, 2) [x, y]
 
             pred_dict = calc_pix_metrics(
                 pred_dict,
@@ -546,6 +530,33 @@ class HeatmapSamplerModule(pl.LightningModule):
 
         self.train_outputs.append(train_metrics)
         return loss
+
+    def collect_multiple_predictions(self, batch, n_samples):
+        """
+        Collect multiple predictions for winner-takes-all evaluation.
+
+        Args:
+            batch: Input batch
+            n_samples: Number of samples to collect
+
+        Returns:
+            pred_dict: Prediction dictionary with all_pred key
+            heatmap: First prediction's heatmap
+        """
+        all_pred_dict = []
+        for i in range(n_samples):
+            all_pred_dict.append(self.predict(batch))
+        pred_dict, heatmap = all_pred_dict[0]
+
+        # Store all sample preds for viz
+        pred_dict[self.prediction_type]["all_pred"] = [
+            i[0][self.prediction_type]["pred"] for i in all_pred_dict
+        ]
+        pred_dict[self.prediction_type]["all_pred"] = torch.stack(
+            pred_dict[self.prediction_type]["all_pred"]
+        ).permute(1, 0, 2)
+
+        return pred_dict, heatmap
 
     @torch.no_grad()
     def predict(self, batch, progress=False):
@@ -644,11 +655,8 @@ class HeatmapSamplerModule(pl.LightningModule):
         # Get GT pixel coordinates
         _, gt = self.extract_gt_4_points(batch)
         gt_mask, _ = self.compute_gt_mask(batch, gt)
-        gt_flat = gt_mask.flatten(1, 2)
-        flat_idx = gt_flat.argmax(dim=1)
-        H, W = gt_mask.shape[1], gt_mask.shape[2]
-        gt_y = (flat_idx[viz_idx] // W).item()
-        gt_x = (flat_idx[viz_idx] % W).item()
+        target_coords = self.extract_pixel_coords_from_mask(gt_mask)
+        gt_x, gt_y = target_coords[viz_idx][0].item(), target_coords[viz_idx][1].item()
 
         # Overlay pixel coords on images
         init_rgb_pix = rgb_init.copy()
@@ -732,28 +740,12 @@ class HeatmapSamplerModule(pl.LightningModule):
         n_samples_wta = self.run_cfg.n_samples_wta
         self.eval()
         with torch.no_grad():
-            all_pred_dict = []
-            for i in range(n_samples_wta):
-                all_pred_dict.append(self.predict(batch))
-            pred_dict, heatmap = all_pred_dict[0]
-
-            # Store all sample preds for viz
-            pred_dict[self.prediction_type]["all_pred"] = [
-                i[0][self.prediction_type]["pred"] for i in all_pred_dict
-            ]
-            pred_dict[self.prediction_type]["all_pred"] = torch.stack(
-                pred_dict[self.prediction_type]["all_pred"]
-            ).permute(1, 0, 2)
+            pred_dict, heatmap = self.collect_multiple_predictions(batch, n_samples_wta)
 
         _, gt = self.extract_gt_4_points(batch)
         gt_mask, _ = self.compute_gt_mask(batch, gt)
-        # Find the pixel with value 1 in gt_mask and convert to 2D coords
-        gt_flat = gt_mask.flatten(1, 2)  # (B, H*W)
-        flat_idx = gt_flat.argmax(dim=1).squeeze(1)  # (B,) - flat index of target pixel
+        target_idx = self.extract_pixel_coords_from_mask(gt_mask)
         H, W = gt_mask.shape[1], gt_mask.shape[2]
-        y_coords = flat_idx // W
-        x_coords = flat_idx % W
-        target_idx = torch.stack([x_coords, y_coords], dim=1)  # (B, 2) [x, y]
 
         pred_dict = calc_pix_metrics(
             pred_dict,
@@ -818,14 +810,10 @@ class HeatmapSamplerModule(pl.LightningModule):
             pred_dict["outputs"] = outputs
 
         _, gt = self.extract_gt_4_points(batch)
-        gt_mask = self.compute_gt_mask(batch, gt)
-        # Find the pixel with value 1 in gt_mask and convert to 2D coords
-        gt_flat = gt_mask.flatten(1, 2)  # (B, H*W)
-        flat_idx = gt_flat.argmax(dim=1).squeeze()  # (B,) - flat index of target pixel
+        gt_mask, _ = self.compute_gt_mask(batch, gt)
+        target_idx = self.extract_pixel_coords_from_mask(gt_mask)
         H, W = gt_mask.shape[1], gt_mask.shape[2]
-        y_coords = flat_idx // W
-        x_coords = flat_idx % W
-        target_idx = torch.stack([x_coords, y_coords], dim=1)  # (B, 2) [x, y]
+
         pred_dict = calc_pix_metrics(
             pred_dict,
             target_idx,
