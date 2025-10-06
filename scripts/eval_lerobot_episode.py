@@ -1,5 +1,4 @@
 import json
-import random
 
 import cv2
 import hydra
@@ -22,12 +21,6 @@ from lfd3d.utils.viz_utils import (
 from tqdm import tqdm
 
 
-def random_episode(episode_idx, n):
-    if n > len(episode_idx) or n is None:
-        return episode_idx
-    return random.sample(episode_idx, n)
-
-
 class EvalDataModule(pl.LightningDataModule):
     def __init__(self, dataloaders, tags, inference_cfg):
         super().__init__()
@@ -43,7 +36,7 @@ class EvalDataModule(pl.LightningDataModule):
         return self.dataloaders
 
 
-def get_eval_datamodule_episode(datamodule, inference_cfg, episode_num=None):
+def get_eval_datamodule_episode(datamodule, inference_cfg):
     tags = datamodule.val_tags
     eval_dataloaders, eval_tags, episode_idx = [], [], []
 
@@ -56,11 +49,6 @@ def get_eval_datamodule_episode(datamodule, inference_cfg, episode_num=None):
     # for i, (tag, loader) in enumerate(datamodule.val_dataloader().items()):
     #     eval_dataloaders.append(loader)
     #     eval_tags.append(f"val_{tag}")
-
-    random_id = random_episode(list(range(0, len(episode_idx))), episode_num)
-    eval_dataloaders = [eval_dataloaders[i] for i in random_id]
-    eval_tags = [eval_tags[i] for i in random_id]
-    episode_idx = [episode_idx[i] for i in random_id]
 
     eval_datamodule = EvalDataModule(eval_dataloaders, eval_tags, inference_cfg)
     return episode_idx, eval_datamodule
@@ -159,16 +147,15 @@ def main(cfg):
 
     # Upload output to wandb
     wandb.init(
-        entity=cfg.wandb.entity,
-        project=cfg.wandb.project,
+        entity="r-pad",
+        project="lfd3d",
         id=cfg.checkpoint.run_id,
         resume="must",
     )
 
     episode_idx, eval_datamodule = get_eval_datamodule_episode(
-        datamodule, cfg.inference, cfg.n_eval_episode
+        datamodule, cfg.inference
     )
-    print(f"Total episode:{episode_idx}")
     preds = trainer.predict(model, datamodule=eval_datamodule)
     preds_dict = {tag: {} for tag in eval_datamodule.eval_tags}
 
