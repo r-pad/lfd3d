@@ -371,6 +371,24 @@ class HeatmapSamplerModule(pl.LightningModule):
 
         return gripper_width / gripper_max_distance
 
+    def extract_pixel_coords_from_mask(self, gt_mask):
+        """
+        Extract 2D pixel coordinates from a binary mask.
+
+        Args:
+            gt_mask: (B, H, W, C) binary mask with 1 at target location
+
+        Returns:
+            target_idx: (B, 2) pixel coordinates [x, y]
+        """
+        gt_flat = gt_mask.flatten(1, 2)  # (B, H*W, C)
+        flat_idx = gt_flat.argmax(dim=1).squeeze()  # (B,) - flat index of target pixel
+        H, W = gt_mask.shape[1], gt_mask.shape[2]
+        y_coords = flat_idx // W
+        x_coords = flat_idx % W
+        target_idx = torch.stack([x_coords, y_coords], dim=1)  # (B, 2) [x, y]
+        return target_idx
+
     def create_gaussian_target(self, coords, H, W, sigma=0.5):
         """Create smooth Gaussian blob around target pixel coordinates"""
         device = coords.device

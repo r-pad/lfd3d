@@ -1,4 +1,11 @@
 defaults:
   - base_train
 
-# All values use defaults from base_train
+# ModelCheckpoint configurations
+checkpoints:
+  rmse:
+    monitor: val/rmse
+    mode: min
+  rmse_and_std_combi:
+    monitor: val/rmse_and_std_combi
+    mode: min
