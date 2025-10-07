@@ -163,7 +163,7 @@ def main(cfg):
     for i, episode_id in enumerate(episode_idx):
         heatmaps = []
         raw_heatmaps = []
-        metrics = {"pix_dist": []}
+        metrics = {"pix_dist": [], "rmse": []}
 
         if len(episode_idx) == 1:
             preds = [preds]
@@ -186,8 +186,10 @@ def main(cfg):
 
                     heatmaps.append(heatmap)
                     raw_heatmaps.append(raw_heatmap_viz)
-            elif cfg.model.name == "dino_3dgp":
+            elif cfg.model.name in ["dino_3dgp", "articubot"]:
                 pred_coord = pred["pred_coord"].cpu().numpy().astype(int)  # B, 2
+                metrics["pix_dist"].append(pred["pix_dist"])
+                metrics["rmse"].append(pred["rmse"])
 
                 for j in range(batch_size):
                     heatmap_ = generate_heatmap_from_points(
@@ -210,9 +212,11 @@ def main(cfg):
             frames=heatmaps,
         )
 
-        metrics["pix_dist"] = torch.cat(metrics["pix_dist"])
-        print("Mean pixel distance:", metrics["pix_dist"].mean().item())
-        print("Std. pixel distance:", metrics["pix_dist"].std().item())
+        for key in metrics:
+            if len(metrics[key]) != 0:
+                metric_val = torch.cat(metrics[key])
+                print(f"Mean {key}:", metric_val.mean().item())
+                print(f"Std. {key}:", metric_val.std().item())
 
 
 if __name__ == "__main__":
