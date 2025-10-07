@@ -381,7 +381,6 @@ class RpadLeRobotDataModule(BaseDataModule):
                     num_workers=self.num_workers,
                     collate_fn=collate_pcd_fn,
                 )
-                break  # HACK: Eval only one episode
 
         return test_dataloaders
 

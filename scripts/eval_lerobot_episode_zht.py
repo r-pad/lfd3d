@@ -26,7 +26,7 @@ from tqdm import tqdm
 def save_path(cfg, episode_id):
     date_str = datetime.now().strftime("%Y-%m-%d")
     time_str = datetime.now().strftime("%H-%M-%S")
-    date_dir = os.path.join(cfg.log_dir, f"eval_{cfg.dataset.name}", date_str)
+    date_dir = os.path.join(cfg.log_dir, f"eval_{cfg.dataset.name}_episodes", date_str)
     time_dir = os.path.join(date_dir, time_str)
     episode_dir = os.path.join(time_dir, f"episode_{episode_id}")
 
@@ -38,7 +38,7 @@ def save_path(cfg, episode_id):
 
 
 def random_episode(episode_idx, n):
-    if n > len(episode_idx) or n is None:
+    if n > len(episode_idx):
         return episode_idx
     return random.sample(episode_idx, n)
 
@@ -58,9 +58,10 @@ class EvalDataModule(pl.LightningDataModule):
         return self.dataloaders
 
 
-def get_eval_datamodule_episode(datamodule, inference_cfg, episode_num=None):
+def get_eval_datamodule_episode(datamodule, inference_cfg):
     tags = datamodule.val_tags
     eval_dataloaders, eval_tags, episode_idx = [], [], []
+    episode_num = inference_cfg.n_eval_episode if "n_eval_episode" in inference_cfg.keys() else 1
 
     for i, (tag, loader) in enumerate(datamodule.test_dataloader().items()):
         eval_dataloaders.extend(loader.values())
@@ -181,7 +182,7 @@ def main(cfg):
     )
 
     episode_idx, eval_datamodule = get_eval_datamodule_episode(
-        datamodule, cfg.inference, cfg.n_eval_episode
+        datamodule, cfg.inference
     )
     print(f"Total episode:{episode_idx}")
     preds = trainer.predict(model, datamodule=eval_datamodule)
