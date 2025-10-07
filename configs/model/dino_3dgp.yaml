@@ -4,6 +4,7 @@ name: dino_3dgp
 type: cross_displacement # Type of model
 use_text_embedding: True # If true, expects (siglip) text embedding to be provided as input and uses as another token
 use_gripper_token: True # Adds an additional gripper token
+use_source_token: True # If true, adds a learnable token for human/robot data source
 num_transformer_layers: 4 # num blocks for self atttention
 dino_model: 'facebook/dinov2-base'
 
