@@ -30,7 +30,7 @@ checkpoint:
   reference: ${wandb.entity}/${wandb.project}/best_${checkpoint.type}_model-${checkpoint.run_id}:best
 
 resources:
-  num_workers: 4
+  num_workers: 32
   gpus:
     - 0
 

@@ -74,6 +74,8 @@ class RpadLeRobotDataset(BaseDataset):
         self.max_depth = dataset_cfg.max_depth
         self.split = split
 
+        if len(split_indices) == 0:
+            split_indices = list(range(len(self.lerobot_dataset)))
         self.split_indices = split_indices
         self.color_key = dataset_cfg.color_key
         self.depth_key = dataset_cfg.depth_key
@@ -159,8 +161,8 @@ class RpadLeRobotDataset(BaseDataset):
         start_tracks, end_tracks = gripper_pcds[0], gripper_pcds[1]
         actual_caption = caption
 
-        rgbs, depths, start_tracks, end_tracks = self.apply_image_augmentation(
-            rgbs, depths, start_tracks, end_tracks, self.augment_cfg
+        rgbs, depths, start_tracks, end_tracks, K_ = self.apply_image_augmentation(
+            rgbs, depths, start_tracks, end_tracks, K_, self.augment_cfg
         )
 
         rgb_embed, text_embed = self.rgb_text_featurizer.compute_rgb_text_feat(
@@ -389,8 +391,7 @@ if __name__ == "__main__":
 
     cfg_dict = {
         "dataset": {
-            "name": "rpadFoxglove",
-            "data_dir": None,
+            "name": "rpadLerobot",
             "cache_dir": None,
             "cache_invalidation_rate": 0.05,
             "train_size": None,
@@ -406,6 +407,9 @@ if __name__ == "__main__":
                 "fps_num_points": [4096, 8192],
                 "voxel_size": [0.01, 0.02],
             },
+            "color_key": "observation.images.cam_azure_kinect.color",
+            "depth_key": "observation.images.cam_azure_kinect.transformed_depth",
+            "gripper_pcd_key": "observation.points.gripper_pcds",
             "data_name": "0627",
             "additional_img_dir": None,
             "data_sources": ["aloha"],
@@ -413,8 +417,13 @@ if __name__ == "__main__":
             "rgb_feat": False,
             "use_full_text": True,
             "use_intermediate_frames": False,
-            "use_gemini_subgoals": False,
-            "repo_id": "beisner/aloha_plate_placement_goal",
+            "use_subgoals": False,
+            "repo_id": [
+                "sriramsk/fold_onesie_20250831_subsampled_heatmapGoal",
+                "sriramsk/fold_shirt_20250918_subsampled_heatmapGoal",
+                "sriramsk/fold_towel_20250919_subsampled_heatmapGoal",
+                "sriramsk/fold_bottoms_20250919_human_heatmapGoal",
+            ],
         },
         "model": {
             "name": "articubot",
@@ -467,7 +476,7 @@ if __name__ == "__main__":
         "lora": {"enable": False, "rank": 4, "target_modules": "all", "dropout": 0.1},
     }
     cfg = OmegaConf.create(cfg_dict)
-    lr_dset = RpadLeRobotDataset(dataset_cfg=cfg.dataset)
+    lr_dset = RpadLeRobotDataset(dataset_cfg=cfg.dataset, augment_train=False)
     item = lr_dset[0]
 
     datamodule = RpadLeRobotDataModule(

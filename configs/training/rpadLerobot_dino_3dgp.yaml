@@ -7,3 +7,12 @@ augment_train: "image"
 epochs: 100
 batch_size: 128
 val_batch_size: 128
+
+# ModelCheckpoint configurations
+checkpoints:
+  rmse:
+    monitor: val/rmse
+    mode: min
+  rmse_and_std_combi:
+    monitor: val/rmse_and_std_combi
+    mode: min

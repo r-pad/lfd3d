@@ -7,3 +7,12 @@ batch_size: 16
 val_batch_size: 16
 check_val_every_n_epochs: 25
 additional_train_logging_period: 300
+
+# ModelCheckpoint configurations
+checkpoints:
+  rmse:
+    monitor: val/rmse
+    mode: min
+  rmse_and_std_combi:
+    monitor: val/rmse_and_std_combi
+    mode: min

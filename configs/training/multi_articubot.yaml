@@ -3,3 +3,12 @@ defaults:
 
 epochs: 1000
 check_val_every_n_epochs: 25
+
+# ModelCheckpoint configurations
+checkpoints:
+  rmse:
+    monitor: val/rmse
+    mode: min
+  rmse_and_std_combi:
+    monitor: val/rmse_and_std_combi
+    mode: min

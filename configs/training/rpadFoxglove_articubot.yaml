@@ -2,3 +2,12 @@ defaults:
   - base_train
 
 epochs: 100
+
+# ModelCheckpoint configurations
+checkpoints:
+  rmse:
+    monitor: val/rmse
+    mode: min
+  rmse_and_std_combi:
+    monitor: val/rmse_and_std_combi
+    mode: min

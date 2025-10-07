@@ -19,6 +19,7 @@ from diffusers import get_cosine_schedule_with_warmup
 from pytorch3d.structures import Pointclouds
 from torch import nn, optim
 
+from lfd3d.models.dino_heatmap import calc_pix_metrics
 from lfd3d.models.tax3d import calc_pcd_metrics
 from lfd3d.utils.viz_utils import (
     get_action_anchor_pcd,
@@ -744,9 +745,14 @@ class ArticubotNetwork(nn.Module):
             robot_output = self.robot_head(robot_features)  # (B, num_classes, N)
 
             # Create final output by selecting appropriate head for each batch item
-            human_mask = torch.tensor([ds == "human" for ds in data_source],
-                                    device=human_output.device, dtype=torch.bool)
-            human_mask = human_mask.unsqueeze(1).unsqueeze(2)  # [B, 1, 1] for broadcasting
+            human_mask = torch.tensor(
+                [ds == "human" for ds in data_source],
+                device=human_output.device,
+                dtype=torch.bool,
+            )
+            human_mask = human_mask.unsqueeze(1).unsqueeze(
+                2
+            )  # [B, 1, 1] for broadcasting
             x = torch.where(human_mask, human_output, robot_output)
         else:
             x = self.conv2(backbone_features)  # (B, num_classes, N)
@@ -914,6 +920,45 @@ class GoalRegressionModule(pl.LightningModule):
         init = torch.cat([init_primary_points, init_extra_point[:, None, :]], dim=1)
         return init, gt
 
+    def project_3d_to_2d(self, points_3d, intrinsics, img_shape=(224, 224)):
+        """
+        Project 3D points to 2D pixel coordinates.
+
+        Args:
+            points_3d: (B, N, 3) or (B, N, M, 3) 3D points
+            intrinsics: (B, 3, 3) camera intrinsics
+            img_shape: (H, W) image shape for clamping
+
+        Returns:
+            pixel_coords: (B, N, 2) or (B, N, M, 2) pixel coordinates [x, y]
+        """
+        H, W = img_shape
+        original_shape = points_3d.shape
+
+        # Reshape to (B, -1, 3) for batch processing
+        if len(original_shape) == 4:
+            B, N, M, _ = original_shape
+            points_3d = points_3d.reshape(B, N * M, 3)
+
+        fx = intrinsics[:, 0, 0].unsqueeze(1)  # (B, 1)
+        fy = intrinsics[:, 1, 1].unsqueeze(1)
+        cx = intrinsics[:, 0, 2].unsqueeze(1)
+        cy = intrinsics[:, 1, 2].unsqueeze(1)
+
+        # Project: [x, y, z] -> [u, v]
+        # Add epsilon to avoid division by zero
+        z = points_3d[:, :, 2].clamp(min=1e-6)
+        u = (points_3d[:, :, 0] * fx / z + cx).clamp(0, W - 1)  # (B, N*M)
+        v = (points_3d[:, :, 1] * fy / z + cy).clamp(0, H - 1)  # (B, N*M)
+
+        pixel_coords = torch.stack([u, v], dim=2)  # (B, N*M, 2)
+
+        # Reshape back to original shape
+        if len(original_shape) == 4:
+            pixel_coords = pixel_coords.reshape(B, N, M, 2)
+
+        return pixel_coords
+
     def get_weighted_displacement(self, scene_pcd, outputs, padding_mask):
         batch_size, num_points, _ = scene_pcd.shape
         scene_pcd = scene_pcd[:, :, None, :3]
@@ -1063,7 +1108,7 @@ class GoalRegressionModule(pl.LightningModule):
         outputs = self.network(
             scene_pcd.permute(0, 2, 1),
             text_embedding=text_embedding,
-            data_source=data_sources
+            data_source=data_sources,
         )
 
         init, gt = self.extract_gt_4_points(batch)
@@ -1146,7 +1191,7 @@ class GoalRegressionModule(pl.LightningModule):
         outputs = self.network(
             scene_pcd.permute(0, 2, 1),
             text_embedding=text_embedding,
-            data_source=data_sources
+            data_source=data_sources,
         )
         init, gt = self.extract_gt_4_points(batch)
 
@@ -1391,6 +1436,29 @@ class GoalRegressionModule(pl.LightningModule):
                 pcd_std,
                 padding_mask,
             )
+
+            # Calculate pixel metrics
+            intrinsics = batch["intrinsics"]
+            H, W = batch["rgbs"].shape[2:4]
+
+            # Project GT to 2D (take first point only)
+            gt_2d = (
+                self.project_3d_to_2d(gt[:, :1, :], intrinsics, (H, W))
+                .squeeze(1)
+                .long()
+            )  # (B, 2)
+
+            # Project all predictions to 2D (take first point only)
+            all_pred_3d = (
+                init[:, None, :, :] + pred_dict[self.prediction_type]["all_pred"]
+            )  # (B, N, 4, 3)
+            all_pred_2d = (
+                self.project_3d_to_2d(all_pred_3d[:, :, :1, :], intrinsics, (H, W))
+                .squeeze(2)
+                .long()
+            )  # (B, N, 2)
+
+            pred_dict = calc_pix_metrics(pred_dict, gt_2d, all_pred_2d, (H, W))
             train_metrics.update(pred_dict)
 
             if self.trainer.is_global_zero:
@@ -1421,6 +1489,14 @@ class GoalRegressionModule(pl.LightningModule):
             log_dictionary["train/chamfer_dist"] = mean_metric("chamfer_dist")
             log_dictionary["train/wta_chamfer_dist"] = mean_metric("wta_chamfer_dist")
             log_dictionary["train/sample_std"] = mean_metric("sample_std")
+            log_dictionary["train/pix_dist"] = mean_metric("pix_dist")
+            log_dictionary["train/wta_pix_dist"] = mean_metric("wta_pix_dist")
+            log_dictionary["train/normalized_pix_dist"] = mean_metric(
+                "normalized_pix_dist"
+            )
+            log_dictionary["train/wta_normalized_pix_dist"] = mean_metric(
+                "wta_normalized_pix_dist"
+            )
 
         ####################################################
         # logging training metrics
@@ -1478,6 +1554,27 @@ class GoalRegressionModule(pl.LightningModule):
             pcd_std,
             padding_mask,
         )
+
+        # Calculate pixel metrics
+        intrinsics = batch["intrinsics"]
+        H, W = batch["rgbs"].shape[2:4]
+
+        # Project GT to 2D (take first point only)
+        gt_2d = (
+            self.project_3d_to_2d(gt[:, :1, :], intrinsics, (H, W)).squeeze(1).long()
+        )  # (B, 2)
+
+        # Project all predictions to 2D (take first point only)
+        all_pred_3d = (
+            init[:, None, :, :] + pred_dict[self.prediction_type]["all_pred"]
+        )  # (B, N, 4, 3)
+        all_pred_2d = (
+            self.project_3d_to_2d(all_pred_3d[:, :, :1, :], intrinsics, (H, W))
+            .squeeze(2)
+            .long()
+        )  # (B, N, 2)
+
+        pred_dict = calc_pix_metrics(pred_dict, gt_2d, all_pred_2d, (H, W))
         self.val_outputs[val_tag].append(pred_dict)
 
         ####################################################
@@ -1500,6 +1597,10 @@ class GoalRegressionModule(pl.LightningModule):
             "chamfer_dist": [],
             "wta_chamfer_dist": [],
             "sample_std": [],
+            "pix_dist": [],
+            "wta_pix_dist": [],
+            "normalized_pix_dist": [],
+            "wta_normalized_pix_dist": [],
         }
 
         for val_tag in self.trainer.datamodule.val_tags:
@@ -1579,16 +1680,49 @@ class GoalRegressionModule(pl.LightningModule):
             pcd_std,
             padding_mask,
         )
+
+        # Calculate pixel metrics
+        intrinsics = batch["intrinsics"]
+        H, W = batch["rgbs"].shape[2:4]
+
+        # Project GT to 2D (take first point only)
+        gt_2d = (
+            self.project_3d_to_2d(gt[:, :1, :], intrinsics, (H, W)).squeeze(1).long()
+        )  # (B, 2)
+
+        # Project all predictions to 2D (take first point only)
+        all_pred_3d = (
+            init[:, None, :, :] + pred_dict[self.prediction_type]["all_pred"]
+        )  # (B, N, 4, 3)
+        all_pred_2d = (
+            self.project_3d_to_2d(all_pred_3d[:, :, :1, :], intrinsics, (H, W))
+            .squeeze(2)
+            .long()
+        )  # (B, N, 2)
+
+        pred_dict = calc_pix_metrics(pred_dict, gt_2d, all_pred_2d, (H, W))
         self.predict_outputs[eval_tag].append(pred_dict)
         self.predict_weighted_displacements[eval_tag].append(
             weighted_displacement.cpu()
         )
 
+        # Get pred_coord for visualization (first sample, first 3 points)
+        pred_3d = (
+            init + pred_dict[self.prediction_type]["pred"]
+        )  # (B, 4, 3) absolute positions
+        pred_3d_first3 = pred_3d[:, :3, :]  # (B, 3, 3) first 3 points
+        pred_coord_viz = self.project_3d_to_2d(
+            pred_3d_first3, intrinsics, (H, W)
+        ).long()  # (B, 3, 2)
+
         return {
+            "pred_coord": pred_coord_viz,
             "rmse": pred_dict["rmse"],
             "chamfer_dist": pred_dict["chamfer_dist"],
             "wta_rmse": pred_dict["wta_rmse"],
             "wta_chamfer_dist": pred_dict["wta_chamfer_dist"],
+            "pix_dist": pred_dict["pix_dist"],
+            "wta_pix_dist": pred_dict["wta_pix_dist"],
             "vid_name": batch["vid_name"],
             "caption": batch["caption"],
             "actual_caption": batch["actual_caption"],
