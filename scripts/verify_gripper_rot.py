@@ -13,7 +13,7 @@ cfg_dict = {
         "num_points": 8192,
         "max_depth": 1.5,
         "normalize": False,
-        "augment_train": False,
+        "augment_train": None,
         "augment_cfg": {
             "augment_prob": 0.75,
             "augment_transform": True,
@@ -89,7 +89,7 @@ cfg_dict = {
     "lora": {"enable": False, "rank": 4, "target_modules": "all", "dropout": 0.1},
 }
 cfg = OmegaConf.create(cfg_dict)
-lr_dset = RpadLeRobotDataset(dataset_cfg=cfg.dataset, augment_train=False)
+lr_dset = RpadLeRobotDataset(dataset_cfg=cfg.dataset, augment_train=None)
 item = lr_dset[0]
 
 

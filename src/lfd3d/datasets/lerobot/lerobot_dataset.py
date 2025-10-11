@@ -59,7 +59,7 @@ class RpadLeRobotDataset(BaseDataset):
         root: str | None = None,
         split: str = "train",
         split_indices: list = [],
-        augment_train: bool = True,
+        augment_train: str = "image",
         augment_cfg: dict = None,
     ):
         super().__init__(augment_train=augment_train, augment_cfg=augment_cfg)
@@ -224,7 +224,7 @@ class RpadLeRobotDataModule(BaseDataModule):
         dataset_cfg,
         seed,
         val_episode_ratio=0.1,
-        augment_train=True,
+        augment_train="image",
         augment_cfg=None,
     ):
         super().__init__(
@@ -322,7 +322,7 @@ class RpadLeRobotDataModule(BaseDataModule):
                 root=self.root,
                 split="val",
                 split_indices=val_indices_for_tag,
-                augment_train=False,  # Never augment validation
+                augment_train=None,  # Never augment validation
                 augment_cfg=self.augment_cfg,
             )
             # Store metadata for lazy test dataset creation
@@ -398,7 +398,7 @@ if __name__ == "__main__":
             "num_points": 8192,
             "max_depth": 1.5,
             "normalize": False,
-            "augment_train": False,
+            "augment_train": None,
             "augment_cfg": {
                 "augment_prob": 0.75,
                 "augment_transform": True,
@@ -475,7 +475,7 @@ if __name__ == "__main__":
         "lora": {"enable": False, "rank": 4, "target_modules": "all", "dropout": 0.1},
     }
     cfg = OmegaConf.create(cfg_dict)
-    lr_dset = RpadLeRobotDataset(dataset_cfg=cfg.dataset, augment_train=False)
+    lr_dset = RpadLeRobotDataset(dataset_cfg=cfg.dataset, augment_train=None)
     item = lr_dset[0]
 
     datamodule = RpadLeRobotDataModule(

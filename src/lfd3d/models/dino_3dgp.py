@@ -77,8 +77,9 @@ class Dino3DGPNetwork(nn.Module):
     DINOv2 + 3D positional encoding + Transformer for 3D goal prediction
     Architecture:
     - Image tokens: DINOv2 patches with 3D PE (x,y,z from depth)
-    - Language token: SigLIP embedding
-    - Gripper token: 6DoF pose + gripper width
+    - Language token: SigLIP embedding (optional)
+    - Gripper token: 6DoF pose + gripper width (optional)
+    - Source token: learnable embedding for human/robot (optional)
     - Transformer: self-attention blocks
     - Output: 256 GMM components, each predicting 13-dim (4×3 coords + 1 weight)
     """
@@ -133,7 +134,7 @@ class Dino3DGPNetwork(nn.Module):
                 nn.Linear(256, self.hidden_dim),
             )
 
-        # Gripper token encoder (6DoF pose + gripper width = 7 dims)
+        # Gripper token encoder (6DoF pose + gripper width = xyz + 6D rot + width = 10dims)
         self.use_gripper_token = model_cfg.use_gripper_token
         if self.use_gripper_token:
             self.gripper_encoder = nn.Sequential(
@@ -150,7 +151,7 @@ class Dino3DGPNetwork(nn.Module):
             self.source_embeddings = nn.Embedding(2, self.hidden_dim)
 
         # Transformer blocks (self-attention only)
-        self.num_layers = model_cfg.get("num_transformer_layers", 4)
+        self.num_layers = model_cfg.num_transformer_layers
         self.transformer_blocks = nn.ModuleList(
             [
                 nn.TransformerEncoderLayer(
@@ -176,7 +177,6 @@ class Dino3DGPNetwork(nn.Module):
             depth: (B, H, W) depth map
         Returns:
             patch_coords: (B, num_patches, 3) 3D coordinates
-            valid_mask: (B, num_patches) mask for valid depth
         """
         B = depth.shape[0]
         device = depth.device
@@ -184,7 +184,6 @@ class Dino3DGPNetwork(nn.Module):
         # Calculate patch grid size (DINOv2 uses 16×16 patches for 224×224 image)
         h_patches = H // self.patch_size
         w_patches = W // self.patch_size
-        num_patches = h_patches * w_patches
 
         # Get center pixel of each patch
         y_centers = (
@@ -243,11 +242,12 @@ class Dino3DGPNetwork(nn.Module):
             image: (B, 3, H, W) RGB image
             depth: (B, H, W) depth map
             intrinsics: (B, 3, 3) camera intrinsics
-            gripper_token: (B, 7) [6DoF pose + gripper width]
+            gripper_token: (B, 10) [6DoF pose (3 pos + 6 rot6d) + gripper width]
             text_embedding: (B, 1152) SigLIP embedding
             source: list of strings ["human" or "aloha"]
         Returns:
             outputs: (B, 256, 13) GMM parameters
+            patch_coords: (B, 256, 3) patch center 3D coordinates
         """
         B, _, H, W = image.shape
 

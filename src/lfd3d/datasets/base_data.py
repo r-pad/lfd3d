@@ -18,7 +18,7 @@ from lfd3d.utils.data_utils import collate_pcd_fn
 
 
 class BaseDataset(td.Dataset):
-    def __init__(self, augment_train=True, augment_cfg=None):
+    def __init__(self, augment_train="image", augment_cfg=None):
         super().__init__()
         # Target shape of images (same as DINOv2)
         self.target_shape = 224
