@@ -142,6 +142,13 @@ class Dino3DGPNetwork(nn.Module):
                 nn.Linear(128, self.hidden_dim),
             )
 
+        # Source token (learnable embeddings for human/robot)
+        self.use_source_token = model_cfg.use_source_token
+        if self.use_source_token:
+            # Learnable embeddings: 0 = human, 1 = robot
+            self.source_to_idx = {"human": 0, "aloha": 1}
+            self.source_embeddings = nn.Embedding(2, self.hidden_dim)
+
         # Transformer blocks (self-attention only)
         self.num_layers = model_cfg.get("num_transformer_layers", 4)
         self.transformer_blocks = nn.ModuleList(
@@ -223,7 +230,13 @@ class Dino3DGPNetwork(nn.Module):
         return patch_coords
 
     def forward(
-        self, image, depth, intrinsics, gripper_token=None, text_embedding=None
+        self,
+        image,
+        depth,
+        intrinsics,
+        gripper_token=None,
+        text_embedding=None,
+        source=None,
     ):
         """
         Args:
@@ -232,6 +245,7 @@ class Dino3DGPNetwork(nn.Module):
             intrinsics: (B, 3, 3) camera intrinsics
             gripper_token: (B, 7) [6DoF pose + gripper width]
             text_embedding: (B, 1152) SigLIP embedding
+            source: list of strings ["human" or "aloha"]
         Returns:
             outputs: (B, 256, 13) GMM parameters
         """
@@ -270,6 +284,16 @@ class Dino3DGPNetwork(nn.Module):
                 1
             )  # (B, 1, hidden_dim)
             tokens = torch.cat([tokens, grip_token], dim=1)  # (B, 258, hidden_dim)
+
+        # Add source token
+        if self.use_source_token:
+            source_indices = torch.tensor(
+                [self.source_to_idx[s] for s in source], device=tokens.device
+            )
+            source_token = self.source_embeddings(source_indices).unsqueeze(
+                1
+            )  # (B, 1, hidden_dim)
+            tokens = torch.cat([tokens, source_token], dim=1)  # (B, 259, hidden_dim)
 
         # Apply transformer blocks
         for block in self.transformer_blocks:
@@ -514,6 +538,7 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
             intrinsics,
             gripper_token=gripper_token,
             text_embedding=text_embedding,
+            source=batch["data_source"],
         )
 
         # outputs: (B, 256, 13) - last dim is [12 coords + 1 weight]
@@ -673,6 +698,7 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
             intrinsics,
             gripper_token=gripper_token,
             text_embedding=text_embedding,
+            source=batch["data_source"],
         )
 
         if self.is_gmm:
