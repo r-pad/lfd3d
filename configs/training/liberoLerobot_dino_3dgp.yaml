@@ -1,17 +1,17 @@
 defaults:
   - base_train
 
+augment_train: "image"
 
 epochs: 100
+batch_size: 128
+val_batch_size: 128
 
 # ModelCheckpoint configurations
 checkpoints:
-  pix_dist:
-    monitor: val/pix_dist
+  rmse:
+    monitor: val/rmse
     mode: min
-  train_pix_dist:
-    monitor: train/pix_dist
-    mode: min
-  normalized_pix_dist:
-    monitor: val/normalized_pix_dist
+  rmse_and_std_combi:
+    monitor: val/rmse_and_std_combi
     mode: min
