@@ -89,7 +89,6 @@ def collate_pcd_fn(batch):
             and sample.shape[1] == 3
             and key not in ["intrinsics", "augment_R"]
         ):  
-            assert key !="augment_t"
             tensor_values = [torch.as_tensor(v).float() for v in values]
             collated_batch[key] = Pointclouds(points=tensor_values)
             # If this is the first point cloud, calculate padding mask
@@ -106,9 +105,6 @@ def collate_pcd_fn(batch):
 
         else:
             raise ValueError("Unexpected type for key:", key)
-    if collated_batch["augment_t"].mean().item() != 0.0:
-        import pdb
-        pdb.set_trace()
     return collated_batch
 
 

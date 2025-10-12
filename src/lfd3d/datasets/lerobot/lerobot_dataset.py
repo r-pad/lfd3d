@@ -186,11 +186,7 @@ class RpadLeRobotDataset(BaseDataset):
             scene_pcd_std,
             augment_tf,
         )
-        assert np.allclose(
-            augment_tf["R"], np.eye(3), atol=1e-6
-        ), "R is not identity:\n"
-        assert np.allclose(augment_tf["t"], np.zeros(3), atol=1e-6), "t is not zero:\n"
-
+    
         # collate_pcd_fn handles batching of the point clouds
         item = {
             "action_pcd": start_tracks,

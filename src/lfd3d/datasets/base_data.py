@@ -366,9 +366,6 @@ class BaseDataset(td.Dataset):
         t = augment_tf["t"]  # Translation vector (3,)
         scene_centroid = augment_tf["C"]
 
-        assert np.allclose(R, np.eye(3), atol=1e-6), f"R is not identity:\n{R}"
-        assert np.allclose(t, np.zeros(3), atol=1e-6), f"t is not zero:\n{t}"
-
         # Apply augmentation
         # If augmentation is disabled or for val/test set. augment_tf will have R=I and t=0
         start_tracks_aug = np.dot(start_tracks - scene_centroid, R) + scene_centroid + t
