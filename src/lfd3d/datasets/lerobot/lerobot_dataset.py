@@ -203,9 +203,9 @@ class RpadLeRobotDataset(BaseDataset):
             "pcd_mean": action_pcd_mean,
             "pcd_std": scene_pcd_std,
             "gripper_idx": gripper_idx,
-            "augment_R": augment_tf["R"].copy(),
-            "augment_t": augment_tf["t"].copy(),
-            "augment_C": augment_tf["C"].copy(),
+            "augment_R": augment_tf["R"],
+            "augment_t": augment_tf["t"],
+            "augment_C": augment_tf["C"],
             "actual_caption": actual_caption,
             "data_source": data_source,
         }
