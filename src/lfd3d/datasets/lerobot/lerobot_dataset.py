@@ -171,6 +171,7 @@ class RpadLeRobotDataset(BaseDataset):
         start_scene_pcd, start_scene_feat_pcd, augment_tf = self.get_scene_pcd(
             rgb_embed, depths[0], K_, self.num_points, self.max_depth
         )
+        assert augment_tf["t"] == np.zeros(3)
 
         gripper_idx = self.GRIPPER_IDX[data_source]
 
