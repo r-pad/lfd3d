@@ -186,7 +186,7 @@ class RpadLeRobotDataset(BaseDataset):
             scene_pcd_std,
             augment_tf,
         )
-
+        assert np.all(augment_tf["t"] == 0)
         # collate_pcd_fn handles batching of the point clouds
         item = {
             "action_pcd": start_tracks,
@@ -203,9 +203,9 @@ class RpadLeRobotDataset(BaseDataset):
             "pcd_mean": action_pcd_mean,
             "pcd_std": scene_pcd_std,
             "gripper_idx": gripper_idx,
-            "augment_R": augment_tf["R"],
-            "augment_t": augment_tf["t"],
-            "augment_C": augment_tf["C"],
+            "augment_R": augment_tf["R"].copy(),
+            "augment_t": augment_tf["t"].copy(),
+            "augment_C": augment_tf["C"].copy(),
             "actual_caption": actual_caption,
             "data_source": data_source,
         }
