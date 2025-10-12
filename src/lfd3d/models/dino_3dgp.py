@@ -596,8 +596,9 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         """Training step with 3D GMM prediction"""
+        breakpoint()
         assert (
-            batch["augment_t"].mean().item() == 0
+            batch["augment_t"].mean().item() == 0.0
         ), "Disable pcd augmentations when training image model!"
 
         self.train()
