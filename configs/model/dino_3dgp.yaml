@@ -16,5 +16,5 @@ fourier_num_frequencies: 21 # Number of frequency bands for Fourier encoding (on
 fourier_include_input: True # Whether to include input coordinates in Fourier encoding (only used if use_fourier_pe=True)
 
 is_gmm: True # Train a GMM and minimize negative log likelihood instead
-fixed_variance: [0.01, 0.05, 0.1, 0.25, 0.5] # for gmm
+fixed_variance: [0.001, 0.005, 0.01, 0.05, 0.1, 0.25, 0.5] # for gmm
 uniform_weights_coeff: 0.1 # coefficient for nll loss term when we use uniform mixing weights instead of pred
