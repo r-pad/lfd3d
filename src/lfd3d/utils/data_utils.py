@@ -88,7 +88,8 @@ def collate_pcd_fn(batch):
             and len(sample.shape) == 2
             and sample.shape[1] == 3
             and key not in ["intrinsics", "augment_R"]
-        ):
+        ):  
+            assert key !="augment_t"
             tensor_values = [torch.as_tensor(v).float() for v in values]
             collated_batch[key] = Pointclouds(points=tensor_values)
             # If this is the first point cloud, calculate padding mask
