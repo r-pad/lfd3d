@@ -105,7 +105,8 @@ def collate_pcd_fn(batch):
 
         else:
             raise ValueError("Unexpected type for key:", key)
-    assert collated_batch["augment_t"].mean().item() == 0.0
+    if collated_batch["augment_t"].mean().item() != 0.0:
+        breakpoint()
     return collated_batch
 
 
