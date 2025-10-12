@@ -1,0 +1,17 @@
+defaults:
+  - base_train
+
+
+epochs: 100
+
+# ModelCheckpoint configurations
+checkpoints:
+  pix_dist:
+    monitor: val/pix_dist
+    mode: min
+  train_pix_dist:
+    monitor: train/pix_dist
+    mode: min
+  normalized_pix_dist:
+    monitor: val/normalized_pix_dist
+    mode: min
