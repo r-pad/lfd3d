@@ -24,7 +24,7 @@ parser = argparse.ArgumentParser(description="Run Phantom on Lerobot")
 parser.add_argument(
     "--calib_file",
     type=str,
-    default="../../src/lfd3d/datasets/aloha_calibration/T_world_from_camera_est_left_v6_0709.txt",
+    default="../../src/lfd3d/datasets/aloha_calibration/T_world_from_camera_est_left_v7_1013.txt",
     help="Cam to world calibration file",
 )
 parser.add_argument(
