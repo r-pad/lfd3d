@@ -105,6 +105,7 @@ def collate_pcd_fn(batch):
 
         else:
             raise ValueError("Unexpected type for key:", key)
+
     return collated_batch
 
 
