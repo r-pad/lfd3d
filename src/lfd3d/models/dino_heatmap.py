@@ -453,9 +453,16 @@ class HeatmapSamplerModule(pl.LightningModule):
                 dim=1
             ).squeeze()  # (B, ) - index of target pixel
             loss = F.cross_entropy(logits, target_idx)
-        elif self.loss_type == "kl_div":  # Goes to NaN?
+        elif "kl_div" in self.loss_type: 
             B, _, H, W = outputs.shape
-            alpha = 1 - 5e-4
+            if self.loss_type == "rkl_div": # reverse kl
+                alpha = 0
+            elif self.loss_type == "mkl_div": # mix kl
+                alpha = 1 - 5e-4
+            elif self.loss_type == "fkl_div": # forward kl
+                alpha = 1
+            else:
+                raise NotImplementedError
 
             # Get target pixel coordinates
             gt_flat = gt_mask.flatten(1, 2)  # (B, H*W)
@@ -614,7 +621,7 @@ class HeatmapSamplerModule(pl.LightningModule):
 
         # Flatten spatial dimensions and apply softmax
         logits = heatmap.squeeze(1).flatten(1)  # (B, H*W)
-        if self.loss_type == "cross_entropy" or self.loss_type == "kl_div":
+        if self.loss_type == "cross_entropy" or "kl_div" in self.loss_type:
             probs = F.softmax(logits, dim=1)
 
             # Multinomial sampling
