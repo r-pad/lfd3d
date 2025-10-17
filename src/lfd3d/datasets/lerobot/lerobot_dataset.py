@@ -89,7 +89,7 @@ class RpadLeRobotDataset(BaseDataset):
         self.GRIPPER_IDX = {
             "aloha": np.array([6, 197, 174]),
             "human": np.array([343, 763, 60]),
-            "libero_franka": np.array([1, 2, 0]),
+            "libero_franka": np.array([0, 1, 2]),
         }
 
     def extract_goal(self, item):
