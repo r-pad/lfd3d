@@ -236,7 +236,6 @@ class BaseDataset(td.Dataset):
             scene_pcd, scene_feat_pcd, augment_tf = self.augment_scene_pcd(
                 scene_pcd, feat_flat, self.augment_cfg["pcd"]
             )
-
         else:  # Just FPS
             scene_pcd, scene_feat_pcd = self.get_fps_pcd(
                 scene_pcd, feat_flat, num_points

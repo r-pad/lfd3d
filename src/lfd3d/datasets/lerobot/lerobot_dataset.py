@@ -171,7 +171,6 @@ class RpadLeRobotDataset(BaseDataset):
         start_scene_pcd, start_scene_feat_pcd, augment_tf = self.get_scene_pcd(
             rgb_embed, depths[0], K_, self.num_points, self.max_depth
         )
-        
 
         gripper_idx = self.GRIPPER_IDX[data_source]
 
@@ -186,7 +185,7 @@ class RpadLeRobotDataset(BaseDataset):
             scene_pcd_std,
             augment_tf,
         )
-    
+
         # collate_pcd_fn handles batching of the point clouds
         item = {
             "action_pcd": start_tracks,
