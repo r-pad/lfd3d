@@ -1,4 +1,4 @@
 defaults:
   - base_inference
-loss_type: "rkl_div" # rkl_div, mkl_div, fkl_div, mse, cross_entropy
+loss_type: "cross_entropy" # rkl_div, mkl_div, fkl_div, mse, cross_entropy
 n_eval_episode: 5

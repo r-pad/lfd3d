@@ -11,7 +11,7 @@ val_batch_size: 128
 check_val_every_n_epochs: 10
 additional_train_logging_period: 100 # Global step period to log additional training metrics
 
-loss_type: "rkl_div" # rkl_div, mkl_div, fkl_div, mse, cross_entropy
+loss_type: "cross_entropy" # rkl_div, mkl_div, fkl_div, mse, cross_entropy
 
 # ModelCheckpoint configurations
 checkpoints:

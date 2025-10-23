@@ -158,7 +158,7 @@ def main(cfg):
 
     # Upload output to wandb
     wandb.init(
-        entity="hz2851-carnegie-mellon-university",
+        entity="r-pad",
         project="lfd3d",
         id=cfg.checkpoint.run_id,
         resume="must",
