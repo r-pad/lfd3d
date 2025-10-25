@@ -147,8 +147,8 @@ class Dino3DGPNetwork(nn.Module):
         self.use_source_token = model_cfg.use_source_token
         if self.use_source_token:
             # Learnable embeddings: 0 = human, 1 = robot
-            self.source_to_idx = {"human": 0, "aloha": 1}
-            self.source_embeddings = nn.Embedding(2, self.hidden_dim)
+            self.source_to_idx = {"human": 0, "aloha": 1, "libero_franka": 2}
+            self.source_embeddings = nn.Embedding(3, self.hidden_dim)
 
         # Transformer blocks (self-attention only)
         self.num_layers = model_cfg.num_transformer_layers
@@ -597,7 +597,7 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         """Training step with 3D GMM prediction"""
         assert (
-            batch["augment_t"].mean().item() == 0
+            batch["augment_t"].mean().item() == 0.0
         ), "Disable pcd augmentations when training image model!"
 
         self.train()
