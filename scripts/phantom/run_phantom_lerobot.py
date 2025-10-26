@@ -16,9 +16,11 @@ from phantom_utils import (
     smooth_and_interpolate_pose,
     visualize_eef,
     write_depth_video,
+    compute_metric,
 )
 from robot_descriptions.loaders.mujoco import load_robot_description
 from tqdm import tqdm
+
 
 parser = argparse.ArgumentParser(description="Run Phantom on Lerobot")
 parser.add_argument(
@@ -99,7 +101,7 @@ for vid_name in tqdm(videos):
     depth_video[real_masks] = 0
 
     hand_pose = np.load(f"{args.lerobot_extradata_path}/{HANDPOSE_DIR}/{vid_name}.npy")
-
+    
     try:
         cam_human_eef_pos, cam_human_eef_rot, human_eef_artic = retarget_human_pose(
             hand_pose
@@ -178,6 +180,14 @@ for vid_name in tqdm(videos):
             ik_human_render_seg.astype(np.uint8) * 255,
             fps=FPS,
         )
+        compute_metric(
+            world_human_eef_pos, 
+            world_human_eef_rot, 
+            world_human_actual_eef_pos, 
+            world_human_actual_eef_rot,
+            f"{args.lerobot_extradata_path}/{VIZ_DIR}/{vid_name}"
+        )
+
 
     ik_human_render_seg = np.array(
         [cv2.resize(i, (WIDTH, HEIGHT)) for i in ik_human_render_seg.astype(np.uint8)]

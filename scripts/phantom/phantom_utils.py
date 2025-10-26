@@ -9,12 +9,64 @@ from scipy.signal import savgol_filter
 from scipy.spatial.transform import Rotation as R
 from torch import pi
 from tqdm import tqdm
+import matplotlib.pyplot as plt
+import os
 
 ALOHA_GRIPPER_MIN, ALOHA_GRIPPER_MAX = 0, 0.041
 HUMAN_GRIPPER_IDX = np.array([343, 763, 60])
 ALOHA_REST_QPOS = np.array(
     [0, -1.73, 1.49, 0, 0, 0, 0, 0, 0, -1.73, 1.49, 0, 0, 0, 0, 0]
 )
+
+
+def compute_metric(hand_pos, hand_rot, gripper_pos, gripper_rot, path=None): 
+    """
+    Args:
+        hand_pos : (N, 3)
+        hand_rot: (N, 3, 3)
+        gripper_pos: (N, 3)
+        gripper_rot: (N, 3, 3)
+    Return:
+        eef_mse: mse of distance between hand_pos and gripper_pos (N, )
+        t_error: translation error (N, 3)
+        rot_error: rotation error (N, )
+    """
+    
+    eef_mse = np.linalg.norm((hand_pos - gripper_pos), axis = 1)
+    t_error = np.abs(hand_pos - gripper_pos)
+    
+    rel_rot = np.einsum('nij,njk->nik', hand_rot.transpose(0,2,1), gripper_rot)
+    trace = np.trace(rel_rot, axis1=1, axis2=2)
+
+    cos_theta = np.clip((trace - 1) / 2, -1.0, 1.0)
+    rot_error = np.degrees(np.arccos(cos_theta)) 
+
+    if path:
+        plot_err_metric(eef_mse, rot_error, path)
+
+    return eef_mse, t_error, rot_error
+
+
+def plot_err_metric(eef_mse, rot_error, path):
+    def _plot_and_save(data, title, ylabel, filename):
+        fig, ax = plt.subplots()
+        ax.plot(data, label="Value")
+
+        avg = float(np.nanmean(data))
+        ax.axhline(avg, color="red", linestyle="--", linewidth=1.2, label=f"Mean = {avg:.4f}")
+
+        ax.set_title(title)
+        ax.set_xlabel("Frame Index")
+        ax.set_ylabel(ylabel)
+        ax.grid(True)
+        ax.legend()
+
+        fig.tight_layout()
+        fig.savefig(os.path.join(path, filename), dpi=150, bbox_inches="tight")
+        plt.close(fig)
+
+    _plot_and_save(eef_mse, "MSE eef metric", "MSE (m)", "mse_error.png")
+    _plot_and_save(rot_error, "Rotation eef metric", "Rotation error (degrees)", "rot_error.png")
 
 
 def inverse_kinematics(model, configuration, eef_pos, gripper_rot):
