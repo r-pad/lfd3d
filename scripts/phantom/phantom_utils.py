@@ -106,8 +106,8 @@ def inverse_kinematics(model, configuration, eef_pos, gripper_rot):
     ee_task = mink.FrameTask(
         frame_name="right/gripper",
         frame_type="site",
-        position_cost=1.0,
-        orientation_cost=1.0,
+        position_cost=2.0,
+        orientation_cost=0.0,
     )
     ee_task.set_target(ee_pose_se3)
     # A posture task to encourage the IK to solve for more "natural" poses
