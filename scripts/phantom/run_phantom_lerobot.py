@@ -17,9 +17,11 @@ from phantom_utils import (
     visualize_eef,
     write_depth_video,
     compute_metric,
+    compute_handpose_error
 )
 from robot_descriptions.loaders.mujoco import load_robot_description
 from tqdm import tqdm
+from lfd3d.utils.viz_utils import plot_barchart_with_error, annotate_video, plot_seq_data
 
 
 parser = argparse.ArgumentParser(description="Run Phantom on Lerobot")
@@ -80,8 +82,8 @@ OUTPUT_DIR = "phantom_retarget"
 FPS = 15
 
 videos = sorted(os.listdir(f"{args.lerobot_extradata_path}/{INPAINT_VIDEO_DIR}"))
-
-for vid_name in tqdm(videos):
+overal_metric={"eef_mse":[], "rot_error":[], "std_eef_mse":[], "std_rot_error": [], "num_sample_each_eposide":[]}
+for vid_name in tqdm(videos):   
     data.qpos = ALOHA_REST_QPOS
     inpainted_video = iio.imread(
         f"{args.lerobot_extradata_path}/{INPAINT_VIDEO_DIR}/{vid_name}"
@@ -180,13 +182,20 @@ for vid_name in tqdm(videos):
             ik_human_render_seg.astype(np.uint8) * 255,
             fps=FPS,
         )
-        compute_metric(
+    
+    eef_mse, rot_error, std_eef_mse, std_rot_error = compute_handpose_error(
             world_human_eef_pos, 
             world_human_eef_rot, 
             world_human_actual_eef_pos, 
             world_human_actual_eef_rot,
-            f"{args.lerobot_extradata_path}/{VIZ_DIR}/{vid_name}"
+            f"{args.lerobot_extradata_path}/{VIZ_DIR}/{vid_name}" if args.visualize else None
         )
+    
+    overal_metric["eef_mse"].append(np.mean(eef_mse))
+    overal_metric["rot_error"].append(np.mean(rot_error))
+    overal_metric["std_eef_mse"].append(std_eef_mse)
+    overal_metric["std_rot_error"].append(std_rot_error)
+    overal_metric["num_sample_each_eposide"].append(eef_mse.shape[0])
 
 
     ik_human_render_seg = np.array(
@@ -203,6 +212,7 @@ for vid_name in tqdm(videos):
     )
 
     composite_img = inpainted_video.copy()
+    composite_img = annotate_video(composite_img, {"t(m)": eef_mse, "r(deg)" : rot_error})
     composite_img[ik_human_render_seg] = ik_human_render_img[ik_human_render_seg]
     composite_depth = depth_video.copy()
     composite_depth[ik_human_render_seg] = ik_human_render_depth[ik_human_render_seg]
@@ -227,3 +237,8 @@ for vid_name in tqdm(videos):
         eef_artic=human_eef_artic,
         joint_state=joint_state,
     )
+    
+plot_barchart_with_error(overal_metric["eef_mse"], overal_metric["std_eef_mse"], "Overal MSE eef metric", "Episode index", "MSE (m)", os.path.join(args.lerobot_extradata_path, OUTPUT_DIR,"episodes_mean_std_mse_error.png"))
+plot_barchart_with_error(overal_metric["rot_error"], overal_metric["std_rot_error"], "Overal Rot error metric", "Episode index", "Rot error (degree)", os.path.join(args.lerobot_extradata_path, OUTPUT_DIR,"episodes_mean_std_rot_error.png"))
+compute_metric(overal_metric, os.path.join(args.lerobot_extradata_path, OUTPUT_DIR,"overal_metric.json"))
+
