@@ -44,6 +44,12 @@ parser.add_argument(
     help="Path to auxiliary data for LeRobot dataset",
 )
 parser.add_argument(
+    "--interpolate_factor",
+    type=int,
+    default=1,
+    help="Interpolation factor for for smoother IK",
+)
+parser.add_argument(
     "--visualize", default=False, action="store_true", help="Enable visualization"
 )
 
@@ -101,6 +107,16 @@ for vid_name in tqdm(videos):
     try:
         cam_human_eef_pos, cam_human_eef_rot, human_eef_artic = retarget_human_pose(
             hand_pose
+        )
+        n_human_original = cam_human_eef_pos.shape[0]
+        n_human_interpolate = n_human_original * interpolate_factor
+        cam_human_eef_pos, cam_human_eef_rot, human_eef_artic = (
+            smooth_and_interpolate_pose(
+                cam_human_eef_pos,
+                cam_human_eef_rot,
+                human_eef_artic,
+                N=n_human_interpolate,
+            )
         )
     except Exception as e:
         print(f"Could not retarget {vid_name} due to {e}. Skipping.")
