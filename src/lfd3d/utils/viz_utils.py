@@ -8,6 +8,7 @@ import torch
 import trimesh
 from matplotlib import cm
 from pytorch3d.ops import sample_farthest_points
+import matplotlib.pyplot as plt
 
 
 def project_pcd_on_image(pcd, mask, image, K, color, return_coords=False):
@@ -311,3 +312,98 @@ def save_video(
         frames = (cv2.resize(frames, output_shape=(n, h, w)) * 255).astype(np.uint8)
     print(f"saving video of size {(n, h, w)} to {save_path}")
     iio.imwrite(save_path, frames, fps=fps, extension=".webm", codec="vp9")
+
+def plot_seq_data(data, title, xlabel, ylabel, path):
+    """
+    Plot a sequence of numeric data with its mean and variance statistics.
+
+    The function creates a line plot of the input data sequence, adds a 
+    horizontal line representing the mean value, and displays the variance 
+    in a text box on the plot. The figure is then saved to the given file path.
+
+    Args:
+        data (list, np.ndarray): Input sequence of numeric values.
+        title (str): Title of the plot.
+        xlabel (str): Label for the x-axis.
+        ylabel (str): Label for the y-axis.
+        path (str): File path where the figure will be saved.
+    """
+    fig, ax = plt.subplots()
+    data = np.array(data)
+    ax.plot(data, label="Error", color="blue")
+
+    avg = float(np.nanmean(data))
+    std = float(np.nanstd(data))
+
+    ax.axhline(avg, color="red", linestyle="--", linewidth=1.2, label=f"Mean = {avg:.4f}")
+    ax.text(0.02, 0.95,
+        f"Std = {std:.4f}",
+        transform=ax.transAxes,
+        fontsize=9,
+        verticalalignment="top",
+        bbox=dict(boxstyle="round", facecolor="white", alpha=0.6))
+
+    ax.set_title(title)
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+    ax.grid(True)
+    ax.legend()
+
+    fig.tight_layout()
+    fig.savefig(path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+
+def plot_barchart_with_error(data, error, title, xlabel, ylabel, path):
+    """
+    Plot data as a bar with an error bar.
+    """
+    data = np.asarray(data)
+    error  = np.asarray(error)
+    x = np.arange(len(data))
+
+    fig, ax = plt.subplots()
+    ax.bar(x, data, yerr=error, capsize=4, width=1.0, align="edge", color="skyblue", edgecolor="black")
+
+    ax.set_xticks(x + 0.5)
+    ax.set_xticklabels([str(i) for i in x])
+
+    ax.set_title(title)
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+    ax.grid(True, axis="y")
+
+    fig.tight_layout()
+    fig.savefig(path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+
+
+def annotate_video(frames, annotation=None, path = None, fps=30):
+    """
+    Args:
+        frames: np.ndarray of shape (N, H, W, 3) dtype=uint8
+        left_values: (N,) array of text/values to put on top-left
+        right_values: (N,) array of text/values to put on top-right
+        out_path: str, path to save the video
+        fps: int, frames per second
+    """
+    H, W = frames.shape[1:3]
+    font = cv2.FONT_HERSHEY_SIMPLEX
+
+    annotated_frames = []
+    pos = [(10, 30), (W - 300, 30), (10, H - 30), (W - 300, H - 30),]
+    for i, frame in enumerate(frames):
+        img = frame.copy()
+
+        if annotation is not None:
+            for j, (key, value) in enumerate(annotation.items()):
+                cv2.putText(
+                    img, f"{key}: {value[i]:.4f}", pos[j],
+                    font, 1, (255, 0, 0), 2, cv2.LINE_AA
+                )
+                
+        annotated_frames.append(img)
+    annotated_frames = np.stack(annotated_frames)
+    if path:
+        iio.imwrite(path, annotated_frames, fps=fps)
+    else:
+        return annotated_frames

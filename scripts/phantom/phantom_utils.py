@@ -9,12 +9,88 @@ from scipy.signal import savgol_filter
 from scipy.spatial.transform import Rotation as R
 from torch import pi
 from tqdm import tqdm
+import os
+from lfd3d.utils.viz_utils import plot_seq_data
 
 ALOHA_GRIPPER_MIN, ALOHA_GRIPPER_MAX = 0, 0.041
 HUMAN_GRIPPER_IDX = np.array([343, 763, 60])
 ALOHA_REST_QPOS = np.array(
     [0, -1.73, 1.49, 0, 0, 0, 0, 0, 0, -1.73, 1.49, 0, 0, 0, 0, 0]
 )
+
+
+def compute_metric(metric, path = None):
+    def get_mean_std(means, stds, counts=None):
+        """
+        Compute overall mean and std from group means, stds, and optional sample counts.
+
+        Args:
+            means (list or np.array): group mean values
+            stds (list or np.array): group standard deviation values
+            counts (list or np.array, optional): sample size for each group.
+                                                If None, assumes equal sizes.
+
+        Returns:
+            overall_mean (float), overall_std (float)
+        """
+        means = np.array(means, dtype=float)
+        stds = np.array(stds, dtype=float)
+
+        if counts is None:
+            counts = np.ones_like(means)  # equal weight
+        else:
+            counts = np.array(counts, dtype=float)
+
+        N = counts.sum()
+
+        overall_mean = np.sum(counts * means) / N
+
+        overall_var = np.sum(counts * (stds**2 + means**2)) / N - overall_mean**2
+        overall_std = np.sqrt(overall_var)
+
+        return overall_mean, overall_std
+
+    eef_mse_mean, eef_mse_std = get_mean_std(metric["eef_mse"], metric["std_eef_mse"], metric["num_sample_each_eposide"])
+    rot_error_mean, rot_error_std = get_mean_std(metric["rot_error"], metric["std_rot_error"], metric["num_sample_each_eposide"])
+
+    metric = {"eef_mse_mean": eef_mse_mean, "eef_mse_std": eef_mse_std, "rot_error_mean": rot_error_mean, "rot_error_std": rot_error_std}
+    if path:
+        import json
+        with open(path, "w") as f:
+            json.dump(metric, f, indent=4) 
+    else:
+        return metric
+
+
+def compute_handpose_error(hand_pos, hand_rot, gripper_pos, gripper_rot, path=None): 
+    """
+    Args:
+        hand_pos : (N, 3)
+        hand_rot: (N, 3, 3)
+        gripper_pos: (N, 3)
+        gripper_rot: (N, 3, 3)
+    Return:
+        eef_mse: mse of distance between hand_pos and gripper_pos in one episode
+        rot_error: mean rotation error in one episode
+        std_eef_mse: std of eef mse
+        std_rot_error: std of rot error
+    """     
+    
+    eef_mse = np.linalg.norm((hand_pos - gripper_pos), axis = 1)
+    t_error = np.abs(hand_pos - gripper_pos)
+    
+    rel_rot = np.einsum('nij,njk->nik', hand_rot.transpose(0,2,1), gripper_rot)
+    trace = np.trace(rel_rot, axis1=1, axis2=2)
+
+    cos_theta = np.clip((trace - 1) / 2, -1.0, 1.0)
+    rot_error = np.degrees(np.arccos(cos_theta)) 
+
+    if path:
+        plot_seq_data(eef_mse, "MSE eef metric", "Frame index", "MSE (m)", os.path.join(path,"mse_error.png"))
+        plot_seq_data(rot_error, "Rotation eef metric",  "Frame index", "Rotation error (degrees)", os.path.join(path,"rot_error.png"))
+        plot_seq_data(np.mean(t_error, axis=1), "Translation eef metric",  "Frame index", "Translation L1 error (m)",  os.path.join(path,"t_error.png"))
+
+    return eef_mse, rot_error, np.std(eef_mse), np.std(rot_error)
 
 
 def inverse_kinematics(model, configuration, eef_pos, gripper_rot):
@@ -30,8 +106,8 @@ def inverse_kinematics(model, configuration, eef_pos, gripper_rot):
     ee_task = mink.FrameTask(
         frame_name="right/gripper",
         frame_type="site",
-        position_cost=1.0,
-        orientation_cost=1.0,
+        position_cost=2.0,
+        orientation_cost=0.0,
     )
     ee_task.set_target(ee_pose_se3)
     # A posture task to encourage the IK to solve for more "natural" poses
