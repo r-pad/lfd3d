@@ -207,7 +207,7 @@ class RpadLeRobotDataset(BaseDataset):
             np.ndarray: 4x4 transformation matrix (T_world_from_camera)
         """
         file_path = Path(__file__).parent.parent / extrinsics_path
-        T = np.loadtxt(file_path)
+        T = np.loadtxt(file_path).astype(np.float32)
         return T.reshape(4, 4)
 
     def _transform_to_world_frame(self, points_cam, T_world_from_cam):

@@ -168,22 +168,49 @@ class Dino3DGPNetwork(nn.Module):
         # Output head: predicts 13 dims per component (12 for 4×3 coords + 1 weight)
         self.output_head = nn.Linear(self.hidden_dim, 13)
 
-    def get_patch_centers(self, H, W, intrinsics, depth):
+    def transform_to_world(self, points_cam, T_world_from_cam):
+        """Transform points from camera frame to world frame.
+
+        Args:
+            points_cam: (B, N, 3) - points in camera frame
+            T_world_from_cam: (B, 4, 4) - transformation matrix
+
+        Returns:
+            points_world: (B, N, 3) - points in world frame
         """
-        Compute 3D coordinates for patch centers using depth.
+        B, N, _ = points_cam.shape
+        # Convert to homogeneous coordinates
+        ones = torch.ones(B, N, 1, device=points_cam.device)
+        points_hom = torch.cat([points_cam, ones], dim=-1)  # (B, N, 4)
+
+        # Apply transformation: (B, 4, 4) @ (B, N, 4) -> (B, N, 4)
+        points_world_hom = torch.einsum("bij,bnj->bni", T_world_from_cam, points_hom)
+
+        # Convert back to 3D
+        points_world = points_world_hom[:, :, :3]  # (B, N, 3)
+
+        return points_world
+
+    def get_patch_centers(self, H, W, intrinsics, depth, extrinsics):
+        """
+        Compute 3D coordinates for patch centers using depth (multi-camera support).
+
         Args:
             H, W: image height and width
-            intrinsics: (B, 3, 3) camera intrinsics
-            depth: (B, H, W) depth map
+            intrinsics: (B, N, 3, 3) camera intrinsics for N cameras
+            depth: (B, N, H, W) depth maps for N cameras
+            extrinsics: (B, N, 4, 4) camera-to-world transforms
+
         Returns:
-            patch_coords: (B, num_patches, 3) 3D coordinates
+            patch_coords: (B, N*num_patches, 3) 3D coordinates in WORLD frame
         """
-        B = depth.shape[0]
+        B, N, _, _ = depth.shape
         device = depth.device
 
         # Calculate patch grid size (DINOv2 uses 16×16 patches for 224×224 image)
         h_patches = H // self.patch_size
         w_patches = W // self.patch_size
+        num_patches = h_patches * w_patches  # 256 for 224x224 with patch_size=14
 
         # Get center pixel of each patch
         y_centers = (
@@ -201,30 +228,46 @@ class Dino3DGPNetwork(nn.Module):
             [xx.flatten(), yy.flatten()], dim=1
         )  # (num_patches, 2)
 
-        # Sample depth at patch centers
-        pixel_coords_batch = pixel_coords.unsqueeze(0).expand(
-            B, -1, -1
-        )  # (B, num_patches, 2)
-        y_idx = pixel_coords_batch[:, :, 1].long()
-        x_idx = pixel_coords_batch[:, :, 0].long()
+        # Process each camera
+        all_coords_world = []
+        for cam_idx in range(N):
+            # Sample depth at patch centers for this camera
+            pixel_coords_batch = pixel_coords.unsqueeze(0).expand(
+                B, -1, -1
+            )  # (B, num_patches, 2)
+            y_idx = pixel_coords_batch[:, :, 1].long()
+            x_idx = pixel_coords_batch[:, :, 0].long()
 
-        depth_values = depth[
-            torch.arange(B, device=device).unsqueeze(1), y_idx, x_idx
-        ]  # (B, num_patches)
+            depth_cam = depth[:, cam_idx, :, :]  # (B, H, W)
+            depth_values = depth_cam[
+                torch.arange(B, device=device).unsqueeze(1), y_idx, x_idx
+            ]  # (B, num_patches)
 
-        # Unproject to 3D
-        fx = intrinsics[:, 0, 0].unsqueeze(1)  # (B, 1)
-        fy = intrinsics[:, 1, 1].unsqueeze(1)
-        cx = intrinsics[:, 0, 2].unsqueeze(1)
-        cy = intrinsics[:, 1, 2].unsqueeze(1)
+            # Unproject to 3D in camera frame
+            K = intrinsics[:, cam_idx, :, :]  # (B, 3, 3)
+            fx = K[:, 0, 0].unsqueeze(1)  # (B, 1)
+            fy = K[:, 1, 1].unsqueeze(1)
+            cx = K[:, 0, 2].unsqueeze(1)
+            cy = K[:, 1, 2].unsqueeze(1)
 
-        x_3d = (pixel_coords_batch[:, :, 0] - cx) * depth_values / fx
-        y_3d = (pixel_coords_batch[:, :, 1] - cy) * depth_values / fy
-        z_3d = depth_values
+            x_3d = (pixel_coords_batch[:, :, 0] - cx) * depth_values / fx
+            y_3d = (pixel_coords_batch[:, :, 1] - cy) * depth_values / fy
+            z_3d = depth_values
 
-        patch_coords = torch.stack(
-            [x_3d, y_3d, z_3d], dim=2
-        ).float()  # (B, num_patches, 3)
+            patch_coords_cam = torch.stack(
+                [x_3d, y_3d, z_3d], dim=2
+            ).float()  # (B, num_patches, 3)
+
+            # Transform to world frame
+            T_world_from_cam = extrinsics[:, cam_idx, :, :]  # (B, 4, 4)
+            patch_coords_world = self.transform_to_world(
+                patch_coords_cam, T_world_from_cam
+            )
+
+            all_coords_world.append(patch_coords_world)
+
+        # Concatenate all cameras: (B, N*num_patches, 3)
+        patch_coords = torch.cat(all_coords_world, dim=1)
 
         return patch_coords
 
@@ -233,57 +276,74 @@ class Dino3DGPNetwork(nn.Module):
         image,
         depth,
         intrinsics,
+        extrinsics,
         gripper_token=None,
         text_embedding=None,
         source=None,
     ):
         """
+        Multi-camera forward pass.
+
         Args:
-            image: (B, 3, H, W) RGB image
-            depth: (B, H, W) depth map
-            intrinsics: (B, 3, 3) camera intrinsics
+            image: (B, N, 3, H, W) RGB images for N cameras
+            depth: (B, N, H, W) depth maps for N cameras
+            intrinsics: (B, N, 3, 3) camera intrinsics
+            extrinsics: (B, N, 4, 4) camera-to-world transforms
             gripper_token: (B, 10) [6DoF pose (3 pos + 6 rot6d) + gripper width]
             text_embedding: (B, 1152) SigLIP embedding
             source: list of strings ["human" or "aloha"]
+
         Returns:
-            outputs: (B, 256, 13) GMM parameters
-            patch_coords: (B, 256, 3) patch center 3D coordinates
+            outputs: (B, N*256, 13) GMM parameters for all cameras
+            patch_coords: (B, N*256, 3) patch center 3D coordinates in WORLD frame
         """
-        B, _, H, W = image.shape
+        B, N, C, H, W = image.shape
 
-        # Extract DINOv2 features
-        with torch.no_grad():
-            inputs = self.backbone_processor(images=image, return_tensors="pt")
-            inputs = {k: v.to(self.backbone.device) for k, v in inputs.items()}
-            dino_outputs = self.backbone(**inputs)
+        # Extract DINOv2 features for each camera
+        all_patch_features = []
+        for cam_idx in range(N):
+            with torch.no_grad():
+                cam_image = image[:, cam_idx, :, :, :]  # (B, 3, H, W)
+                inputs = self.backbone_processor(images=cam_image, return_tensors="pt")
+                inputs = {k: v.to(self.backbone.device) for k, v in inputs.items()}
+                dino_outputs = self.backbone(**inputs)
 
-        # Get patch features (skip CLS token)
-        patch_features = dino_outputs.last_hidden_state[
-            :, 1:
-        ]  # (B, 256, dino_hidden_dim)
+            # Get patch features (skip CLS token)
+            patch_features = dino_outputs.last_hidden_state[
+                :, 1:
+            ]  # (B, 256, dino_hidden_dim)
+            all_patch_features.append(patch_features)
 
-        # Get 3D positional encoding for patches
-        patch_coords = self.get_patch_centers(H, W, intrinsics, depth)
-        pos_encoding = self.pos_encoder(patch_coords)  # (B, 256, 128)
+        # Concatenate features from all cameras: (B, N*256, dino_hidden_dim)
+        patch_features = torch.cat(all_patch_features, dim=1)
+
+        # Get 3D positional encoding for patches (in world frame)
+        patch_coords = self.get_patch_centers(
+            H, W, intrinsics, depth, extrinsics
+        )  # (B, N*256, 3)
+        pos_encoding = self.pos_encoder(patch_coords)  # (B, N*256, 128)
 
         # Combine patch features with positional encoding
         tokens = torch.cat(
             [patch_features, pos_encoding], dim=-1
-        )  # (B, 256, hidden_dim)
+        )  # (B, N*256, hidden_dim)
+
+        # Store number of patch tokens for later
+        num_patch_tokens = tokens.shape[1]
 
         # Add language token
         if self.use_text_embedding:
             lang_token = self.text_encoder(text_embedding).unsqueeze(
                 1
             )  # (B, 1, hidden_dim)
-            tokens = torch.cat([tokens, lang_token], dim=1)  # (B, 257, hidden_dim)
+            tokens = torch.cat([tokens, lang_token], dim=1)  # (B, N*256+1, hidden_dim)
 
         # Add gripper token
         if self.use_gripper_token:
             grip_token = self.gripper_encoder(gripper_token).unsqueeze(
                 1
             )  # (B, 1, hidden_dim)
-            tokens = torch.cat([tokens, grip_token], dim=1)  # (B, 258, hidden_dim)
+            tokens = torch.cat([tokens, grip_token], dim=1)  # (B, N*256+2, hidden_dim)
 
         # Add source token
         if self.use_source_token:
@@ -293,17 +353,19 @@ class Dino3DGPNetwork(nn.Module):
             source_token = self.source_embeddings(source_indices).unsqueeze(
                 1
             )  # (B, 1, hidden_dim)
-            tokens = torch.cat([tokens, source_token], dim=1)  # (B, 259, hidden_dim)
+            tokens = torch.cat(
+                [tokens, source_token], dim=1
+            )  # (B, N*256+3, hidden_dim)
 
         # Apply transformer blocks
         for block in self.transformer_blocks:
             tokens = block(tokens)
 
-        # Take only the first 256 tokens (throw away language and gripper tokens)
-        tokens = tokens[:, :256]  # (B, 256, hidden_dim)
+        # Take only the patch tokens (throw away language, gripper, source tokens)
+        tokens = tokens[:, :num_patch_tokens]  # (B, N*256, hidden_dim)
 
         # Predict GMM parameters
-        outputs = self.output_head(tokens)  # (B, 256, 13)
+        outputs = self.output_head(tokens)  # (B, N*256, 13)
 
         return outputs, patch_coords
 
@@ -484,7 +546,7 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
     ):
         """
         Negative log-likelihood loss for GMM.
-        Similar to articubot.py but adapted for 256 fixed components.
+        Similar to articubot.py but adapted for 256*N fixed components.
         """
         batch_size, num_components = pred_displacement.shape[:2]
 
@@ -497,15 +559,15 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
         # Compute Gaussian log-likelihoods
         diff = (pred_displacement - gt_displacement).reshape(
             batch_size, num_components, -1
-        )  # Shape: (B, 256, 12)
-        exponent = -0.5 * torch.sum((diff**2) / variance, dim=2)  # Shape: (B, 256)
+        )  # Shape: (B, 256*N, 12)
+        exponent = -0.5 * torch.sum((diff**2) / variance, dim=2)  # Shape: (B, 256*N)
         log_gaussians = exponent
 
         # Compute log mixing coefficients
-        log_mixing_coeffs = torch.log_softmax(weights, dim=1)  # (B, 256)
+        log_mixing_coeffs = torch.log_softmax(weights, dim=1)  # (B, 256*N)
         log_mixing_coeffs = torch.clamp(log_mixing_coeffs, min=-10)
 
-        masked_sum = log_gaussians + log_mixing_coeffs  # [B, 256]
+        masked_sum = log_gaussians + log_mixing_coeffs  # [B, 256*N]
         masked_sum = masked_sum.masked_fill(~valid_mask, -1e9)
 
         max_log = torch.max(masked_sum, dim=1, keepdim=True).values  # (B, 1)
@@ -524,18 +586,53 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
         # Get gripper token (6DoF pose + gripper width)
         gripper_token = self.get_gripper_token(init)
 
-        # RGBs is [B, 2, H, W, 3], depths is [B, 2, H, W]
-        # Use the first image/depth for prediction
-        rgb = batch["rgbs"][:, 0].permute(0, 3, 1, 2)  # (B, 3, H, W)
-        depth = batch["depths"][:, 0]  # (B, H, W)
-        depth[depth > self.max_depth] = 0
-        intrinsics = batch["intrinsics"]  # (B, 3, 3)
+        # Combine primary + auxiliary cameras
+        # Primary: batch["rgbs"][:, 0] is (B, H, W, 3), batch["depths"][:, 0] is (B, H, W)
+        # Auxiliary: batch["aux_rgbs"] is (B, N_aux, 2, H, W, 3), batch["aux_depths"] is (B, N_aux, 2, H, W)
+
+        primary_rgb = batch["rgbs"][:, 0]  # (B, H, W, 3)
+        primary_depth = batch["depths"][:, 0]  # (B, H, W)
+        aux_rgbs = batch["aux_rgbs"][:, :, 0, :, :, :]  # (B, N_aux, H, W, 3)
+        aux_depths = batch["aux_depths"][:, :, 0, :, :]  # (B, N_aux, H, W)
+
+        # Stack along camera dimension
+        all_rgbs = torch.cat(
+            [primary_rgb.unsqueeze(1), aux_rgbs], dim=1
+        )  # (B, N, H, W, 3)
+        all_depths = torch.cat(
+            [primary_depth.unsqueeze(1), aux_depths], dim=1
+        )  # (B, N, H, W)
+
+        # Clip depths
+        all_depths[all_depths > self.max_depth] = 0
+
+        # Permute RGB to (B, N, 3, H, W)
+        rgb = all_rgbs.permute(0, 1, 4, 2, 3)
+        depth = all_depths
+
+        # Combine intrinsics and extrinsics
+        all_intrinsics = torch.cat(
+            [
+                batch["intrinsics"].unsqueeze(1),  # (B, 1, 3, 3)
+                batch["aux_intrinsics"],  # (B, N_aux, 3, 3)
+            ],
+            dim=1,
+        )  # (B, N, 3, 3)
+
+        all_extrinsics = torch.cat(
+            [
+                batch["extrinsics"].unsqueeze(1),  # (B, 1, 4, 4)
+                batch["aux_extrinsics"],  # (B, N_aux, 4, 4)
+            ],
+            dim=1,
+        )  # (B, N, 4, 4)
 
         # Forward through network
         outputs, patch_coords = self.network(
             rgb,
             depth,
-            intrinsics,
+            all_intrinsics,
+            all_extrinsics,
             gripper_token=gripper_token,
             text_embedding=text_embedding,
             source=batch["data_source"],
@@ -686,16 +783,36 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
         init, gt = self.extract_gt_4_points(batch)
         gripper_token = self.get_gripper_token(init)
 
-        # Get inputs
-        rgb = batch["rgbs"][:, 0].permute(0, 3, 1, 2)
-        depth = batch["depths"][:, 0]
-        intrinsics = batch["intrinsics"]
+        # Combine primary + auxiliary cameras (same as forward)
+        primary_rgb = batch["rgbs"][:, 0]  # (B, H, W, 3)
+        primary_depth = batch["depths"][:, 0]  # (B, H, W)
+        aux_rgbs = batch["aux_rgbs"][:, :, 0, :, :, :]  # (B, N_aux, H, W, 3)
+        aux_depths = batch["aux_depths"][:, :, 0, :, :]  # (B, N_aux, H, W)
+
+        all_rgbs = torch.cat(
+            [primary_rgb.unsqueeze(1), aux_rgbs], dim=1
+        )  # (B, N, H, W, 3)
+        all_depths = torch.cat(
+            [primary_depth.unsqueeze(1), aux_depths], dim=1
+        )  # (B, N, H, W)
+
+        rgb = all_rgbs.permute(0, 1, 4, 2, 3)  # (B, N, 3, H, W)
+        depth = all_depths
+
+        all_intrinsics = torch.cat(
+            [batch["intrinsics"].unsqueeze(1), batch["aux_intrinsics"]], dim=1
+        )
+
+        all_extrinsics = torch.cat(
+            [batch["extrinsics"].unsqueeze(1), batch["aux_extrinsics"]], dim=1
+        )
 
         # Forward
         outputs, patch_coords = self.network(
             rgb,
             depth,
-            intrinsics,
+            all_intrinsics,
+            all_extrinsics,
             gripper_token=gripper_token,
             text_embedding=text_embedding,
             source=batch["data_source"],
@@ -713,8 +830,8 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
         """
         Sample from GMM by selecting a component and using its mean.
         Args:
-            outputs: (B, 256, 13) GMM parameters
-            patch_coords: (B, 256, 3) patch center coordinates
+            outputs: (B, 256*N, 13) GMM parameters
+            patch_coords: (B, 256*N, 3) patch center coordinates
         Returns:
             pred_points: (B, 4, 3) sampled goal points
         """
@@ -816,6 +933,29 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
         gt_pcd = np.hstack((gt_pcd, np.ones((gt_pcd.shape[0], 1))))
         gt_pcd = (end2start @ gt_pcd.T).T[:, :3]
 
+        # Transform from world frame to primary camera frame for projection
+        # Primary camera extrinsics: T_world_from_cam, we need T_cam_from_world
+        primary_extrinsics = batch["extrinsics"][viz_idx].cpu().numpy()  # (4, 4)
+        T_cam_from_world = np.linalg.inv(primary_extrinsics)
+
+        # Transform points to primary camera frame
+        # Transform initial pcd (for init_rgb_proj)
+        pcd_cam = np.hstack((pcd, np.ones((pcd.shape[0], 1))))
+        pcd_cam = (T_cam_from_world @ pcd_cam.T).T[:, :3]
+
+        pcd_endframe = np.hstack((pcd_endframe, np.ones((pcd_endframe.shape[0], 1))))
+        pcd_endframe = (T_cam_from_world @ pcd_endframe.T).T[:, :3]
+
+        all_pred_pcd_tmp = []
+        for i in range(N):
+            tmp_pcd = np.hstack((all_pred_pcd[i], np.ones((all_pred_pcd.shape[1], 1))))
+            tmp_pcd = (T_cam_from_world @ tmp_pcd.T).T[:, :3]
+            all_pred_pcd_tmp.append(tmp_pcd)
+        all_pred_pcd = np.stack(all_pred_pcd_tmp)
+
+        gt_pcd = np.hstack((gt_pcd, np.ones((gt_pcd.shape[0], 1))))
+        gt_pcd = (T_cam_from_world @ gt_pcd.T).T[:, :3]
+
         K = batch["intrinsics"][viz_idx].cpu().numpy()
 
         rgb_init, rgb_end = (
@@ -828,7 +968,7 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
         )
 
         # Project tracks to image
-        init_rgb_proj = project_pcd_on_image(pcd, padding_mask, rgb_init, K, GREEN)
+        init_rgb_proj = project_pcd_on_image(pcd_cam, padding_mask, rgb_init, K, GREEN)
         end_rgb_proj = project_pcd_on_image(gt_pcd, padding_mask, rgb_end, K, RED)
         pred_rgb_proj = project_pcd_on_image(
             all_pred_pcd[-1], padding_mask, rgb_end, K, BLUE
