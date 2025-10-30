@@ -16,7 +16,7 @@ n_samples_wta: 5 # number of samples for evaluating coverage
 save_wta_to_disk: False # save to disk for further examination
 
 # Augmentation settings
-augment_train: "pcd" # Options: "pcd", "image", or null
+augment_train: "pcd" # Options: "pcd", "image", "image_color_only", or null
 augment_cfg:
   augment_prob: 0.75 # Probability of augmentation (the actual augmentation prob also depends on cache_invalidation_rate)
   pcd:
