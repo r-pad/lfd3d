@@ -43,10 +43,6 @@ class BaseDataset(td.Dataset):
         self.augment_train = augment_train
         self.augment_cfg = augment_cfg
 
-        assert (
-            augment_train in ["image_color_only", None]
-        ), "Augmentations need to be handled carefully. Disabling other augmentations for now."
-
     def apply_image_augmentation(
         self, rgbs, depths, start_tracks, end_tracks, K, augment_cfg
     ):
