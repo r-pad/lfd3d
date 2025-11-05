@@ -18,7 +18,7 @@ from lfd3d.utils.data_utils import collate_pcd_fn
 
 
 class BaseDataset(td.Dataset):
-    def __init__(self, augment_train="image", augment_cfg=None):
+    def __init__(self, augment_train="image_color_only", augment_cfg=None):
         super().__init__()
         # Target shape of images (same as DINOv2)
         self.target_shape = 224
@@ -43,6 +43,10 @@ class BaseDataset(td.Dataset):
         self.augment_train = augment_train
         self.augment_cfg = augment_cfg
 
+        assert (
+            augment_train in ["image_color_only", None]
+        ), "Augmentations need to be handled carefully. Disabling other augmentations for now."
+
     def apply_image_augmentation(
         self, rgbs, depths, start_tracks, end_tracks, K, augment_cfg
     ):
@@ -58,9 +62,13 @@ class BaseDataset(td.Dataset):
         Returns:
             tuple: (rgbs, depths, start_tracks, end_tracks, K)
         """
+        # Check if we should apply augmentations
+        is_image_mode = self.augment_train == "image"
+        is_color_only_mode = self.augment_train == "image_color_only"
+
         if not (
             self.split == "train"
-            and self.augment_train == "image"
+            and (is_image_mode or is_color_only_mode)
             and random.random() < self.augment_cfg.augment_prob
         ):
             return rgbs, depths, start_tracks, end_tracks, K
@@ -109,8 +117,8 @@ class BaseDataset(td.Dataset):
             K[0, :] *= scale_x  # fx, cx
             K[1, :] *= scale_y  # fy, cy
 
-        # Rotation
-        if random.random() < img_cfg.rotate_prob:
+        # Rotation (only in full "image" mode, not in "image_color_only")
+        if is_image_mode and random.random() < img_cfg.rotate_prob:
             # Sample rotation angle in degrees
             angle = random.uniform(-30, 30)
 
@@ -135,8 +143,8 @@ class BaseDataset(td.Dataset):
             start_tracks[:] = start_tracks @ R_z.T
             end_tracks[:] = end_tracks @ R_z.T
 
-        # Horizontal Flip
-        if random.random() < img_cfg.hflip_prob:
+        # Horizontal Flip (only in full "image" mode, not in "image_color_only")
+        if is_image_mode and random.random() < img_cfg.hflip_prob:
             rgb_pils = [TF.hflip(pil) for pil in rgb_pils]
             depth_pils = [TF.hflip(pil) for pil in depth_pils]
             # Flip x coordinate in 3D

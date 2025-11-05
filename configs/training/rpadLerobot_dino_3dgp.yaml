@@ -1,8 +1,8 @@
 defaults:
   - base_train
 
-# Override augment_train to image for dino 3dgp
-augment_train: "image"
+# Override augment_train to image_color_only for dino 3dgp (safe for multiview)
+augment_train: "image_color_only"
 
 epochs: 100
 batch_size: 128

@@ -77,9 +77,19 @@ class RpadLeRobotDataset(BaseDataset):
         if len(split_indices) == 0:
             split_indices = list(range(len(self.lerobot_dataset)))
         self.split_indices = split_indices
-        self.color_key = dataset_cfg.color_key
-        self.depth_key = dataset_cfg.depth_key
+
+        # Multi-camera configuration: first camera in list is primary
+        self.cameras = dataset_cfg.cameras
         self.gripper_pcd_key = dataset_cfg.gripper_pcd_key
+
+        # Validate augmentation mode for multi-camera
+        if len(self.cameras) > 1:
+            if augment_train == "image":
+                raise ValueError(
+                    "Multi-camera setup does not allow augment_train to be 'image'."
+                    "Geometric augmentations (rotation, hflip) are not "
+                    "compatible with world-frame ground truth."
+                )
 
         self.rgb_text_featurizer = RGBTextFeaturizer(
             target_shape=self.target_shape, rgb_feat=self.dataset_cfg.rgb_feat
@@ -89,7 +99,9 @@ class RpadLeRobotDataset(BaseDataset):
         self.GRIPPER_IDX = {
             "aloha": np.array([6, 197, 174]),
             "human": np.array([343, 763, 60]),
-            "libero_franka": np.array([0, 1, 2]), # gripper pcd in dataset: [left right top grasp-center] in agentview; (right gripper, left gripper, top, grasp-center)
+            "libero_franka": np.array(
+                [0, 1, 2]
+            ),  # gripper pcd in dataset: [left right top grasp-center] in agentview; (right gripper, left gripper, top, grasp-center)
         }
 
     def extract_goal(self, item):
@@ -98,9 +110,18 @@ class RpadLeRobotDataset(BaseDataset):
         else:
             return item["task"]
 
-    def load_transition(
-        self, idx
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, str, str]:
+    def load_transition(self, idx):
+        """Load a transition from the dataset.
+
+        Returns:
+            - all_rgbs: list of (2, H, W, 3) arrays, one per camera
+            - all_depths: list of (2, H, W) arrays, one per camera
+            - orig_shape: (H, W) from first camera
+            - gripper_pcds: (2, N, 3) array
+            - task: str
+            - episode_index: str
+            - cam_names: list of camera names
+        """
         start_item = self.lerobot_dataset[idx]
         task = self.extract_goal(start_item)
         episode_index = start_item["episode_index"]
@@ -110,38 +131,106 @@ class RpadLeRobotDataset(BaseDataset):
         ).item()
 
         end_item = self.lerobot_dataset[end_idx]
-        COLOR_KEY = self.color_key
-        rgb_init = (start_item[COLOR_KEY].permute(1, 2, 0).numpy() * 255).astype(
-            np.uint8
-        )
-        orig_shape = rgb_init.shape[:2]
 
-        rgb_init = Image.fromarray(rgb_init)
-        rgb_init = np.asarray(self.rgb_preprocess(rgb_init))
-        rgb_end = (end_item[COLOR_KEY].permute(1, 2, 0).numpy() * 255).astype(np.uint8)
-        rgb_end = Image.fromarray(rgb_end)
-        rgb_end = np.asarray(self.rgb_preprocess(rgb_end))
-        rgbs = np.array([rgb_init, rgb_end])
+        all_rgbs = []
+        all_depths = []
+        cam_names = []
+        orig_shape = None
 
-        DEPTH_KEY = self.depth_key
-        depth_init = Image.fromarray(start_item[DEPTH_KEY].numpy()[0])
-        depth_init = np.asarray(self.depth_preprocess(depth_init))
-        depth_end = Image.fromarray(end_item[DEPTH_KEY].numpy()[0])
-        depth_end = np.asarray(self.depth_preprocess(depth_end))
-        depths = np.array([depth_init, depth_end])
+        for cam_cfg in self.cameras:
+            COLOR_KEY = cam_cfg.color_key
+            DEPTH_KEY = cam_cfg.depth_key
+
+            # Load RGB for this camera
+            rgb_init = (start_item[COLOR_KEY].permute(1, 2, 0).numpy() * 255).astype(
+                np.uint8
+            )
+            if orig_shape is None:
+                orig_shape = rgb_init.shape[:2]
+
+            rgb_init = Image.fromarray(rgb_init)
+            rgb_init = np.asarray(self.rgb_preprocess(rgb_init))
+            rgb_end = (end_item[COLOR_KEY].permute(1, 2, 0).numpy() * 255).astype(
+                np.uint8
+            )
+            rgb_end = Image.fromarray(rgb_end)
+            rgb_end = np.asarray(self.rgb_preprocess(rgb_end))
+            rgbs = np.array([rgb_init, rgb_end])
+
+            # Load depth for this camera
+            depth_init = Image.fromarray(start_item[DEPTH_KEY].numpy()[0])
+            depth_init = np.asarray(self.depth_preprocess(depth_init))
+            depth_end = Image.fromarray(end_item[DEPTH_KEY].numpy()[0])
+            depth_end = np.asarray(self.depth_preprocess(depth_end))
+            depths = np.array([depth_init, depth_end])
+
+            all_rgbs.append(rgbs)
+            all_depths.append(depths)
+            cam_names.append(cam_cfg.name)
 
         GRIPPER_PCD_KEY = self.gripper_pcd_key
         gripper_pcd_init = start_item[GRIPPER_PCD_KEY]
         gripper_pcd_end = end_item[GRIPPER_PCD_KEY]
         gripper_pcds = np.array([gripper_pcd_init, gripper_pcd_end])
 
-        return rgbs, depths, orig_shape, gripper_pcds, task, f"{episode_index}"
-
-    def _load_camera_params(self, data_source):
-        file_path = (
-            Path(__file__).parent.parent / f"{data_source}_calibration/intrinsics.txt"
+        return (
+            all_rgbs,
+            all_depths,
+            orig_shape,
+            gripper_pcds,
+            task,
+            f"{episode_index}",
+            cam_names,
         )
+
+    def _load_camera_intrinsics(self, intrinsics_path, data_source):
+        """Load camera intrinsics from file.
+
+        Args:
+            intrinsics_path: Relative path to intrinsics file (e.g., "aloha_calibration/intrinsics_xxx.txt")
+            data_source: Data source name (e.g., 'aloha', 'human', 'libero_franka')
+
+        Returns:
+            np.ndarray: 3x3 intrinsics matrix
+        """
+        file_path = Path(__file__).parent.parent / intrinsics_path
         return np.loadtxt(file_path)
+
+    def _load_camera_extrinsics(self, extrinsics_path, data_source):
+        """Load camera extrinsics (T_world_from_camera) from file.
+
+        Args:
+            extrinsics_path: Relative path to extrinsics file (e.g., "aloha_calibration/T_world_from_camera_xxx.txt")
+            data_source: Data source name (e.g., 'aloha', 'human', 'libero_franka')
+
+        Returns:
+            np.ndarray: 4x4 transformation matrix (T_world_from_camera)
+        """
+        file_path = Path(__file__).parent.parent / extrinsics_path
+        T = np.loadtxt(file_path).astype(np.float32)
+        return T.reshape(4, 4)
+
+    def _transform_to_world_frame(self, points_cam, T_world_from_cam):
+        """Transform points from camera frame to world frame.
+
+        Args:
+            points_cam: (N, 3) array of points in camera frame
+            T_world_from_cam: (4, 4) transformation matrix
+
+        Returns:
+            (N, 3) array of points in world frame
+        """
+        # Convert to homogeneous coordinates
+        N = points_cam.shape[0]
+        points_hom = np.concatenate([points_cam, np.ones((N, 1))], axis=1)  # (N, 4)
+
+        # Apply transformation
+        points_world_hom = (T_world_from_cam @ points_hom.T).T  # (N, 4)
+
+        # Convert back to 3D
+        points_world = points_world_hom[:, :3]  # (N, 3)
+
+        return points_world
 
     def __getitem__(self, index):
         # Map the dataset index to the actual LeRobot dataset index using split_indices
@@ -151,61 +240,133 @@ class RpadLeRobotDataset(BaseDataset):
         start2end = torch.eye(4)  # Static camera
 
         # Retrieve the item from the underlying LeRobot dataset
-        rgbs, depths, orig_shape, gripper_pcds, caption, demo_name = (
-            self.load_transition(actual_index)
-        )
+        (
+            all_rgbs,
+            all_depths,
+            orig_shape,
+            gripper_pcds,
+            caption,
+            demo_name,
+            cam_names,
+        ) = self.load_transition(actual_index)
 
-        K = self._load_camera_params(data_source)
-        K_ = BaseDataset.get_scaled_intrinsics(K, orig_shape, self.target_shape)
+        # Load intrinsics and extrinsics for all cameras
+        all_intrinsics = []
+        all_extrinsics = []
+        for cam_cfg in self.cameras:
+            # Load intrinsics
+            K = self._load_camera_intrinsics(cam_cfg.intrinsics, data_source)
+            K_scaled = BaseDataset.get_scaled_intrinsics(
+                K, orig_shape, self.target_shape
+            )
+            all_intrinsics.append(K_scaled)
 
+            # Load extrinsics
+            T = self._load_camera_extrinsics(cam_cfg.extrinsics, data_source)
+            all_extrinsics.append(T)
+
+        # Gripper tracks
         start_tracks, end_tracks = gripper_pcds[0], gripper_pcds[1]
         actual_caption = caption
 
-        rgbs, depths, start_tracks, end_tracks, K_ = self.apply_image_augmentation(
-            rgbs, depths, start_tracks, end_tracks, K_, self.augment_cfg
-        )
+        # Apply augmentation to all cameras
+        # Note: Each camera gets independent random augmentations
+        all_rgbs_aug = []
+        all_depths_aug = []
+        all_intrinsics_aug = []
+        for i, (rgbs, depths, K) in enumerate(
+            zip(all_rgbs, all_depths, all_intrinsics)
+        ):
+            # For image_color_only mode, tracks are not transformed (they're in world frame)
+            rgbs_aug, depths_aug, start_tracks, end_tracks, K_aug = (
+                self.apply_image_augmentation(
+                    rgbs, depths, start_tracks, end_tracks, K, self.augment_cfg
+                )
+            )
+            all_rgbs_aug.append(rgbs_aug)
+            all_depths_aug.append(depths_aug)
+            all_intrinsics_aug.append(K_aug)
 
+        # Primary camera is first in list
+        primary_rgbs = all_rgbs_aug[0]
+        primary_depths = all_depths_aug[0]
+        primary_K = all_intrinsics_aug[0]
+        primary_T = all_extrinsics[0]
+
+        # Compute scene PCD from primary camera
         rgb_embed, text_embed = self.rgb_text_featurizer.compute_rgb_text_feat(
-            rgbs[0], caption
+            primary_rgbs[0], caption
         )
         start_scene_pcd, start_scene_feat_pcd, augment_tf = self.get_scene_pcd(
-            rgb_embed, depths[0], K_, self.num_points, self.max_depth
+            rgb_embed, primary_depths[0], primary_K, self.num_points, self.max_depth
+        )
+
+        # Transform scene PCD from camera frame to world frame
+        # start_scene_pcd is (N, 3) in camera frame, transform using primary extrinsics
+        start_scene_pcd_world = self._transform_to_world_frame(
+            start_scene_pcd, primary_T
         )
 
         gripper_idx = self.GRIPPER_IDX[data_source]
 
+        # Normalize in world frame
         action_pcd_mean, scene_pcd_std = self.get_normalize_mean_std(
-            start_tracks, start_scene_pcd, self.dataset_cfg
+            start_tracks, start_scene_pcd_world, self.dataset_cfg
         )
-        start_tracks, end_tracks, start_scene_pcd = self.transform_pcds(
+        start_tracks, end_tracks, start_scene_pcd_world = self.transform_pcds(
             start_tracks,
             end_tracks,
-            start_scene_pcd,
+            start_scene_pcd_world,
             action_pcd_mean,
             scene_pcd_std,
             augment_tf,
         )
 
         # collate_pcd_fn handles batching of the point clouds
+        # Prepare auxiliary camera data
+        if len(self.cameras) > 1:
+            aux_rgbs = np.stack(all_rgbs_aug[1:], axis=0)  # (num_aux, 2, H, W, 3)
+            aux_depths = np.stack(all_depths_aug[1:], axis=0)  # (num_aux, 2, H, W)
+            aux_intrinsics = np.stack(all_intrinsics_aug[1:], axis=0)  # (num_aux, 3, 3)
+            aux_extrinsics = np.stack(all_extrinsics[1:], axis=0)  # (num_aux, 4, 4)
+        else:
+            # No auxiliary cameras
+            aux_rgbs = np.zeros((0, 2, *self.target_shape, 3), dtype=np.uint8)
+            aux_depths = np.zeros((0, 2, *self.target_shape), dtype=np.float32)
+            aux_intrinsics = np.zeros((0, 3, 3), dtype=np.float32)
+            aux_extrinsics = np.zeros((0, 4, 4), dtype=np.float32)
+
         item = {
+            # Primary camera data
+            "rgbs": primary_rgbs,
+            "depths": primary_depths,
+            "intrinsics": primary_K,
+            "extrinsics": primary_T,
+            # Auxiliary camera data
+            "aux_rgbs": aux_rgbs,
+            "aux_depths": aux_depths,
+            "aux_intrinsics": aux_intrinsics,
+            "aux_extrinsics": aux_extrinsics,
+            # Point clouds (in world frame)
             "action_pcd": start_tracks,
-            "anchor_pcd": start_scene_pcd,
+            "anchor_pcd": start_scene_pcd_world,
             "anchor_feat_pcd": start_scene_feat_pcd,
+            # Labels
+            "cross_displacement": end_tracks - start_tracks,
+            # Text/metadata
             "caption": caption,
             "text_embed": text_embed,
-            "cross_displacement": end_tracks - start_tracks,
-            "intrinsics": K_,
-            "rgbs": rgbs,
-            "depths": depths,
+            "actual_caption": actual_caption,
+            # Transforms/normalization
             "start2end": start2end,
-            "vid_name": demo_name,
             "pcd_mean": action_pcd_mean,
             "pcd_std": scene_pcd_std,
-            "gripper_idx": gripper_idx,
             "augment_R": augment_tf["R"],
             "augment_t": augment_tf["t"],
             "augment_C": augment_tf["C"],
-            "actual_caption": actual_caption,
+            # Other
+            "gripper_idx": gripper_idx,
+            "vid_name": demo_name,
             "data_source": data_source,
         }
         return item
