@@ -20,8 +20,12 @@ from phantom_utils import (
     compute_handpose_error
 )
 from robot_descriptions.loaders.mujoco import load_robot_description
+from yourdfpy import URDF
 from tqdm import tqdm
-from lfd3d.utils.viz_utils import plot_barchart_with_error, annotate_video, plot_seq_data
+from lfd3d.utils.viz_utils import plot_barchart_with_error, annotate_video
+import pyroki as pk
+import logging
+logging.getLogger("jaxls").setLevel(logging.WARNING) # remove jaxls logging
 
 
 parser = argparse.ArgumentParser(description="Run Phantom on Lerobot")
@@ -52,6 +56,9 @@ parser.add_argument(
 parser.add_argument(
     "--visualize", default=False, action="store_true", help="Enable visualization"
 )
+parser.add_argument(
+    "--pyroki", default=False, action="store_true", help="Whether use pyroki for retargeting"
+)
 
 args = parser.parse_args()
 
@@ -72,6 +79,11 @@ K[1, 1] /= 4
 K[1, 2] /= 4
 setup_camera(model, cam_id, cam_to_world, width, height, K)
 renderer = mujoco.Renderer(model, width=width, height=height)
+
+#Pyroki setting
+ALOHA_URDF = "../../pyroki/examples/aloha_urdf/aloha_scene.urdf"
+pyroki_urdf = URDF.load(ALOHA_URDF)
+pyroki_robot = pk.Robot.from_urdf(pyroki_urdf) if args.pyroki else None
 
 INPAINT_VIDEO_DIR = "e2fgvi_vid"
 DEPTH_DIR = "observation.images.cam_azure_kinect.transformed_depth"
@@ -159,6 +171,7 @@ for vid_name in tqdm(videos):
         world_human_eef_rot,
         human_eef_artic,
         n=interpolate_factor,
+        pyroki_robot=pyroki_robot,
     )
 
     if args.visualize:

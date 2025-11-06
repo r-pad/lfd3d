@@ -11,6 +11,7 @@ from torch import pi
 from tqdm import tqdm
 import os
 from lfd3d.utils.viz_utils import plot_seq_data
+from pyroki_utils import inverse_kinematics_pk
 
 ALOHA_GRIPPER_MIN, ALOHA_GRIPPER_MAX = 0, 0.041
 HUMAN_GRIPPER_IDX = np.array([343, 763, 60])
@@ -331,7 +332,7 @@ def write_depth_video(
 
 
 def render_with_ik(
-    model, mink_config, renderer, data, eef_pos, eef_rot, gripper_artic, n=10
+    model, mink_config, renderer, data, eef_pos, eef_rot, gripper_artic, n=10, pyroki_robot=None,
 ):
     render_images = []
     render_seg = []
@@ -350,8 +351,11 @@ def render_with_ik(
 
     n_poses = eef_pos.shape[0]
     for i in tqdm(range(n_poses)):
-        Q = inverse_kinematics(model, mink_config, eef_pos[i], eef_rot[i])
-
+        if pyroki_robot:
+            Q = inverse_kinematics_pk(pyroki_robot, eef_pos[i], eef_rot[i])
+        else:
+            Q = inverse_kinematics(model, mink_config, eef_pos[i], eef_rot[i])
+        
         # Keep them synced ....
         data.qpos = Q
         data.qpos[8 + 6 : 8 + 8] = gripper_artic[i]
