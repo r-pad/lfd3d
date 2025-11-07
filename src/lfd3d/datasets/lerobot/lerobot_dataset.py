@@ -331,8 +331,8 @@ class RpadLeRobotDataset(BaseDataset):
             aux_extrinsics = np.stack(all_extrinsics[1:], axis=0)  # (num_aux, 4, 4)
         else:
             # No auxiliary cameras
-            aux_rgbs = np.zeros((0, 2, *self.target_shape, 3), dtype=np.uint8)
-            aux_depths = np.zeros((0, 2, *self.target_shape), dtype=np.float32)
+            aux_rgbs = np.zeros((0, 2, self.target_shape, self.target_shape, 3), dtype=np.uint8)
+            aux_depths = np.zeros((0, 2, self.target_shape, self.target_shape), dtype=np.float32)
             aux_intrinsics = np.zeros((0, 3, 3), dtype=np.float32)
             aux_extrinsics = np.zeros((0, 4, 4), dtype=np.float32)
 
