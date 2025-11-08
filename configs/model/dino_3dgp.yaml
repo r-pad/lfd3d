@@ -18,3 +18,10 @@ fourier_include_input: True # Whether to include input coordinates in Fourier en
 is_gmm: True # Train a GMM and minimize negative log likelihood instead
 fixed_variance: [0.01, 0.05, 0.1, 0.25, 0.5] # for gmm
 uniform_weights_coeff: 0.1 # coefficient for nll loss term when we use uniform mixing weights instead of pred
+
+# Model-specific training augmentations
+image_token_dropout: True # Enable image token dropout during training
+gripper_noise_prob: 0.4 # Probability of applying gripper noise augmentation
+gripper_noise_translation: 0.01 # Translation noise in meters (±1cm)
+gripper_noise_rotation: 3.0 # Rotation noise in degrees (±3 degrees)
+gripper_noise_width: 0.005 # Gripper width noise in meters (±0.5cm)
