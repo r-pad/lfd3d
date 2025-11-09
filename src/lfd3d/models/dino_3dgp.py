@@ -587,25 +587,42 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
         init = torch.cat([init_primary_points, init_extra_point[:, None, :]], dim=1)
         return init, gt
 
-    def project_3d_to_2d(self, points_3d, intrinsics, img_shape=(224, 224)):
+    def project_3d_to_2d(
+        self, points_3d_world, intrinsics, extrinsics, img_shape=(224, 224)
+    ):
         """
-        Project 3D points to 2D pixel coordinates.
+        Project 3D points in world frame to 2D pixel coordinates.
 
         Args:
-            points_3d: (B, N, 3) or (B, N, M, 3) 3D points
+            points_3d_world: (B, N, 3) or (B, N, M, 3) 3D points in WORLD frame
             intrinsics: (B, 3, 3) camera intrinsics
+            extrinsics: (B, 4, 4) camera-to-world transformation (T_world_from_cam)
             img_shape: (H, W) image shape for clamping
 
         Returns:
             pixel_coords: (B, N, 2) or (B, N, M, 2) pixel coordinates [x, y]
         """
         H, W = img_shape
-        original_shape = points_3d.shape
+        original_shape = points_3d_world.shape
 
         # Reshape to (B, -1, 3) for batch processing
         if len(original_shape) == 4:
             B, N, M, _ = original_shape
-            points_3d = points_3d.reshape(B, N * M, 3)
+            points_3d_world = points_3d_world.reshape(B, N * M, 3)
+        else:
+            B, N, _ = original_shape
+
+        # Transform from world frame to camera frame
+        # extrinsics is T_world_from_cam, we need T_cam_from_world = inv(T_world_from_cam)
+        T_cam_from_world = torch.inverse(extrinsics)  # (B, 4, 4)
+
+        ones = torch.ones(B, points_3d_world.shape[1], 1, device=points_3d_world.device)
+        points_world_hom = torch.cat([points_3d_world, ones], dim=-1)  # (B, N*M, 4)
+
+        # Apply transformation: (B, 4, 4) @ (B, N*M, 4) -> (B, N*M, 4) ->  (B, N*M, 3)
+        points_3d_cam = torch.einsum(
+            "bij,bnj->bni", T_cam_from_world, points_world_hom
+        )[:, :, :3]
 
         fx = intrinsics[:, 0, 0].unsqueeze(1)  # (B, 1)
         fy = intrinsics[:, 1, 1].unsqueeze(1)
@@ -614,9 +631,9 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
 
         # Project: [x, y, z] -> [u, v]
         # Add epsilon to avoid division by zero
-        z = points_3d[:, :, 2].clamp(min=1e-6)
-        u = (points_3d[:, :, 0] * fx / z + cx).clamp(0, W - 1)  # (B, N*M)
-        v = (points_3d[:, :, 1] * fy / z + cy).clamp(0, H - 1)  # (B, N*M)
+        z = points_3d_cam[:, :, 2].clamp(min=1e-6)
+        u = (points_3d_cam[:, :, 0] * fx / z + cx).clamp(0, W - 1)  # (B, N*M)
+        v = (points_3d_cam[:, :, 1] * fy / z + cy).clamp(0, H - 1)  # (B, N*M)
 
         pixel_coords = torch.stack([u, v], dim=2)  # (B, N*M, 2)
 
@@ -877,11 +894,12 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
 
             # Calculate pixel metrics
             intrinsics = batch["intrinsics"]
+            extrinsics = batch["extrinsics"]
             H, W = batch["rgbs"].shape[2:4]
 
             # Project GT to 2D (take first point only)
             gt_2d = (
-                self.project_3d_to_2d(gt[:, :1, :], intrinsics, (H, W))
+                self.project_3d_to_2d(gt[:, :1, :], intrinsics, extrinsics, (H, W))
                 .squeeze(1)
                 .long()
             )  # (B, 2)
@@ -891,7 +909,9 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
                 init[:, None, :, :] + pred_dict[self.prediction_type]["all_pred"]
             )  # (B, N, 4, 3)
             all_pred_2d = (
-                self.project_3d_to_2d(all_pred_3d[:, :, :1, :], intrinsics, (H, W))
+                self.project_3d_to_2d(
+                    all_pred_3d[:, :, :1, :], intrinsics, extrinsics, (H, W)
+                )
                 .squeeze(2)
                 .long()
             )  # (B, N, 2)
@@ -1217,11 +1237,14 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
 
         # Calculate pixel metrics
         intrinsics = batch["intrinsics"]
+        extrinsics = batch["extrinsics"]
         H, W = batch["rgbs"].shape[2:4]
 
         # Project GT to 2D (take first point only)
         gt_2d = (
-            self.project_3d_to_2d(gt[:, :1, :], intrinsics, (H, W)).squeeze(1).long()
+            self.project_3d_to_2d(gt[:, :1, :], intrinsics, extrinsics, (H, W))
+            .squeeze(1)
+            .long()
         )  # (B, 2)
 
         # Project all predictions to 2D (take first point only)
@@ -1229,7 +1252,9 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
             init[:, None, :, :] + pred_dict[self.prediction_type]["all_pred"]
         )  # (B, N, 4, 3)
         all_pred_2d = (
-            self.project_3d_to_2d(all_pred_3d[:, :, :1, :], intrinsics, (H, W))
+            self.project_3d_to_2d(
+                all_pred_3d[:, :, :1, :], intrinsics, extrinsics, (H, W)
+            )
             .squeeze(2)
             .long()
         )  # (B, N, 2)
@@ -1327,11 +1352,14 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
 
         # Calculate pixel metrics
         intrinsics = batch["intrinsics"]
+        extrinsics = batch["extrinsics"]
         H, W = batch["rgbs"].shape[2:4]
 
         # Project GT to 2D (take first point only)
         gt_2d = (
-            self.project_3d_to_2d(gt[:, :1, :], intrinsics, (H, W)).squeeze(1).long()
+            self.project_3d_to_2d(gt[:, :1, :], intrinsics, extrinsics, (H, W))
+            .squeeze(1)
+            .long()
         )  # (B, 2)
 
         # Project all predictions to 2D (take first point only)
@@ -1339,7 +1367,9 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
             init[:, None, :, :] + pred_dict[self.prediction_type]["all_pred"]
         )  # (B, N, 4, 3)
         all_pred_2d = (
-            self.project_3d_to_2d(all_pred_3d[:, :, :1, :], intrinsics, (H, W))
+            self.project_3d_to_2d(
+                all_pred_3d[:, :, :1, :], intrinsics, extrinsics, (H, W)
+            )
             .squeeze(2)
             .long()
         )  # (B, N, 2)
@@ -1356,7 +1386,7 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
         )  # (B, 4, 3) absolute positions
         pred_3d_first3 = pred_3d[:, :3, :]  # (B, 3, 3) first 3 points
         pred_coord_viz = self.project_3d_to_2d(
-            pred_3d_first3, intrinsics, (H, W)
+            pred_3d_first3, intrinsics, extrinsics, (H, W)
         ).long()  # (B, 3, 2)
 
         return {

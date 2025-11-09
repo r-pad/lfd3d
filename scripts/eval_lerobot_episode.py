@@ -36,16 +36,20 @@ class EvalDataModule(pl.LightningDataModule):
     def predict_dataloader(self):
         return self.dataloaders
 
+
 def random_episode(episode_idx, n):
     if n > len(episode_idx):
         return episode_idx
     return random.sample(episode_idx, n)
 
+
 def get_eval_datamodule_episode(datamodule, inference_cfg):
     tags = datamodule.val_tags
     eval_dataloaders, eval_tags, episode_idx = [], [], []
-    episode_num = inference_cfg.n_eval_episode if "n_eval_episode" in inference_cfg.keys() else 1
-    
+    episode_num = (
+        inference_cfg.n_eval_episode if "n_eval_episode" in inference_cfg.keys() else 1
+    )
+
     for i, (tag, loader) in enumerate(datamodule.test_dataloader().items()):
         eval_dataloaders.extend(loader.values())
         episode_idx.extend(loader.keys())
@@ -206,9 +210,13 @@ def main(cfg):
                     heatmap_ = generate_heatmap_from_points(
                         pred_coord[j], rgb[j].shape
                     )  # H, W, 3
-                    alpha = 0.8
-                    # Blend with original image
-                    heatmap = cv2.addWeighted(rgb[j], 1 - alpha, heatmap_, alpha, 0)
+                    more_colorful_heatmap = True
+                    if more_colorful_heatmap:
+                        heatmap = get_heatmap_viz(rgb[j], heatmap_[:, :, 0])  # H, W, 3
+                    else:
+                        alpha = 0.8
+                        # Blend with original image
+                        heatmap = cv2.addWeighted(rgb[j], 1 - alpha, heatmap_, alpha, 0)
                     heatmaps.append(heatmap)
             else:
                 raise NotImplementedError
