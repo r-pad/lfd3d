@@ -1,16 +1,17 @@
+import os
+
 import av
 import mink
 import mujoco
 import numpy as np
 import open3d as o3d
 import torch
+from lfd3d.utils.viz_utils import plot_seq_data
 from scipy.interpolate import interp1d
 from scipy.signal import savgol_filter
 from scipy.spatial.transform import Rotation as R
 from torch import pi
 from tqdm import tqdm
-import os
-from lfd3d.utils.viz_utils import plot_seq_data
 
 ALOHA_GRIPPER_MIN, ALOHA_GRIPPER_MAX = 0, 0.041
 HUMAN_GRIPPER_IDX = np.array([343, 763, 60])
@@ -19,7 +20,7 @@ ALOHA_REST_QPOS = np.array(
 )
 
 
-def compute_metric(metric, path = None):
+def compute_metric(metric, path=None):
     def get_mean_std(means, stds, counts=None):
         """
         Compute overall mean and std from group means, stds, and optional sample counts.
@@ -50,19 +51,29 @@ def compute_metric(metric, path = None):
 
         return overall_mean, overall_std
 
-    eef_mse_mean, eef_mse_std = get_mean_std(metric["eef_mse"], metric["std_eef_mse"], metric["num_sample_each_eposide"])
-    rot_error_mean, rot_error_std = get_mean_std(metric["rot_error"], metric["std_rot_error"], metric["num_sample_each_eposide"])
+    eef_mse_mean, eef_mse_std = get_mean_std(
+        metric["eef_mse"], metric["std_eef_mse"], metric["num_sample_each_eposide"]
+    )
+    rot_error_mean, rot_error_std = get_mean_std(
+        metric["rot_error"], metric["std_rot_error"], metric["num_sample_each_eposide"]
+    )
 
-    metric = {"eef_mse_mean": eef_mse_mean, "eef_mse_std": eef_mse_std, "rot_error_mean": rot_error_mean, "rot_error_std": rot_error_std}
+    metric = {
+        "eef_mse_mean": eef_mse_mean,
+        "eef_mse_std": eef_mse_std,
+        "rot_error_mean": rot_error_mean,
+        "rot_error_std": rot_error_std,
+    }
     if path:
         import json
+
         with open(path, "w") as f:
-            json.dump(metric, f, indent=4) 
+            json.dump(metric, f, indent=4)
     else:
         return metric
 
 
-def compute_handpose_error(hand_pos, hand_rot, gripper_pos, gripper_rot, path=None): 
+def compute_handpose_error(hand_pos, hand_rot, gripper_pos, gripper_rot, path=None):
     """
     Args:
         hand_pos : (N, 3)
@@ -74,21 +85,39 @@ def compute_handpose_error(hand_pos, hand_rot, gripper_pos, gripper_rot, path=No
         rot_error: mean rotation error in one episode
         std_eef_mse: std of eef mse
         std_rot_error: std of rot error
-    """     
-    
-    eef_mse = np.linalg.norm((hand_pos - gripper_pos), axis = 1)
+    """
+
+    eef_mse = np.linalg.norm((hand_pos - gripper_pos), axis=1)
     t_error = np.abs(hand_pos - gripper_pos)
-    
-    rel_rot = np.einsum('nij,njk->nik', hand_rot.transpose(0,2,1), gripper_rot)
+
+    rel_rot = np.einsum("nij,njk->nik", hand_rot.transpose(0, 2, 1), gripper_rot)
     trace = np.trace(rel_rot, axis1=1, axis2=2)
 
     cos_theta = np.clip((trace - 1) / 2, -1.0, 1.0)
-    rot_error = np.degrees(np.arccos(cos_theta)) 
+    rot_error = np.degrees(np.arccos(cos_theta))
 
     if path:
-        plot_seq_data(eef_mse, "MSE eef metric", "Frame index", "MSE (m)", os.path.join(path,"mse_error.png"))
-        plot_seq_data(rot_error, "Rotation eef metric",  "Frame index", "Rotation error (degrees)", os.path.join(path,"rot_error.png"))
-        plot_seq_data(np.mean(t_error, axis=1), "Translation eef metric",  "Frame index", "Translation L1 error (m)",  os.path.join(path,"t_error.png"))
+        plot_seq_data(
+            eef_mse,
+            "MSE eef metric",
+            "Frame index",
+            "MSE (m)",
+            os.path.join(path, "mse_error.png"),
+        )
+        plot_seq_data(
+            rot_error,
+            "Rotation eef metric",
+            "Frame index",
+            "Rotation error (degrees)",
+            os.path.join(path, "rot_error.png"),
+        )
+        plot_seq_data(
+            np.mean(t_error, axis=1),
+            "Translation eef metric",
+            "Frame index",
+            "Translation L1 error (m)",
+            os.path.join(path, "t_error.png"),
+        )
 
     return eef_mse, rot_error, np.std(eef_mse), np.std(rot_error)
 
@@ -230,6 +259,100 @@ def map_sim2real(vec):
         (real_gripper_max - real_gripper_min) / (sim_gripper_max - sim_gripper_min)
     ) + real_gripper_min
     return vec
+
+
+def map_real2sim(Q):
+    """
+    The real robot joints and the sim robot don't map exactly to each other.
+    Some joints are offset, some joints rotate the opposite direction.
+    This mapping converts real robot joint angles (in radians) to the sim version.
+
+    Copied from lerobot/common/utils/aloha_utils.py
+
+    Args:
+        Q: (16,) tensor of real robot joint angles in radians (already in sim format, no duplicates)
+
+    Returns:
+        Q: (16,) tensor of sim robot joint angles in radians
+
+    sim = real*sign + offset
+    """
+    sign = torch.tensor([-1, -1, 1, 1, 1, 1, 1, 1, -1, -1, 1, 1, 1, 1, 1, 1])
+    offset = torch.tensor(
+        [pi / 2, 0, -pi / 2, 0, 0, 0, 0, 0, pi / 2, 0, -pi / 2, 0, 0, 0, 0, 0]
+    )
+    Q = sign * Q + offset
+
+    # We handle the shoulder joint separately, x*-1 + np.pi/2 brings it close but just outside joint limits for some reason....
+    # Remap this joint range using real observed min/max and sim min/max
+    real_shoulder_min, real_shoulder_max = -3.59, -0.23
+    sim_shoulder_min, sim_shoulder_max = -1.85, 1.26
+    Q[1] = (Q[1] - real_shoulder_min) * (
+        (sim_shoulder_max - sim_shoulder_min) / (real_shoulder_max - real_shoulder_min)
+    ) + sim_shoulder_min
+    Q[9] = (Q[9] - real_shoulder_min) * (
+        (sim_shoulder_max - sim_shoulder_min) / (real_shoulder_max - real_shoulder_min)
+    ) + sim_shoulder_min
+
+    # same for gripper
+    real_gripper_min, real_gripper_max = -0.11, 1.7262
+    sim_gripper_min, sim_gripper_max = 0, 0.041
+    Q[6] = (Q[6] - real_gripper_min) * (
+        (sim_gripper_max - sim_gripper_min) / (real_gripper_max - real_gripper_min)
+    ) + sim_gripper_min
+    Q[7] = (Q[7] - real_gripper_min) * (
+        (sim_gripper_max - sim_gripper_min) / (real_gripper_max - real_gripper_min)
+    ) + sim_gripper_min
+    Q[14] = (Q[14] - real_gripper_min) * (
+        (sim_gripper_max - sim_gripper_min) / (real_gripper_max - real_gripper_min)
+    ) + sim_gripper_min
+    Q[15] = (Q[15] - real_gripper_min) * (
+        (sim_gripper_max - sim_gripper_min) / (real_gripper_max - real_gripper_min)
+    ) + sim_gripper_min
+
+    return Q
+
+
+def convert_real_joints(real_joints):
+    """
+    Convert real robot joint angles (18-DOF) to sim robot joint angles (16-DOF).
+
+    Copied from lerobot/common/utils/aloha_utils.py
+
+    Mapping from LeRobot (real) to robot_descriptions (sim)
+    Check LeRobot joint names in lerobot/common/robot_devices/robots/configs.py
+    Check robot_descriptions joint names with `print([model.joint(i).name for i in range(model.njnt)])`
+
+    Args:
+        real_joints: (18,) array of real robot joint angles in degrees
+
+    Returns:
+        Q: (16,) tensor of sim robot joint angles in radians
+    """
+    Q = torch.deg2rad(
+        torch.tensor(
+            [
+                real_joints[0],
+                real_joints[1],
+                real_joints[3],
+                real_joints[5],
+                real_joints[6],
+                real_joints[7],
+                real_joints[8],
+                real_joints[8],
+                real_joints[9],
+                real_joints[10],
+                real_joints[12],
+                real_joints[14],
+                real_joints[15],
+                real_joints[16],
+                real_joints[17],
+                real_joints[17],
+            ]
+        )
+    )
+    Q = map_real2sim(Q)
+    return Q
 
 
 def render_rightArm_images(renderer, data, camera="teleoperator_pov", use_seg=False):
