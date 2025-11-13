@@ -9,7 +9,11 @@ import torch
 import torch.nn.functional as F
 import wandb
 from diffusers import get_cosine_schedule_with_warmup
-from pytorch3d.transforms import matrix_to_rotation_6d
+from pytorch3d.transforms import (
+    euler_angles_to_matrix,
+    matrix_to_rotation_6d,
+    rotation_6d_to_matrix,
+)
 from torch import nn, optim
 from transformers import AutoImageProcessor, AutoModel
 
@@ -81,7 +85,7 @@ class Dino3DGPNetwork(nn.Module):
     - Gripper token: 6DoF pose + gripper width (optional)
     - Source token: learnable embedding for human/robot (optional)
     - Transformer: self-attention blocks
-    - Output: 256 GMM components, each predicting 13-dim (4×3 coords + 1 weight)
+    - Output: N*256 GMM components, each predicting 13-dim (4×3 coords + 1 weight)
     """
 
     def __init__(self, model_cfg):
@@ -98,7 +102,9 @@ class Dino3DGPNetwork(nn.Module):
         self.pos_encoding_dim = 128
         self.hidden_dim = self.backbone.config.hidden_size + self.pos_encoding_dim
         self.patch_size = self.backbone.config.patch_size
-        self.num_components = 256  # Fixed number of GMM components
+
+        # Training augmentations
+        self.image_token_dropout = model_cfg.image_token_dropout
 
         # 3D Positional encoding
         if model_cfg.use_fourier_pe:
@@ -167,6 +173,66 @@ class Dino3DGPNetwork(nn.Module):
 
         # Output head: predicts 13 dims per component (12 for 4×3 coords + 1 weight)
         self.output_head = nn.Linear(self.hidden_dim, 13)
+
+    def apply_image_token_dropout(self, tokens, patch_coords, num_cameras):
+        """
+        Apply image token dropout during training.
+
+        Args:
+            tokens: (B, N*256, hidden_dim) image tokens
+            patch_coords: (B, N*256, 3) patch coordinates
+            num_cameras: N - number of cameras
+
+        Returns:
+            tokens: (B, T, hidden_dim) tokens after dropout
+            patch_coords: (B, T, 3) patch coords after dropout
+        """
+        if not self.training or not self.image_token_dropout:
+            return tokens, patch_coords
+
+        B, total_tokens, hidden_dim = tokens.shape
+        tokens_per_camera = 256
+        device = tokens.device
+
+        # Sample dropout strategy: 0.6 = no dropout, 0.3 = token dropout, 0.1 = camera dropout
+        dropout_type = random.choices([0, 1, 2], weights=[0.6, 0.3, 0.1])[0]
+
+        if dropout_type == 0:
+            # No dropout
+            return tokens, patch_coords
+        elif dropout_type == 1:
+            # Drop 0-30% of all tokens randomly
+            dropout_ratio = random.uniform(0.0, 0.3)
+            num_tokens_to_keep = int(total_tokens * (1 - dropout_ratio))
+
+            indices = torch.stack(
+                [
+                    torch.randperm(total_tokens, device=device)[:num_tokens_to_keep]
+                    for _ in range(B)
+                ]
+            )
+            batch_idx = torch.arange(B, device=device)[:, None]
+
+            tokens = tokens[batch_idx, indices]
+            patch_coords = patch_coords[batch_idx, indices]
+
+            return tokens, patch_coords
+        else:
+            # Drop one entire camera (only if more than one camera)
+            if num_cameras > 1:
+                # Randomly select a camera to drop
+                camera_to_drop = random.randint(0, num_cameras - 1)
+                start_idx = camera_to_drop * tokens_per_camera
+                end_idx = start_idx + tokens_per_camera
+
+                # Create mask to keep all tokens except from dropped camera
+                mask = torch.ones(total_tokens, dtype=torch.bool, device=device)
+                mask[start_idx:end_idx] = False
+
+                # Apply mask
+                tokens = tokens[:, mask, :]
+                patch_coords = patch_coords[:, mask, :]
+            return tokens, patch_coords
 
     def transform_to_world(self, points_cam, T_world_from_cam):
         """Transform points from camera frame to world frame.
@@ -294,8 +360,8 @@ class Dino3DGPNetwork(nn.Module):
             source: list of strings ["human" or "aloha"]
 
         Returns:
-            outputs: (B, N*256, 13) GMM parameters for all cameras
-            patch_coords: (B, N*256, 3) patch center 3D coordinates in WORLD frame
+            outputs: (B, T, 13) GMM parameters for all cameras
+            patch_coords: (B, T, 3) patch center 3D coordinates in WORLD frame
         """
         B, N, C, H, W = image.shape
 
@@ -328,7 +394,10 @@ class Dino3DGPNetwork(nn.Module):
             [patch_features, pos_encoding], dim=-1
         )  # (B, N*256, hidden_dim)
 
-        # Store number of patch tokens for later
+        # Apply image token dropout (training only)
+        tokens, patch_coords = self.apply_image_token_dropout(tokens, patch_coords, N)
+
+        # Number of tokens T <= N*256
         num_patch_tokens = tokens.shape[1]
 
         # Add language token
@@ -336,14 +405,14 @@ class Dino3DGPNetwork(nn.Module):
             lang_token = self.text_encoder(text_embedding).unsqueeze(
                 1
             )  # (B, 1, hidden_dim)
-            tokens = torch.cat([tokens, lang_token], dim=1)  # (B, N*256+1, hidden_dim)
+            tokens = torch.cat([tokens, lang_token], dim=1)  # (B, T+1, hidden_dim)
 
         # Add gripper token
         if self.use_gripper_token:
             grip_token = self.gripper_encoder(gripper_token).unsqueeze(
                 1
             )  # (B, 1, hidden_dim)
-            tokens = torch.cat([tokens, grip_token], dim=1)  # (B, N*256+2, hidden_dim)
+            tokens = torch.cat([tokens, grip_token], dim=1)  # (B, T+2, hidden_dim)
 
         # Add source token
         if self.use_source_token:
@@ -353,19 +422,17 @@ class Dino3DGPNetwork(nn.Module):
             source_token = self.source_embeddings(source_indices).unsqueeze(
                 1
             )  # (B, 1, hidden_dim)
-            tokens = torch.cat(
-                [tokens, source_token], dim=1
-            )  # (B, N*256+3, hidden_dim)
+            tokens = torch.cat([tokens, source_token], dim=1)  # (B, T+3, hidden_dim)
 
         # Apply transformer blocks
         for block in self.transformer_blocks:
             tokens = block(tokens)
 
         # Take only the patch tokens (throw away language, gripper, source tokens)
-        tokens = tokens[:, :num_patch_tokens]  # (B, N*256, hidden_dim)
+        tokens = tokens[:, :num_patch_tokens]  # (B, T, hidden_dim)
 
         # Predict GMM parameters
-        outputs = self.output_head(tokens)  # (B, N*256, 13)
+        outputs = self.output_head(tokens)  # (B, T, 13)
 
         return outputs, patch_coords
 
@@ -392,6 +459,12 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
         self.fixed_variance = cfg.model.fixed_variance
         self.uniform_weights_coeff = cfg.model.uniform_weights_coeff
         self.is_gmm = cfg.model.is_gmm
+
+        # Gripper noise augmentation parameters
+        self.gripper_noise_prob = cfg.model.gripper_noise_prob
+        self.gripper_noise_translation = cfg.model.gripper_noise_translation
+        self.gripper_noise_rotation = cfg.model.gripper_noise_rotation
+        self.gripper_noise_width = cfg.model.gripper_noise_width
 
         if self.prediction_type != "cross_displacement":
             raise ValueError(f"Invalid prediction type: {self.prediction_type}")
@@ -436,6 +509,62 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
             },
         }
 
+    def apply_gripper_noise_to_token(self, gripper_token):
+        """
+        Apply noise to gripper token during training.
+
+        Args:
+            gripper_token: (B, 10) [pos (3) + rot6d (6) + width (1)]
+
+        Returns:
+            noisy_token: (B, 10) gripper token with noise applied
+        """
+        if not self.training or random.random() > self.gripper_noise_prob:
+            return gripper_token
+
+        B = gripper_token.shape[0]
+        device = gripper_token.device
+
+        # Parse gripper token
+        pos = gripper_token[:, :3]  # (B, 3)
+        rot6d = gripper_token[:, 3:9]  # (B, 6)
+        width = gripper_token[:, 9:10]  # (B, 1)
+
+        # 1. Add translation noise
+        translation_noise = torch.empty_like(pos).uniform_(
+            -self.gripper_noise_translation, self.gripper_noise_translation
+        )
+        noisy_pos = pos + translation_noise
+
+        # 2. Add rotation noise
+        # Convert rot6d to rotation matrix
+        rot_matrix = rotation_6d_to_matrix(rot6d)  # (B, 3, 3)
+
+        # Generate random euler angles (XYZ convention)
+        euler_noise = torch.empty(B, 3, device=device).uniform_(
+            -np.deg2rad(self.gripper_noise_rotation),
+            np.deg2rad(self.gripper_noise_rotation),
+        )  # (B, 3) in radians
+
+        # Convert euler angles to rotation matrix
+        R_noise = euler_angles_to_matrix(euler_noise, convention="XYZ")  # (B, 3, 3)
+
+        # Apply noise: R_new = R_noise @ R_original
+        noisy_rot_matrix = torch.bmm(R_noise, rot_matrix)  # (B, 3, 3)
+
+        # Convert back to rot6d
+        noisy_rot6d = matrix_to_rotation_6d(noisy_rot_matrix)  # (B, 6)
+
+        # 3. Add gripper width noise
+        width_noise = torch.empty_like(width).uniform_(
+            -self.gripper_noise_width, self.gripper_noise_width
+        )
+        noisy_width = width + width_noise
+
+        # Reconstruct token
+        noisy_token = torch.cat([noisy_pos, noisy_rot6d, noisy_width], dim=1)
+        return noisy_token
+
     def extract_gt_4_points(self, batch):
         """Extract ground truth goal points (4 gripper points)"""
         cross_displacement = batch[self.label_key].points_padded()
@@ -458,25 +587,42 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
         init = torch.cat([init_primary_points, init_extra_point[:, None, :]], dim=1)
         return init, gt
 
-    def project_3d_to_2d(self, points_3d, intrinsics, img_shape=(224, 224)):
+    def project_3d_to_2d(
+        self, points_3d_world, intrinsics, extrinsics, img_shape=(224, 224)
+    ):
         """
-        Project 3D points to 2D pixel coordinates.
+        Project 3D points in world frame to 2D pixel coordinates.
 
         Args:
-            points_3d: (B, N, 3) or (B, N, M, 3) 3D points
+            points_3d_world: (B, N, 3) or (B, N, M, 3) 3D points in WORLD frame
             intrinsics: (B, 3, 3) camera intrinsics
+            extrinsics: (B, 4, 4) camera-to-world transformation (T_world_from_cam)
             img_shape: (H, W) image shape for clamping
 
         Returns:
             pixel_coords: (B, N, 2) or (B, N, M, 2) pixel coordinates [x, y]
         """
         H, W = img_shape
-        original_shape = points_3d.shape
+        original_shape = points_3d_world.shape
 
         # Reshape to (B, -1, 3) for batch processing
         if len(original_shape) == 4:
             B, N, M, _ = original_shape
-            points_3d = points_3d.reshape(B, N * M, 3)
+            points_3d_world = points_3d_world.reshape(B, N * M, 3)
+        else:
+            B, N, _ = original_shape
+
+        # Transform from world frame to camera frame
+        # extrinsics is T_world_from_cam, we need T_cam_from_world = inv(T_world_from_cam)
+        T_cam_from_world = torch.inverse(extrinsics)  # (B, 4, 4)
+
+        ones = torch.ones(B, points_3d_world.shape[1], 1, device=points_3d_world.device)
+        points_world_hom = torch.cat([points_3d_world, ones], dim=-1)  # (B, N*M, 4)
+
+        # Apply transformation: (B, 4, 4) @ (B, N*M, 4) -> (B, N*M, 4) ->  (B, N*M, 3)
+        points_3d_cam = torch.einsum(
+            "bij,bnj->bni", T_cam_from_world, points_world_hom
+        )[:, :, :3]
 
         fx = intrinsics[:, 0, 0].unsqueeze(1)  # (B, 1)
         fy = intrinsics[:, 1, 1].unsqueeze(1)
@@ -485,9 +631,9 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
 
         # Project: [x, y, z] -> [u, v]
         # Add epsilon to avoid division by zero
-        z = points_3d[:, :, 2].clamp(min=1e-6)
-        u = (points_3d[:, :, 0] * fx / z + cx).clamp(0, W - 1)  # (B, N*M)
-        v = (points_3d[:, :, 1] * fy / z + cy).clamp(0, H - 1)  # (B, N*M)
+        z = points_3d_cam[:, :, 2].clamp(min=1e-6)
+        u = (points_3d_cam[:, :, 0] * fx / z + cx).clamp(0, W - 1)  # (B, N*M)
+        v = (points_3d_cam[:, :, 1] * fy / z + cy).clamp(0, H - 1)  # (B, N*M)
 
         pixel_coords = torch.stack([u, v], dim=2)  # (B, N*M, 2)
 
@@ -546,7 +692,7 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
     ):
         """
         Negative log-likelihood loss for GMM.
-        Similar to articubot.py but adapted for 256*N fixed components.
+        Similar to articubot.py but adapted for T <= 256*N fixed components.
         """
         batch_size, num_components = pred_displacement.shape[:2]
 
@@ -559,15 +705,15 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
         # Compute Gaussian log-likelihoods
         diff = (pred_displacement - gt_displacement).reshape(
             batch_size, num_components, -1
-        )  # Shape: (B, 256*N, 12)
-        exponent = -0.5 * torch.sum((diff**2) / variance, dim=2)  # Shape: (B, 256*N)
+        )  # Shape: (B, T, 12)
+        exponent = -0.5 * torch.sum((diff**2) / variance, dim=2)  # Shape: (B, T)
         log_gaussians = exponent
 
         # Compute log mixing coefficients
-        log_mixing_coeffs = torch.log_softmax(weights, dim=1)  # (B, 256*N)
+        log_mixing_coeffs = torch.log_softmax(weights, dim=1)  # (B, T)
         log_mixing_coeffs = torch.clamp(log_mixing_coeffs, min=-10)
 
-        masked_sum = log_gaussians + log_mixing_coeffs  # [B, 256*N]
+        masked_sum = log_gaussians + log_mixing_coeffs  # [B, T]
         masked_sum = masked_sum.masked_fill(~valid_mask, -1e9)
 
         max_log = torch.max(masked_sum, dim=1, keepdim=True).values  # (B, 1)
@@ -585,6 +731,9 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
 
         # Get gripper token (6DoF pose + gripper width)
         gripper_token = self.get_gripper_token(init)
+
+        # Apply gripper noise augmentation (training only)
+        gripper_token = self.apply_gripper_noise_to_token(gripper_token)
 
         # Combine primary + auxiliary cameras
         # Primary: batch["rgbs"][:, 0] is (B, H, W, 3), batch["depths"][:, 0] is (B, H, W)
@@ -638,24 +787,24 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
             source=batch["data_source"],
         )
 
-        # outputs: (B, 256, 13) - last dim is [12 coords + 1 weight]
+        # outputs: (B, T, 13) - last dim is [12 coords + 1 weight]
         B, num_components, _ = outputs.shape
 
         # Parse outputs
         pred_displacement = outputs[:, :, :-1].reshape(
             B, num_components, 4, 3
-        )  # (B, 256, 4, 3)
-        weights = outputs[:, :, -1]  # (B, 256)
+        )  # (B, T, 4, 3)
+        weights = outputs[:, :, -1]  # (B, T)
 
         # Predictions are residuals from patch centers, add them to get absolute positions
         # Expand patch_coords to match pred shape
-        patch_coords_expanded = patch_coords[:, :, None, :]  # (B, 256, 1, 3)
+        patch_coords_expanded = patch_coords[:, :, None, :]  # (B, T, 1, 3)
         pred = patch_coords_expanded + pred_displacement  # Residual to absolute
 
         # GT displacement relative to patch centers
-        gt_displacement = gt[:, None, :, :] - patch_coords_expanded  # (B, 256, 4, 3)
+        gt_displacement = gt[:, None, :, :] - patch_coords_expanded  # (B, T, 4, 3)
 
-        # All components are valid (256 fixed components)
+        # All components are valid (T fixed components)
         valid_mask = torch.ones(
             B, num_components, device=outputs.device, dtype=torch.bool
         )
@@ -745,11 +894,12 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
 
             # Calculate pixel metrics
             intrinsics = batch["intrinsics"]
+            extrinsics = batch["extrinsics"]
             H, W = batch["rgbs"].shape[2:4]
 
             # Project GT to 2D (take first point only)
             gt_2d = (
-                self.project_3d_to_2d(gt[:, :1, :], intrinsics, (H, W))
+                self.project_3d_to_2d(gt[:, :1, :], intrinsics, extrinsics, (H, W))
                 .squeeze(1)
                 .long()
             )  # (B, 2)
@@ -759,7 +909,9 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
                 init[:, None, :, :] + pred_dict[self.prediction_type]["all_pred"]
             )  # (B, N, 4, 3)
             all_pred_2d = (
-                self.project_3d_to_2d(all_pred_3d[:, :, :1, :], intrinsics, (H, W))
+                self.project_3d_to_2d(
+                    all_pred_3d[:, :, :1, :], intrinsics, extrinsics, (H, W)
+                )
                 .squeeze(2)
                 .long()
             )  # (B, N, 2)
@@ -830,8 +982,8 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
         """
         Sample from GMM by selecting a component and using its mean.
         Args:
-            outputs: (B, 256*N, 13) GMM parameters
-            patch_coords: (B, 256*N, 3) patch center coordinates
+            outputs: (B, T, 13) GMM parameters
+            patch_coords: (B, T, 3) patch center coordinates
         Returns:
             pred_points: (B, 4, 3) sampled goal points
         """
@@ -1085,11 +1237,14 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
 
         # Calculate pixel metrics
         intrinsics = batch["intrinsics"]
+        extrinsics = batch["extrinsics"]
         H, W = batch["rgbs"].shape[2:4]
 
         # Project GT to 2D (take first point only)
         gt_2d = (
-            self.project_3d_to_2d(gt[:, :1, :], intrinsics, (H, W)).squeeze(1).long()
+            self.project_3d_to_2d(gt[:, :1, :], intrinsics, extrinsics, (H, W))
+            .squeeze(1)
+            .long()
         )  # (B, 2)
 
         # Project all predictions to 2D (take first point only)
@@ -1097,7 +1252,9 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
             init[:, None, :, :] + pred_dict[self.prediction_type]["all_pred"]
         )  # (B, N, 4, 3)
         all_pred_2d = (
-            self.project_3d_to_2d(all_pred_3d[:, :, :1, :], intrinsics, (H, W))
+            self.project_3d_to_2d(
+                all_pred_3d[:, :, :1, :], intrinsics, extrinsics, (H, W)
+            )
             .squeeze(2)
             .long()
         )  # (B, N, 2)
@@ -1195,11 +1352,14 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
 
         # Calculate pixel metrics
         intrinsics = batch["intrinsics"]
+        extrinsics = batch["extrinsics"]
         H, W = batch["rgbs"].shape[2:4]
 
         # Project GT to 2D (take first point only)
         gt_2d = (
-            self.project_3d_to_2d(gt[:, :1, :], intrinsics, (H, W)).squeeze(1).long()
+            self.project_3d_to_2d(gt[:, :1, :], intrinsics, extrinsics, (H, W))
+            .squeeze(1)
+            .long()
         )  # (B, 2)
 
         # Project all predictions to 2D (take first point only)
@@ -1207,7 +1367,9 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
             init[:, None, :, :] + pred_dict[self.prediction_type]["all_pred"]
         )  # (B, N, 4, 3)
         all_pred_2d = (
-            self.project_3d_to_2d(all_pred_3d[:, :, :1, :], intrinsics, (H, W))
+            self.project_3d_to_2d(
+                all_pred_3d[:, :, :1, :], intrinsics, extrinsics, (H, W)
+            )
             .squeeze(2)
             .long()
         )  # (B, N, 2)
@@ -1224,7 +1386,7 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
         )  # (B, 4, 3) absolute positions
         pred_3d_first3 = pred_3d[:, :3, :]  # (B, 3, 3) first 3 points
         pred_coord_viz = self.project_3d_to_2d(
-            pred_3d_first3, intrinsics, (H, W)
+            pred_3d_first3, intrinsics, extrinsics, (H, W)
         ).long()  # (B, 3, 2)
 
         return {

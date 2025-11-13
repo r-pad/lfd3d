@@ -59,7 +59,7 @@ class RpadLeRobotDataset(BaseDataset):
         root: str | None = None,
         split: str = "train",
         split_indices: list = [],
-        augment_train: str = "image",
+        augment_train: str = "image_color_only",
         augment_cfg: dict = None,
     ):
         super().__init__(augment_train=augment_train, augment_cfg=augment_cfg)

@@ -1,0 +1,18 @@
+{
+  "cameras": [
+    {
+      "name": "cam_azure_kinect_front",
+      "color_key": "observation.images.cam_azure_kinect_front.color",
+      "depth_key": "observation.images.cam_azure_kinect_front.transformed_depth",
+      "intrinsics": "intrinsics_000259921812.txt",
+      "extrinsics": "T_world_from_camera_front_v1_1020.txt"
+    },
+    {
+      "name": "cam_azure_kinect_back",
+      "color_key": "observation.images.cam_azure_kinect_back.color",
+      "depth_key": "observation.images.cam_azure_kinect_back.transformed_depth",
+      "intrinsics": "intrinsics_000003493812.txt",
+      "extrinsics": "T_world_from_camera_back_v1_1020.txt"
+    }
+  ]
+}
