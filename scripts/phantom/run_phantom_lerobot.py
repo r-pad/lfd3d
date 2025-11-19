@@ -141,6 +141,13 @@ def process_single_video(
     mask_dir,
     interpolate_factor,
 ):
+    output_vid_name = f"{vid_name.replace('.mp4', '')}_{camera_key}.mp4"
+    if os.path.exists(f"{args.lerobot_extradata_path}/{OUTPUT_DIR}/{output_vid_name}"):
+        print(
+            f"Phantom output already saved at {args.lerobot_extradata_path}/{OUTPUT_DIR}/{output_vid_name}. Skipping"
+        )
+        return
+
     """Process a single video file."""
     data.qpos = ALOHA_REST_QPOS
 
@@ -264,7 +271,6 @@ def process_single_video(
     composite_depth[ik_human_render_seg] = ik_human_render_depth[ik_human_render_seg]
 
     # Save outputs
-    output_vid_name = f"{vid_name.replace('.mp4', '')}_{camera_key}.mp4"
     save_video_outputs(
         args.lerobot_extradata_path,
         output_vid_name,
@@ -407,6 +413,7 @@ def main():
             interpolate_factor,
             FPS,
         )
+    print("Done!")
 
 
 if __name__ == "__main__":
