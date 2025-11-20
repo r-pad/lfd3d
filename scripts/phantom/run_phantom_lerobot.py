@@ -69,9 +69,13 @@ def load_camera_configs(calib_json_path):
     return calib_data["cameras"]
 
 
-def setup_mujoco_model():
+def setup_mujoco_model(path=None):
     """Setup MuJoCo model, data, and configuration."""
-    model = load_robot_description("aloha_mj_description")
+    if path == None:
+        path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "..", "..", "robot_descriptions/mujoco_menagerie/aloha/scene.xml"
+        )
+    model = mujoco.MjModel.from_xml_path(path)
     data = mujoco.MjData(model)
     mink_config = mink.Configuration(model)
     cam_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_CAMERA, "teleoperator_pov")
