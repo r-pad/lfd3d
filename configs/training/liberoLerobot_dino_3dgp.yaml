@@ -1,7 +1,7 @@
 defaults:
   - base_train
 
-augment_train: "image"
+augment_train: "image_color_only"
 
 epochs: 100
 batch_size: 128

@@ -11,8 +11,13 @@ use_subgoals: False
 max_depth: 2.0 # Filter out PCD beyond this depth
 
 # Camera keys in the dataset
-color_key: "observation.images.agentview"
-depth_key: "observation.images.agentview_depth"
+cameras:
+  - name: cam_libero
+    color_key: "observation.images.cam_libero.color"
+    depth_key: "observation.images.cam_libero.transformed_depth"
+    intrinsics: "libero_franka_calibration/intrinsics.txt"
+    extrinsics: "libero_franka_calibration/agentview_cam_to_world.txt"
+    
 gripper_pcd_key: "observation.points.gripper_pcds"
 
 rgb_feat: False # If true, compute DINOv2 features, else just return RGB
