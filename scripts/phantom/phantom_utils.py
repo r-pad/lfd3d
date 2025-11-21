@@ -12,6 +12,9 @@ from scipy.signal import savgol_filter
 from scipy.spatial.transform import Rotation as R
 from torch import pi
 from tqdm import tqdm
+from torchvision.transforms import ColorJitter
+from torchvision.transforms import functional as TF
+from PIL import Image
 
 ALOHA_GRIPPER_MIN, ALOHA_GRIPPER_MAX = 0, 0.041
 HUMAN_GRIPPER_IDX = np.array([343, 763, 60])
@@ -454,8 +457,9 @@ def write_depth_video(
 
 
 def render_with_ik(
-    model, mink_config, renderer, data, eef_pos, eef_rot, gripper_artic, n=10
+    model, mink_config, renderer, data, eef_pos, eef_rot, gripper_artic, n=10, aug_brightness=0.2, aug_contrast=0.2, aug_saturation=0.2, aug_hue=0.1
 ):
+
     render_images = []
     render_seg = []
     render_depth = []
@@ -472,6 +476,14 @@ def render_with_ik(
     mink_config.update(qpos)
 
     n_poses = eef_pos.shape[0]
+    
+    color_jitter = ColorJitter(
+        brightness=aug_brightness,
+        contrast=aug_contrast,
+        saturation=aug_saturation,
+        hue=aug_hue,
+    )
+
     for i in tqdm(range(n_poses)):
         Q = inverse_kinematics(model, mink_config, eef_pos[i], eef_rot[i])
 
@@ -491,7 +503,15 @@ def render_with_ik(
         joint_state.append(joint_angles)
 
         if i % n == 0:
+            params= color_jitter.get_params(color_jitter.brightness, 
+                                                   color_jitter.contrast, 
+                                                   color_jitter.saturation, 
+                                                   color_jitter.hue)
+            fn_idx, brightness_f, contrast_f, saturation_f, hue_f = params
             rgb, depth, seg = render_rightArm_images(renderer, data)
+            rgb_pil = Image.fromarray(rgb)  
+            rgb_pil = TF.adjust_brightness(rgb_pil, brightness_f)
+            rgb = np.array(rgb_pil)
             render_images.append(rgb)
             render_seg.append(seg)
             render_depth.append(depth)
