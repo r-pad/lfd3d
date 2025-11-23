@@ -183,14 +183,16 @@ class BaseDataset(td.Dataset):
         # Gaussian blur + poisson
         if random.random() < img_cfg.blur_prob:
             rgb_pils = [
-                pil.filter(ImageFilter.GaussianBlur(radius=img_cfg.blur_kernel_size))
+                Image.fromarray(
+                    np.random.poisson(np.array(pil).astype(np.float32))
+                    .clip(0, 255)
+                    .astype(np.uint8)
+                )
                 for pil in rgb_pils
             ]
-        
+
             rgb_pils = [
-                Image.fromarray(
-                    np.random.poisson(np.array(pil).astype(np.float32)).clip(0, 255).astype(np.uint8)
-                )
+                pil.filter(ImageFilter.GaussianBlur(radius=img_cfg.blur_kernel_size))
                 for pil in rgb_pils
             ]
 
