@@ -22,6 +22,12 @@ Alternatively, use Docker (see below).
 
 ## Feature Generation
 
+### Mujoco Calibration
+- Calibration:
+  - The default path to MuJoCo robot model: ~/.cache/robot_descriptions/mujoco_menagerie/{YOUR ROBOT} e.g. ~/.cache/robot_descriptions/mujoco_menagerie/aloha
+  - Copy the robot model: Copy the robot directory from the cache into your local robot_descriptions folder.
+  - Modify the robot description XML (e.g., aloha.xml): Update the robot description file to align the real-world robot’s geometry, joint limits, and transforms with the virtual robot used by MuJoCo.
+
 ### HOI4D
 
 - GT Points (any one of the following):

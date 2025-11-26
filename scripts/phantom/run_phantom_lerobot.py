@@ -70,7 +70,7 @@ def load_camera_configs(calib_json_path):
 
 
 def setup_mujoco_model(path=None):
-    """Setup MuJoCo model, data, and configuration."""
+    """Setup aloha MuJoCo model, data, and configuration."""
     if path == None:
         path = os.path.join(
         os.path.dirname(os.path.abspath(__file__)), "..", "..", "robot_descriptions/mujoco_menagerie/aloha/scene.xml"
