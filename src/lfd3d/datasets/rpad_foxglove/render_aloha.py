@@ -9,7 +9,6 @@ import open3d as o3d
 import trimesh
 import zarr
 from lfd3d.utils.data_utils import combine_meshes
-from robot_descriptions.loaders.mujoco import load_robot_description
 from scipy.spatial.transform import Rotation
 from tqdm import tqdm
 
@@ -186,6 +185,18 @@ def filter_segmask(rend_depth, rend_segmask, cam_depth):
     return filter_mask
 
 
+def setup_mujoco_model(path=None):
+    """Setup aloha MuJoCo model and data."""
+    if path == None:
+        path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "..", "robot_descriptions/mujoco_menagerie/aloha/scene.xml"
+        )
+    model = mujoco.MjModel.from_xml_path(path)
+    data = mujoco.MjData(model)
+    cam_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_CAMERA, "teleoperator_pov")
+    return model, data, cam_id
+
+
 def process_demo(
     demo,
     model,
@@ -267,9 +278,7 @@ def process_demo(
 
 def main(args):
     dataset = zarr.group(args.root)
-    model = load_robot_description("aloha_mj_description")
-    data = mujoco.MjData(model)
-    cam_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_CAMERA, "teleoperator_pov")
+    model, data, cam_id = setup_mujoco_model()
 
     rgb_cam_info = dataset[list(dataset.keys())[0]]["raw"]["rgb"]["camera_info"]
     width = rgb_cam_info["width"][0] // 4
