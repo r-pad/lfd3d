@@ -10,16 +10,12 @@ use_subgoals: False
 
 # Multi-camera configuration (first camera is primary)
 cameras:
-  - name: front
+  - name: cam_azure_kinect_front
     color_key: "observation.images.cam_azure_kinect_front.color"
     depth_key: "observation.images.cam_azure_kinect_front.transformed_depth"
-    intrinsics: "aloha_calibration/intrinsics_000259921812.txt"
-    extrinsics: "aloha_calibration/T_world_from_camera_front_v1_1020.txt"
-  - name: back
+  - name: cam_azure_kinect_back
     color_key: "observation.images.cam_azure_kinect_back.color"
     depth_key: "observation.images.cam_azure_kinect_back.transformed_depth"
-    intrinsics: "aloha_calibration/intrinsics_000003493812.txt"
-    extrinsics: "aloha_calibration/T_world_from_camera_back_v1_1020.txt"
 
 gripper_pcd_key: "observation.points.gripper_pcds"
 

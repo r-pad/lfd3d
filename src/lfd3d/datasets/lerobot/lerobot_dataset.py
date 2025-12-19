@@ -183,33 +183,6 @@ class RpadLeRobotDataset(BaseDataset):
             cam_names,
         )
 
-    def _load_camera_intrinsics(self, intrinsics_path, data_source):
-        """Load camera intrinsics from file.
-
-        Args:
-            intrinsics_path: Relative path to intrinsics file (e.g., "aloha_calibration/intrinsics_xxx.txt")
-            data_source: Data source name (e.g., 'aloha', 'human', 'libero_franka')
-
-        Returns:
-            np.ndarray: 3x3 intrinsics matrix
-        """
-        file_path = Path(__file__).parent.parent / intrinsics_path
-        return np.loadtxt(file_path)
-
-    def _load_camera_extrinsics(self, extrinsics_path, data_source):
-        """Load camera extrinsics (T_world_from_camera) from file.
-
-        Args:
-            extrinsics_path: Relative path to extrinsics file (e.g., "aloha_calibration/T_world_from_camera_xxx.txt")
-            data_source: Data source name (e.g., 'aloha', 'human', 'libero_franka')
-
-        Returns:
-            np.ndarray: 4x4 transformation matrix (T_world_from_camera)
-        """
-        file_path = Path(__file__).parent.parent / extrinsics_path
-        T = np.loadtxt(file_path).astype(np.float32)
-        return T.reshape(4, 4)
-
     def _transform_to_world_frame(self, points_cam, T_world_from_cam):
         """Transform points from camera frame to world frame.
 
@@ -253,16 +226,18 @@ class RpadLeRobotDataset(BaseDataset):
         # Load intrinsics and extrinsics for all cameras
         all_intrinsics = []
         all_extrinsics = []
-        for cam_cfg in self.cameras:
-            # Load intrinsics
-            K = self._load_camera_intrinsics(cam_cfg.intrinsics, data_source)
+        for cam_name in cam_names:
+            K = self.lerobot_dataset[actual_index][
+                f"observation.{cam_name}.intrinsics"
+            ].numpy()
             K_scaled = BaseDataset.get_scaled_intrinsics(
                 K, orig_shape, self.target_shape
             )
             all_intrinsics.append(K_scaled)
 
-            # Load extrinsics
-            T = self._load_camera_extrinsics(cam_cfg.extrinsics, data_source)
+            T = self.lerobot_dataset[actual_index][
+                f"observation.{cam_name}.extrinsics"
+            ].numpy()
             all_extrinsics.append(T)
 
         # Gripper tracks
@@ -331,8 +306,12 @@ class RpadLeRobotDataset(BaseDataset):
             aux_extrinsics = np.stack(all_extrinsics[1:], axis=0)  # (num_aux, 4, 4)
         else:
             # No auxiliary cameras
-            aux_rgbs = np.zeros((0, 2, self.target_shape, self.target_shape, 3), dtype=np.uint8) 
-            aux_depths = np.zeros((0, 2, self.target_shape, self.target_shape), dtype=np.float32)
+            aux_rgbs = np.zeros(
+                (0, 2, self.target_shape, self.target_shape, 3), dtype=np.uint8
+            )
+            aux_depths = np.zeros(
+                (0, 2, self.target_shape, self.target_shape), dtype=np.float32
+            )
             aux_intrinsics = np.zeros((0, 3, 3), dtype=np.float32)
             aux_extrinsics = np.zeros((0, 4, 4), dtype=np.float32)
 
