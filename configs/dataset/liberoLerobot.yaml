@@ -9,6 +9,7 @@ repo_id: sriramsk/libero_lerobot_singleTask_heatmapGoal
 use_subgoals: False
 
 max_depth: 2.0 # Filter out PCD beyond this depth
+val_episode_ratio: 0.1 # percent of episodes in val set
 
 # Camera keys in the dataset
 cameras:

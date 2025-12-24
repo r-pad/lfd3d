@@ -363,7 +363,6 @@ class RpadLeRobotDataModule(BaseDataModule):
         num_workers,
         dataset_cfg,
         seed,
-        val_episode_ratio=0.1,
         augment_train="image",
         augment_cfg=None,
     ):
@@ -379,7 +378,7 @@ class RpadLeRobotDataModule(BaseDataModule):
         self.val_tags = []  # populated in _generate_episode_splits
         # Subset of train to use for eval
         self.TRAIN_SUBSET_SIZE = 20
-        self.val_episode_ratio = val_episode_ratio
+        self.val_episode_ratio = dataset_cfg.val_episode_ratio
         self.train_indices = None
         self.val_indices = None
 

@@ -37,18 +37,10 @@ class EvalDataModule(pl.LightningDataModule):
         return self.dataloaders
 
 
-def random_episode(episode_idx, n):
-    if n > len(episode_idx):
-        return episode_idx
-    return random.sample(episode_idx, n)
-
-
 def get_eval_datamodule_episode(datamodule, inference_cfg):
     tags = datamodule.val_tags
     eval_dataloaders, eval_tags, episode_idx = [], [], []
-    episode_num = (
-        inference_cfg.n_eval_episode if "n_eval_episode" in inference_cfg.keys() else 1
-    )
+    episode_num = inference_cfg.n_eval_episode
 
     for i, (tag, loader) in enumerate(datamodule.test_dataloader().items()):
         eval_dataloaders.extend(loader.values())
@@ -60,7 +52,7 @@ def get_eval_datamodule_episode(datamodule, inference_cfg):
     #     eval_dataloaders.append(loader)
     #     eval_tags.append(f"val_{tag}")
 
-    random_id = random_episode(list(range(0, len(episode_idx))), episode_num)
+    random_id = random.sample(list(range(0, len(episode_idx))), episode_num)
     eval_dataloaders = [eval_dataloaders[i] for i in random_id]
     eval_tags = [eval_tags[i] for i in random_id]
     episode_idx = [episode_idx[i] for i in random_id]
