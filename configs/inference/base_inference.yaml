@@ -3,6 +3,7 @@ batch_size: 16
 val_batch_size: 16
 n_samples_wta: 5 # number of samples for evaluating coverage
 save_wta_to_disk: False # save to disk for further examination
+n_eval_episode: 1
 
 # Augmentation settings
 augment_train: null # Options: "pcd", "image", or null

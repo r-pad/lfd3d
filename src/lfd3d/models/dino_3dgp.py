@@ -15,7 +15,7 @@ from pytorch3d.transforms import (
     rotation_6d_to_matrix,
 )
 from torch import nn, optim
-from transformers import AutoImageProcessor, AutoModel
+from transformers import AutoImageProcessor, AutoModel, T5EncoderModel, T5Tokenizer
 
 from lfd3d.models.dino_heatmap import calc_pix_metrics
 from lfd3d.models.tax3d import calc_pcd_metrics
@@ -81,7 +81,7 @@ class Dino3DGPNetwork(nn.Module):
     DINOv2 + 3D positional encoding + Transformer for 3D goal prediction
     Architecture:
     - Image tokens: DINOv2 patches with 3D PE (x,y,z from depth)
-    - Language token: SigLIP embedding (optional)
+    - Language tokens: Flan-T5 (optional)
     - Gripper token: 6DoF pose + gripper width (optional)
     - Source token: learnable embedding for human/robot (optional)
     - Transformer: self-attention blocks
@@ -131,11 +131,14 @@ class Dino3DGPNetwork(nn.Module):
                 nn.Linear(128, self.pos_encoding_dim),
             )
 
-        # Language token encoder
+        # Language encoder
         self.use_text_embedding = model_cfg.use_text_embedding
         if self.use_text_embedding:
-            self.text_encoder = nn.Sequential(
-                nn.Linear(1152, 256),  # SIGLIP input dim
+            self.text_tokenizer = T5Tokenizer.from_pretrained("google/flan-t5-base")
+            self.text_encoder = T5EncoderModel.from_pretrained("google/flan-t5-base")
+            self.text_encoder.requires_grad_(False)  # Freeze
+            self.text_proj = nn.Sequential(
+                nn.Linear(768, 256),  # Flan-T5 output dim
                 nn.ReLU(),
                 nn.Linear(256, self.hidden_dim),
             )
@@ -344,7 +347,7 @@ class Dino3DGPNetwork(nn.Module):
         intrinsics,
         extrinsics,
         gripper_token=None,
-        text_embedding=None,
+        text=None,
         source=None,
     ):
         """
@@ -356,8 +359,8 @@ class Dino3DGPNetwork(nn.Module):
             intrinsics: (B, N, 3, 3) camera intrinsics
             extrinsics: (B, N, 4, 4) camera-to-world transforms
             gripper_token: (B, 10) [6DoF pose (3 pos + 6 rot6d) + gripper width]
-            text_embedding: (B, 1152) SigLIP embedding
-            source: list of strings ["human" or "aloha"]
+            text: (B, ) Text captions
+            source: (B, ) ["human" or "aloha"]
 
         Returns:
             outputs: (B, T, 13) GMM parameters for all cameras
@@ -399,20 +402,31 @@ class Dino3DGPNetwork(nn.Module):
 
         # Number of tokens T <= N*256
         num_patch_tokens = tokens.shape[1]
+        mask = torch.zeros(B, num_patch_tokens, dtype=torch.bool, device=tokens.device)
 
-        # Add language token
+        # Add language tokens
         if self.use_text_embedding:
-            lang_token = self.text_encoder(text_embedding).unsqueeze(
-                1
-            )  # (B, 1, hidden_dim)
-            tokens = torch.cat([tokens, lang_token], dim=1)  # (B, T+1, hidden_dim)
+            text_tokens = self.text_tokenizer(
+                text, return_tensors="pt", padding=True, truncation=True
+            )
+            text_tokens = {
+                k: v.to(self.text_encoder.device) for k, v in text_tokens.items()
+            }
+            text_embedding = self.text_encoder(**text_tokens).last_hidden_state
+
+            lang_tokens = self.text_proj(text_embedding)  # (B, J, hidden_dim)
+            tokens = torch.cat([tokens, lang_tokens], dim=1)  # (B, T+J, hidden_dim)
+            mask = torch.cat([mask, text_tokens["attention_mask"] == 0], dim=1)
 
         # Add gripper token
         if self.use_gripper_token:
             grip_token = self.gripper_encoder(gripper_token).unsqueeze(
                 1
             )  # (B, 1, hidden_dim)
-            tokens = torch.cat([tokens, grip_token], dim=1)  # (B, T+2, hidden_dim)
+            tokens = torch.cat([tokens, grip_token], dim=1)  # (B, T+J+1, hidden_dim)
+            mask = torch.cat(
+                [mask, torch.zeros(B, 1, dtype=torch.bool, device=tokens.device)], dim=1
+            )
 
         # Add source token
         if self.use_source_token:
@@ -422,11 +436,14 @@ class Dino3DGPNetwork(nn.Module):
             source_token = self.source_embeddings(source_indices).unsqueeze(
                 1
             )  # (B, 1, hidden_dim)
-            tokens = torch.cat([tokens, source_token], dim=1)  # (B, T+3, hidden_dim)
+            tokens = torch.cat([tokens, source_token], dim=1)  # (B, T+J+2, hidden_dim)
+            mask = torch.cat(
+                [mask, torch.zeros(B, 1, dtype=torch.bool, device=tokens.device)], dim=1
+            )
 
         # Apply transformer blocks
         for block in self.transformer_blocks:
-            tokens = block(tokens)
+            tokens = block(tokens, src_key_padding_mask=mask)
 
         # Take only the patch tokens (throw away language, gripper, source tokens)
         tokens = tokens[:, :num_patch_tokens]  # (B, T, hidden_dim)
@@ -726,7 +743,6 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
 
     def forward(self, batch):
         """Forward pass with GMM loss"""
-        text_embedding = batch["text_embed"]
         init, gt = self.extract_gt_4_points(batch)
 
         # Get gripper token (6DoF pose + gripper width)
@@ -783,7 +799,7 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
             all_intrinsics,
             all_extrinsics,
             gripper_token=gripper_token,
-            text_embedding=text_embedding,
+            text=batch["caption"],
             source=batch["data_source"],
         )
 
@@ -931,7 +947,6 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
         Predict 3D goal points using GMM sampling.
         Returns displacement from initial gripper position.
         """
-        text_embedding = batch["text_embed"]
         init, gt = self.extract_gt_4_points(batch)
         gripper_token = self.get_gripper_token(init)
 
@@ -966,7 +981,7 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
             all_intrinsics,
             all_extrinsics,
             gripper_token=gripper_token,
-            text_embedding=text_embedding,
+            text=batch["caption"],
             source=batch["data_source"],
         )
 
