@@ -273,19 +273,41 @@ class RpadLeRobotDataset(BaseDataset):
         primary_K = all_intrinsics_aug[0]
         primary_T = all_extrinsics[0]
 
-        # Compute scene PCD from primary camera
-        rgb_embed, text_embed = self.rgb_text_featurizer.compute_rgb_text_feat(
-            primary_rgbs[0], caption
-        )
-        start_scene_pcd, start_scene_feat_pcd, augment_tf = self.get_scene_pcd(
-            rgb_embed, primary_depths[0], primary_K, self.num_points, self.max_depth
-        )
+        # Compute scene PCD from all cameras and combine in world frame
+        all_scene_pcds_world = []
+        all_scene_feat_pcds = []
+        augment_tf = None
 
-        # Transform scene PCD from camera frame to world frame
-        # start_scene_pcd is (N, 3) in camera frame, transform using primary extrinsics
-        start_scene_pcd_world = self._transform_to_world_frame(
-            start_scene_pcd, primary_T
-        )
+        for i, (rgbs, depths, K, T) in enumerate(
+            zip(all_rgbs_aug, all_depths_aug, all_intrinsics_aug, all_extrinsics)
+        ):
+            # Compute RGB embedding for this camera
+            rgb_embed_cam, text_embed = self.rgb_text_featurizer.compute_rgb_text_feat(
+                rgbs[0], caption
+            )
+
+            # Compute scene PCD in camera frame with points_per_camera
+            scene_pcd_cam, scene_feat_pcd_cam, augment_tf_cam = self.get_scene_pcd(
+                rgb_embed_cam,
+                depths[0],
+                K,
+                self.num_points // len(all_rgbs_aug),
+                self.max_depth,
+            )
+
+            # Store augment_tf from primary camera (first iteration)
+            if augment_tf is None:
+                augment_tf = augment_tf_cam
+
+            # Transform to world frame
+            scene_pcd_world = self._transform_to_world_frame(scene_pcd_cam, T)
+
+            all_scene_pcds_world.append(scene_pcd_world)
+            all_scene_feat_pcds.append(scene_feat_pcd_cam)
+
+        # Concatenate point clouds from all cameras
+        start_scene_pcd_world = np.concatenate(all_scene_pcds_world, axis=0)
+        start_scene_feat_pcd = np.concatenate(all_scene_feat_pcds, axis=0)
 
         gripper_idx = self.GRIPPER_IDX[data_source]
 
