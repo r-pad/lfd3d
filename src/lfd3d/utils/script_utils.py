@@ -174,6 +174,7 @@ def load_checkpoint_config_from_wandb(
         "dataset.additional_img_dir",
         "dataset.use_intermediate_frames",
         "dataset.data_sources",
+        "dataset.val_episode_ratio",
     ],
 ):
     """

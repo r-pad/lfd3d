@@ -34,6 +34,10 @@ def source_of_data(item):
     """
     Return the source of the current demo i.e. where the data is from
     """
+    return item["embodiment"]
+    # Code below is deprecated and only kept for future reference.
+    # Embodiment is expected to be baked into the dataset
+    """
     # Currently identifying demo type by checking number of vertices
     # For human data, we have 778 vertices from the MANO mesh
     # For aloha data, we're sampling 500 points from the mesh.
@@ -50,6 +54,7 @@ def source_of_data(item):
         raise NotImplementedError
 
     return demo_type
+    """
 
 
 class RpadLeRobotDataset(BaseDataset):
