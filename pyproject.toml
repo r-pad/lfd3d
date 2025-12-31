@@ -32,10 +32,8 @@ dependencies = [
     "ipdb>=0.13.13,<0.14",
     "addict==2.4.0",
     "mujoco>=3.2.7,<3.3",
-    "tensorflow-datasets>=4.9.8,<5",
-    "tensorflow-cpu>=2.19.0,<3",
     "google-genai>=1.11.0,<2",
-    "peft>=0.15.2,<0.16",
+    "peft>=0.17,<0.18",
     "decord>=0.6.0,<0.7",
     "mink>=0.0.11,<0.0.12",
 ]
@@ -96,7 +94,7 @@ spconv-cu124 = "*"
 torch_geometric = "<2.3"
 lerobot = { git = "https://github.com/r-pad/lerobot.git", rev = "33e6e4cf090331e2fa23616007718a63aa35bd77" }
 
-# Git dependencies as tasks
+# Problematic dependencies as tasks
 [tool.pixi.tasks]
 install-pyg = """
 pip install pyg_lib torch_scatter torch_sparse torch_cluster torch_spline_conv -f https://data.pyg.org/whl/torch-2.6.0+cu124.html
@@ -109,6 +107,7 @@ install-rpad-libs = "pip install git+https://github.com/r-pad/pyg_libs.git git+h
 install-torchdatasets = "pip install git+https://github.com/sriramsk1999/torchdatasets.git"
 install-segment-anything = "pip install git+https://github.com/facebookresearch/segment-anything.git"
 install-mano = "pip install git+https://github.com/hassony2/chumpy.git git+https://github.com/hassony2/manopth.git"
+install-tf = "pip install tensorflow-datasets<5 tensorflow-cpu<3"
 install-deps = { depends-on = [
     "install-open3d",
     "install-pyg",
@@ -117,6 +116,7 @@ install-deps = { depends-on = [
     "install-torchdatasets",
     "install-segment-anything",
     "install-mano",
+    "install-tf",
 ] }
 
 setup-pre-commit = "pre-commit install"
