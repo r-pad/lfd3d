@@ -253,7 +253,6 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/4c/c5/5757886c4f538c1b3f95f6745499a24bffa389a805dee92d093e2d9ba7db/easydict-1.9.tar.gz
       - pypi: https://files.pythonhosted.org/packages/87/62/9773de14fe6c45c23649e98b83231fffd7b9892b6cf863251dc2afa73643/einops-0.8.1-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/dd/71/40ee142e564b8a34a7ae9546e99e665e0001011a3254d5bbbe113d72ccba/etils-1.12.2-py3-none-any.whl
-      - pypi: https://files.pythonhosted.org/packages/63/fe/a17c106a1f4061ce83f04d14bcedcfb2c38c7793ea56bfb906a6fadae8cb/evdev-1.9.2.tar.gz
       - pypi: https://files.pythonhosted.org/packages/02/cc/b7e31358aac6ed1ef2bb790a9746ac2c69bcb3c8588b41616914eb106eaf/exceptiongroup-1.2.2-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/7b/8f/c4d9bafc34ad7ad5d8dc16dd1347ee0e507a52c3adb6bfa8887e1c6a26ba/executing-2.2.0-py2.py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/05/2c/ffc08c54c05cdce6fbed2aeebc46348dbe180c6d2c541c7af7ba0aa5f5f8/Farama_Notifications-0.0.4-py3-none-any.whl
@@ -289,7 +288,7 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/86/50/2446a132267e60b8a48b2e5835d6e24fd988000d0f5b9b15ebd6d64ef769/hf_xet-1.1.7-cp37-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/87/f5/72347bc88306acb359581ac4d52f23c0ef445b57157adedb9aee0cd689d2/httpcore-1.0.7-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/2a/39/e50c7c3a983047577ee07d2a9e53faf5a69493943ec3f6a384bdc792deb2/httpx-0.28.1-py3-none-any.whl
-      - pypi: https://files.pythonhosted.org/packages/32/30/532fe57467a6cc7ff2e39f088db1cb6d6bf522f724a4a5c7beda1282d5a6/huggingface_hub-0.32.2-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/cb/bd/1a875e0d592d447cbc02805fd3fe0f497714d6a2583f59d14fa9ebad96eb/huggingface_hub-0.36.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/c6/50/e0edd38dcd63fb26a8547f13d28f7a008bc4a3fd4eb4ff030673f22ad41a/hydra_core-1.3.2-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/07/ce/0845144ed1f0e25db5e7a79c2354c1da4b5ce392b8966449d5db8dca18f1/identify-2.6.9-py2.py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/76/c6/c88e154df9c4e1a2a66ccf0005a88dfb2650c1dffb6f5ce603dfbd452ce3/idna-3.10-py3-none-any.whl
@@ -331,7 +330,7 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/3f/0a/678ebcf4b6dad6ad63dfc2445d190f79a97fa7bc7150f57a6c505459e2bc/keras-3.9.2-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/de/c6/7b9bb8044e150d4d1558423a1568e4f227193662a02231064e3824f37e0a/kiwisolver-1.4.8-cp310-cp310-manylinux_2_12_x86_64.manylinux2010_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/2d/00/d90b10b962b4277f5e64a78b6609968859ff86889f5b898c1a778c06ec00/lark-1.2.2-py3-none-any.whl
-      - pypi: git+https://github.com/r-pad/lerobot.git?rev=ebbe620d3938ce368d87841d52ef551dda512936#ebbe620d3938ce368d87841d52ef551dda512936
+      - pypi: git+https://github.com/r-pad/lerobot.git?rev=33e6e4cf090331e2fa23616007718a63aa35bd77#33e6e4cf090331e2fa23616007718a63aa35bd77
       - pypi: https://files.pythonhosted.org/packages/1d/fc/716c1e62e512ef1c160e7984a73a5fc7df45166f2ff3f254e71c58076f7c/libclang-18.1.1-py2.py3-none-manylinux2010_x86_64.whl
       - pypi: git+https://github.com/sriramsk1999/LIBERO.git?rev=15a91548acf90c6f502a99c21ca18792c5ae8256#15a91548acf90c6f502a99c21ca18792c5ae8256
       - pypi: https://files.pythonhosted.org/packages/16/2a/d5de2884759ca5eb1103200c1c3b9c5df362250020870a1556d19d15a6d1/lightning_utilities-0.11.7-py3-none-any.whl
@@ -429,7 +428,6 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/8a/0b/9fcc47d19c48b59121088dd6da2488a49d5f72dacf8262e2790a1d2c7d15/pygments-2.19.1-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/eb/f5/b9e2a42aa8f9e34d52d66de87941ecd236570c7ed2e87775ed23bbe4e224/pymdown_extensions-10.14.3-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/df/6f/d545c5b80957ae211568f311e0dfd89471e38855c8cc82aefe4616e35976/pymunk-7.1.0-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl
-      - pypi: https://files.pythonhosted.org/packages/59/4f/ac3fa906ae8a375a536b12794128c5efacade9eaa917a35dfd27ce0c7400/pynput-1.8.1-py2.py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/92/44/8634af40b0db528b5b37e901c0dc67321354880d251bf8965901d57693a5/PyOpenGL-3.1.9-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/05/e7/df2285f3d08fee213f2d041540fa4fc9ca6c2d44cf36d3a035bf2a8d2bcc/pyparsing-3.2.3-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/af/2d/d6d4a12a4af3b944e4ab27850bf1e696fc17fbdccdcd5fbbafadbfbca5a4/pyrealsense2-2.56.5.9235-cp310-cp310-manylinux1_x86_64.whl
@@ -437,7 +435,6 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/7a/d0/de969198293cdea22b3a6fb99a99aeeddb7b3827f0823b33c5dc0734bbe5/pytest-7.3.2-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/ec/57/56b9bcc3c9c6a792fcbaf139543cee77261f3651ca9da0c93f5c1221264b/python_dateutil-2.9.0.post0-py2.py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/08/20/0f2523b9e50a8052bc6a8b732dfc8568abbdc42010aef03a2d750bdab3b2/python_json_logger-3.3.0-py3-none-any.whl
-      - pypi: https://files.pythonhosted.org/packages/fc/b8/ff33610932e0ee81ae7f1269c890f697d56ff74b9f5b2ee5d9b7fa2c5355/python_xlib-0.33-py2.py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/2b/d2/ecd65ff1e0b1ca79f9785dd65d5ced7ec2643a828068aaa24e47e4c84a14/pytorch_lightning-2.4.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/81/c4/34e93fe5f5429d7570ec1fa436f1986fb1f00c3e0f43a589fe2bbcd22c3f/pytz-2025.2-py2.py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/6b/4e/1523cb902fd98355e2e9ea5e5eb237cbc5f3ad5f3075fa65087aa0ecb669/PyYAML-6.0.2-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
@@ -486,7 +483,7 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/32/d5/f9a850d79b0851d1d4ef6456097579a9005b31fea68726a4ae5f2d82ddd9/threadpoolctl-3.6.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/01/a5/eeb717242343d9ca34e7de554a6c08d96a0cfc7005ece4f847b1753581a6/timm-0.9.12-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/e6/34/ebdc18bae6aa14fbee1a08b63c015c72b64868ff7dae68808ab500c492e2/tinycss2-1.4.0-py3-none-any.whl
-      - pypi: https://files.pythonhosted.org/packages/aa/49/15fae66ac62e49255eeedbb7f4127564b2c3f3aef2009913f525732d1a08/tokenizers-0.20.3-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
+      - pypi: https://files.pythonhosted.org/packages/d0/c6/dc3a0db5a6766416c32c034286d7c2d406da1f498e4de04ab1b8959edd00/tokenizers-0.22.1-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/44/6f/7120676b6d73228c96e17f1f794d8ab046fc910d781c8d151120c3f1569e/toml-0.10.2-py2.py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/6e/c2/61d3e0f47e2b74ef40a68b9e6ad5984f6241a942f7cd3bbfbdbd03861ea9/tomli-2.2.1-py3-none-any.whl
       - pypi: https://download.pytorch.org/whl/cu124/torch-2.6.0%2Bcu124-cp310-cp310-linux_x86_64.whl#sha256=7f2ba7f7c0459320a521696f6b5bccc187f59890b23c9dfb6c49b0b87c6bfc97
@@ -497,7 +494,7 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/22/55/b78a464de78051a30599ceb6983b01d8f732e6f69bf37b4ed07f642ac0fc/tornado-6.4.2-cp38-abi3-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/d0/30/dc54f88dd4a2b5dc8a0279bdd7270e735851848b762aeb1c1184ed1f6b14/tqdm-4.67.1-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/00/c0/8f5d070730d7836adc9c9b6408dec68c6ced86b304a9b26a14df072a6e8c/traitlets-5.14.3-py3-none-any.whl
-      - pypi: https://files.pythonhosted.org/packages/f9/9d/030cc1b3e88172967e22ee1d012e0d5e0384eb70d2a098d1669d549aea29/transformers-4.45.2-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/98/41/6ba7c2eafa839069f1f949c30cd22e791b14b90c7af8cb0c65cc47702dca/transformers-4.56.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/3e/79/9563bd90b2b964e85424b6e41e58c39d812d31f62198140b87c823e19ed9/trimesh-4.7.3-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/01/65/3ffa90e158a2c82f0716eee8d26a725d241549b7d7aaf7e4f44ac03ebd89/triton-3.2.0-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/7f/fc/5b29fea8cee020515ca82cc68e3b8e1e34bb19a3535ad854cac9257b414c/typer-0.15.2-py3-none-any.whl
@@ -1767,11 +1764,6 @@ packages:
   - etils[etree] ; extra == 'etree-tf'
   - etils[ecolab] ; extra == 'lazy-imports'
   requires_python: '>=3.10'
-- pypi: https://files.pythonhosted.org/packages/63/fe/a17c106a1f4061ce83f04d14bcedcfb2c38c7793ea56bfb906a6fadae8cb/evdev-1.9.2.tar.gz
-  name: evdev
-  version: 1.9.2
-  sha256: 5d3278892ce1f92a74d6bf888cc8525d9f68af85dbe336c95d1c87fb8f423069
-  requires_python: '>=3.8'
 - pypi: https://files.pythonhosted.org/packages/02/cc/b7e31358aac6ed1ef2bb790a9746ac2c69bcb3c8588b41616914eb106eaf/exceptiongroup-1.2.2-py3-none-any.whl
   name: exceptiongroup
   version: 1.2.2
@@ -2558,10 +2550,10 @@ packages:
   - socksio==1.* ; extra == 'socks'
   - zstandard>=0.18.0 ; extra == 'zstd'
   requires_python: '>=3.8'
-- pypi: https://files.pythonhosted.org/packages/32/30/532fe57467a6cc7ff2e39f088db1cb6d6bf522f724a4a5c7beda1282d5a6/huggingface_hub-0.32.2-py3-none-any.whl
+- pypi: https://files.pythonhosted.org/packages/cb/bd/1a875e0d592d447cbc02805fd3fe0f497714d6a2583f59d14fa9ebad96eb/huggingface_hub-0.36.0-py3-none-any.whl
   name: huggingface-hub
-  version: 0.32.2
-  sha256: f8fcf14603237eadf96dbe577d30b330f8c27b4a0a31e8f6c94fdc25e021fdb8
+  version: 0.36.0
+  sha256: 7bcc9ad17d5b3f07b57c78e79d527102d08313caa278a641993acddcb894548d
   requires_dist:
   - filelock
   - fsspec>=2023.5.0
@@ -2570,7 +2562,7 @@ packages:
   - requests
   - tqdm>=4.42.1
   - typing-extensions>=3.7.4.3
-  - hf-xet>=1.1.2,<2.0.0 ; platform_machine == 'aarch64' or platform_machine == 'amd64' or platform_machine == 'arm64' or platform_machine == 'x86_64'
+  - hf-xet>=1.1.3,<2.0.0 ; platform_machine == 'aarch64' or platform_machine == 'amd64' or platform_machine == 'arm64' or platform_machine == 'x86_64'
   - inquirerpy==0.3.4 ; extra == 'all'
   - aiohttp ; extra == 'all'
   - authlib>=1.3.2 ; extra == 'all'
@@ -2585,7 +2577,7 @@ packages:
   - pytest-xdist ; extra == 'all'
   - pytest-vcr ; extra == 'all'
   - pytest-asyncio ; extra == 'all'
-  - pytest-rerunfailures ; extra == 'all'
+  - pytest-rerunfailures<16.0 ; extra == 'all'
   - pytest-mock ; extra == 'all'
   - urllib3<2.0 ; extra == 'all'
   - soundfile ; extra == 'all'
@@ -2593,7 +2585,8 @@ packages:
   - gradio>=4.0.0 ; extra == 'all'
   - numpy ; extra == 'all'
   - ruff>=0.9.0 ; extra == 'all'
-  - libcst==1.4.0 ; extra == 'all'
+  - libcst>=1.4.0 ; extra == 'all'
+  - ty ; extra == 'all'
   - typing-extensions>=4.8.0 ; extra == 'all'
   - types-pyyaml ; extra == 'all'
   - types-requests ; extra == 'all'
@@ -2618,7 +2611,7 @@ packages:
   - pytest-xdist ; extra == 'dev'
   - pytest-vcr ; extra == 'dev'
   - pytest-asyncio ; extra == 'dev'
-  - pytest-rerunfailures ; extra == 'dev'
+  - pytest-rerunfailures<16.0 ; extra == 'dev'
   - pytest-mock ; extra == 'dev'
   - urllib3<2.0 ; extra == 'dev'
   - soundfile ; extra == 'dev'
@@ -2626,7 +2619,8 @@ packages:
   - gradio>=4.0.0 ; extra == 'dev'
   - numpy ; extra == 'dev'
   - ruff>=0.9.0 ; extra == 'dev'
-  - libcst==1.4.0 ; extra == 'dev'
+  - libcst>=1.4.0 ; extra == 'dev'
+  - ty ; extra == 'dev'
   - typing-extensions>=4.8.0 ; extra == 'dev'
   - types-pyyaml ; extra == 'dev'
   - types-requests ; extra == 'dev'
@@ -2650,7 +2644,8 @@ packages:
   - httpx ; extra == 'oauth'
   - itsdangerous ; extra == 'oauth'
   - ruff>=0.9.0 ; extra == 'quality'
-  - libcst==1.4.0 ; extra == 'quality'
+  - libcst>=1.4.0 ; extra == 'quality'
+  - ty ; extra == 'quality'
   - mypy>=1.14.1,<1.15.0 ; python_full_version == '3.8.*' and extra == 'quality'
   - mypy==1.15.0 ; python_full_version >= '3.9' and extra == 'quality'
   - tensorflow ; extra == 'tensorflow'
@@ -2672,7 +2667,7 @@ packages:
   - pytest-xdist ; extra == 'testing'
   - pytest-vcr ; extra == 'testing'
   - pytest-asyncio ; extra == 'testing'
-  - pytest-rerunfailures ; extra == 'testing'
+  - pytest-rerunfailures<16.0 ; extra == 'testing'
   - pytest-mock ; extra == 'testing'
   - urllib3<2.0 ; extra == 'testing'
   - soundfile ; extra == 'testing'
@@ -3567,7 +3562,7 @@ packages:
   purls: []
   size: 671240
   timestamp: 1740155456116
-- pypi: git+https://github.com/r-pad/lerobot.git?rev=ebbe620d3938ce368d87841d52ef551dda512936#ebbe620d3938ce368d87841d52ef551dda512936
+- pypi: git+https://github.com/r-pad/lerobot.git?rev=33e6e4cf090331e2fa23616007718a63aa35bd77#33e6e4cf090331e2fa23616007718a63aa35bd77
   name: lerobot
   version: 0.1.0
   requires_dist:
@@ -3590,7 +3585,6 @@ packages:
   - packaging>=24.2
   - av>=14.2.0
   - pymunk>=6.6.0
-  - pynput>=1.7.7
   - pyzmq>=26.2.1
   - rerun-sdk>=0.21.0,<0.24.0
   - termcolor>=2.4.0
@@ -3605,7 +3599,7 @@ packages:
   - wheel
   - pybind11>=2.13.6,<3
   - trimesh>=4.6.13,<5
-  - transformers==4.45.2
+  - transformers==4.56.0
   - sentencepiece>=0.2.0,<0.3
   - google-genai>=1.26.0,<2
   - ipdb>=0.13.13,<0.14
@@ -3621,15 +3615,12 @@ packages:
   - debugpy>=1.8.1 ; extra == 'dev'
   - gym-dora @ git+https://github.com/dora-rs/dora-lerobot.git#subdirectory=gym_dora ; python_full_version < '4.0' and extra == 'dora'
   - dynamixel-sdk>=3.7.31 ; extra == 'dynamixel'
-  - pynput>=1.7.7 ; extra == 'dynamixel'
   - feetech-servo-sdk>=1.0.0 ; extra == 'feetech'
-  - pynput>=1.7.7 ; extra == 'feetech'
   - transformers>=4.48.0 ; extra == 'pi0'
   - gym-pusht>=0.1.5 ; python_full_version < '4.0' and extra == 'pusht'
   - hello-robot-stretch-body>=0.7.27 ; python_full_version < '4.0' and sys_platform == 'linux' and extra == 'stretch'
   - pyrender @ git+https://github.com/mmatl/pyrender.git ; sys_platform == 'linux' and extra == 'stretch'
   - pyrealsense2>=2.55.1.6486 ; sys_platform != 'darwin' and extra == 'stretch'
-  - pynput>=1.7.7 ; extra == 'stretch'
   - pytest>=8.1.0 ; extra == 'test'
   - pytest-cov>=5.0.0 ; extra == 'test'
   - pyserial>=3.5 ; extra == 'test'
@@ -3641,12 +3632,12 @@ packages:
 - pypi: .
   name: lfd3d
   version: 0.1.0
-  sha256: 16c01e215d7ff447a4b9afcc0e8d2cfb638e8777f429516090d808e4ef472bfb
+  sha256: 41eeab520065d37d54617be301199b8936e5f16f7786c6a11caea7f82a5f6ebd
   requires_dist:
   - diffusers>=0.26.3
   - gif
   - typer
-  - huggingface-hub>=0.25.2,<=0.32.2
+  - huggingface-hub>=0.34.0,<1.0
   - datasets<4.0.0
   - hydra-core==1.3.2
   - pytorch-lightning==2.4
@@ -3655,7 +3646,7 @@ packages:
   - torchmetrics
   - wandb==0.18
   - moviepy==1.0.3
-  - transformers==4.45.2
+  - transformers==4.56.0
   - sentencepiece
   - robot-descriptions
   - trimesh
@@ -5784,17 +5775,6 @@ packages:
   - matplotlib ; extra == 'dev'
   - numpy ; extra == 'dev'
   requires_python: '>=3.9'
-- pypi: https://files.pythonhosted.org/packages/59/4f/ac3fa906ae8a375a536b12794128c5efacade9eaa917a35dfd27ce0c7400/pynput-1.8.1-py2.py3-none-any.whl
-  name: pynput
-  version: 1.8.1
-  sha256: 42dfcf27404459ca16ca889c8fb8ffe42a9fe54f722fd1a3e130728e59e768d2
-  requires_dist:
-  - six
-  - evdev>=1.3 ; 'linux' in sys_platform
-  - python-xlib>=0.17 ; 'linux' in sys_platform
-  - enum34 ; python_full_version == '2.7.*'
-  - pyobjc-framework-applicationservices>=8.0 ; sys_platform == 'darwin'
-  - pyobjc-framework-quartz>=8.0 ; sys_platform == 'darwin'
 - pypi: https://files.pythonhosted.org/packages/92/44/8634af40b0db528b5b37e901c0dc67321354880d251bf8965901d57693a5/PyOpenGL-3.1.9-py3-none-any.whl
   name: pyopengl
   version: 3.1.9
@@ -5899,12 +5879,6 @@ packages:
   - mkdocs-literate-nav ; extra == 'dev'
   - mike ; extra == 'dev'
   requires_python: '>=3.8'
-- pypi: https://files.pythonhosted.org/packages/fc/b8/ff33610932e0ee81ae7f1269c890f697d56ff74b9f5b2ee5d9b7fa2c5355/python_xlib-0.33-py2.py3-none-any.whl
-  name: python-xlib
-  version: '0.33'
-  sha256: c3534038d42e0df2f1392a1b30a15a4ff5fdc2b86cfa94f072bf11b10a164398
-  requires_dist:
-  - six>=1.10.0
 - conda: https://conda.anaconda.org/conda-forge/linux-64/python_abi-3.10-6_cp310.conda
   build_number: 6
   sha256: 716287b4c15fb9a78b49a627dd7057c9fc7a29c6d4056b506fc84dab2cd2ca85
@@ -6884,13 +6858,14 @@ packages:
   purls: []
   size: 3318875
   timestamp: 1699202167581
-- pypi: https://files.pythonhosted.org/packages/aa/49/15fae66ac62e49255eeedbb7f4127564b2c3f3aef2009913f525732d1a08/tokenizers-0.20.3-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
+- pypi: https://files.pythonhosted.org/packages/d0/c6/dc3a0db5a6766416c32c034286d7c2d406da1f498e4de04ab1b8959edd00/tokenizers-0.22.1-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
   name: tokenizers
-  version: 0.20.3
-  sha256: 1fd9fee817f655a8f50049f685e224828abfadd436b8ff67979fc1d054b435f1
+  version: 0.22.1
+  sha256: e2ef6063d7a84994129732b47e7915e8710f27f99f3a3260b8a38fc7ccd083f4
   requires_dist:
-  - huggingface-hub>=0.16.4,<1.0
+  - huggingface-hub>=0.16.4,<2.0
   - pytest ; extra == 'testing'
+  - pytest-asyncio ; extra == 'testing'
   - requests ; extra == 'testing'
   - numpy ; extra == 'testing'
   - datasets ; extra == 'testing'
@@ -6900,7 +6875,7 @@ packages:
   - sphinx-rtd-theme ; extra == 'docs'
   - setuptools-rust ; extra == 'docs'
   - tokenizers[testing] ; extra == 'dev'
-  requires_python: '>=3.7'
+  requires_python: '>=3.9'
 - pypi: https://files.pythonhosted.org/packages/44/6f/7120676b6d73228c96e17f1f794d8ab046fc910d781c8d151120c3f1569e/toml-0.10.2-py2.py3-none-any.whl
   name: toml
   version: 0.10.2
@@ -7186,359 +7161,393 @@ packages:
   - pytest-mypy-testing ; extra == 'test'
   - pytest>=7.0,<8.2 ; extra == 'test'
   requires_python: '>=3.8'
-- pypi: https://files.pythonhosted.org/packages/f9/9d/030cc1b3e88172967e22ee1d012e0d5e0384eb70d2a098d1669d549aea29/transformers-4.45.2-py3-none-any.whl
+- pypi: https://files.pythonhosted.org/packages/98/41/6ba7c2eafa839069f1f949c30cd22e791b14b90c7af8cb0c65cc47702dca/transformers-4.56.0-py3-none-any.whl
   name: transformers
-  version: 4.45.2
-  sha256: c551b33660cfc815bae1f9f097ecfd1e65be623f13c6ee0dda372bd881460210
+  version: 4.56.0
+  sha256: bacf539c38dd850690856881c4974321af93a22f2ee96bcc994741a2121d8e71
   requires_dist:
   - filelock
-  - huggingface-hub>=0.23.2,<1.0
+  - huggingface-hub>=0.34.0,<1.0
   - numpy>=1.17
   - packaging>=20.0
   - pyyaml>=5.1
   - regex!=2019.12.17
   - requests
-  - safetensors>=0.4.1
-  - tokenizers>=0.20,<0.21
+  - tokenizers>=0.22.0,<=0.23.0
+  - safetensors>=0.4.3
   - tqdm>=4.27
   - accelerate>=0.26.0 ; extra == 'accelerate'
-  - pillow>=10.0.1,<=15.0 ; extra == 'agents'
-  - accelerate>=0.26.0 ; extra == 'agents'
-  - datasets!=2.5.0 ; extra == 'agents'
-  - diffusers ; extra == 'agents'
-  - opencv-python ; extra == 'agents'
-  - sentencepiece>=0.1.91,!=0.1.92 ; extra == 'agents'
-  - torch ; extra == 'agents'
-  - pillow>=10.0.1,<=15.0 ; extra == 'all'
+  - tensorflow>2.9,<2.16 ; extra == 'all'
+  - onnxconverter-common ; extra == 'all'
+  - tf2onnx ; extra == 'all'
+  - tensorflow-text<2.16 ; extra == 'all'
+  - keras-nlp>=0.3.1,<0.14.0 ; extra == 'all'
+  - torch>=2.2 ; extra == 'all'
   - accelerate>=0.26.0 ; extra == 'all'
-  - av==9.2.0 ; extra == 'all'
-  - codecarbon==1.2.0 ; extra == 'all'
-  - decord==0.6.0 ; extra == 'all'
-  - flax>=0.4.1,<=0.7.0 ; extra == 'all'
   - jax>=0.4.1,<=0.4.13 ; extra == 'all'
   - jaxlib>=0.4.1,<=0.4.13 ; extra == 'all'
-  - kenlm ; extra == 'all'
-  - keras-nlp>=0.3.1,<0.14.0 ; extra == 'all'
-  - librosa ; extra == 'all'
-  - onnxconverter-common ; extra == 'all'
+  - flax>=0.4.1,<=0.7.0 ; extra == 'all'
   - optax>=0.0.8,<=0.1.4 ; extra == 'all'
-  - optuna ; extra == 'all'
-  - phonemizer ; extra == 'all'
-  - protobuf ; extra == 'all'
-  - pyctcdecode>=0.4.0 ; extra == 'all'
-  - ray[tune]>=2.7.0 ; extra == 'all'
   - scipy<1.13.0 ; extra == 'all'
   - sentencepiece>=0.1.91,!=0.1.92 ; extra == 'all'
-  - sigopt ; extra == 'all'
-  - tensorflow-text<2.16 ; extra == 'all'
-  - tensorflow>2.9,<2.16 ; extra == 'all'
-  - tf2onnx ; extra == 'all'
-  - timm<=0.9.16 ; extra == 'all'
-  - tokenizers>=0.20,<0.21 ; extra == 'all'
-  - torch ; extra == 'all'
+  - protobuf ; extra == 'all'
+  - tokenizers>=0.22.0,<=0.23.0 ; extra == 'all'
   - torchaudio ; extra == 'all'
+  - librosa ; extra == 'all'
+  - pyctcdecode>=0.4.0 ; extra == 'all'
+  - phonemizer ; extra == 'all'
+  - kenlm ; extra == 'all'
+  - pillow>=10.0.1,<=15.0 ; extra == 'all'
+  - kernels>=0.6.1,<=0.9 ; extra == 'all'
+  - optuna ; extra == 'all'
+  - ray[tune]>=2.7.0 ; extra == 'all'
+  - sigopt ; extra == 'all'
+  - timm!=1.0.18,<=1.0.19 ; extra == 'all'
   - torchvision ; extra == 'all'
-  - kenlm ; extra == 'audio'
+  - codecarbon>=2.8.1 ; extra == 'all'
+  - av ; extra == 'all'
+  - num2words ; extra == 'all'
+  - mistral-common[opencv]>=1.6.3 ; extra == 'all'
+  - jinja2>=3.1.0 ; extra == 'all'
   - librosa ; extra == 'audio'
-  - phonemizer ; extra == 'audio'
   - pyctcdecode>=0.4.0 ; extra == 'audio'
+  - phonemizer ; extra == 'audio'
+  - kenlm ; extra == 'audio'
   - optimum-benchmark>=0.3.0 ; extra == 'benchmark'
-  - codecarbon==1.2.0 ; extra == 'codecarbon'
-  - accelerate>=0.26.0 ; extra == 'deepspeed'
+  - jinja2>=3.1.0 ; extra == 'chat-template'
+  - codecarbon>=2.8.1 ; extra == 'codecarbon'
   - deepspeed>=0.9.3 ; extra == 'deepspeed'
-  - gitpython<3.1.19 ; extra == 'deepspeed-testing'
-  - accelerate>=0.26.0 ; extra == 'deepspeed-testing'
-  - beautifulsoup4 ; extra == 'deepspeed-testing'
-  - cookiecutter==1.7.3 ; extra == 'deepspeed-testing'
-  - datasets!=2.5.0 ; extra == 'deepspeed-testing'
+  - accelerate>=0.26.0 ; extra == 'deepspeed'
   - deepspeed>=0.9.3 ; extra == 'deepspeed-testing'
+  - accelerate>=0.26.0 ; extra == 'deepspeed-testing'
+  - pytest>=7.2.0 ; extra == 'deepspeed-testing'
+  - pytest-asyncio ; extra == 'deepspeed-testing'
+  - pytest-rich ; extra == 'deepspeed-testing'
+  - pytest-xdist ; extra == 'deepspeed-testing'
+  - pytest-order ; extra == 'deepspeed-testing'
+  - pytest-rerunfailures ; extra == 'deepspeed-testing'
+  - timeout-decorator ; extra == 'deepspeed-testing'
+  - parameterized>=0.9 ; extra == 'deepspeed-testing'
+  - psutil ; extra == 'deepspeed-testing'
+  - datasets>=2.15.0 ; extra == 'deepspeed-testing'
   - dill<0.3.5 ; extra == 'deepspeed-testing'
   - evaluate>=0.2.0 ; extra == 'deepspeed-testing'
-  - faiss-cpu ; extra == 'deepspeed-testing'
-  - nltk<=3.8.1 ; extra == 'deepspeed-testing'
-  - optuna ; extra == 'deepspeed-testing'
-  - parameterized ; extra == 'deepspeed-testing'
-  - protobuf ; extra == 'deepspeed-testing'
-  - psutil ; extra == 'deepspeed-testing'
-  - pydantic ; extra == 'deepspeed-testing'
-  - pytest-rich ; extra == 'deepspeed-testing'
   - pytest-timeout ; extra == 'deepspeed-testing'
-  - pytest-xdist ; extra == 'deepspeed-testing'
-  - pytest>=7.2.0,<8.0.0 ; extra == 'deepspeed-testing'
-  - rjieba ; extra == 'deepspeed-testing'
+  - ruff==0.11.2 ; extra == 'deepspeed-testing'
   - rouge-score!=0.0.7,!=0.0.8,!=0.1,!=0.1.1 ; extra == 'deepspeed-testing'
-  - ruff==0.5.1 ; extra == 'deepspeed-testing'
-  - sacrebleu>=1.4.12,<2.0.0 ; extra == 'deepspeed-testing'
+  - nltk<=3.8.1 ; extra == 'deepspeed-testing'
+  - gitpython<3.1.19 ; extra == 'deepspeed-testing'
   - sacremoses ; extra == 'deepspeed-testing'
-  - sentencepiece>=0.1.91,!=0.1.92 ; extra == 'deepspeed-testing'
+  - rjieba ; extra == 'deepspeed-testing'
+  - beautifulsoup4 ; extra == 'deepspeed-testing'
   - tensorboard ; extra == 'deepspeed-testing'
-  - timeout-decorator ; extra == 'deepspeed-testing'
-  - gitpython<3.1.19 ; extra == 'dev'
-  - pillow>=10.0.1,<=15.0 ; extra == 'dev'
+  - pydantic>=2 ; extra == 'deepspeed-testing'
+  - sentencepiece>=0.1.91,!=0.1.92 ; extra == 'deepspeed-testing'
+  - sacrebleu>=1.4.12,<2.0.0 ; extra == 'deepspeed-testing'
+  - libcst ; extra == 'deepspeed-testing'
+  - faiss-cpu ; extra == 'deepspeed-testing'
+  - cookiecutter==1.7.3 ; extra == 'deepspeed-testing'
+  - mistral-common[opencv]>=1.6.3 ; extra == 'deepspeed-testing'
+  - optuna ; extra == 'deepspeed-testing'
+  - protobuf ; extra == 'deepspeed-testing'
+  - tensorflow>2.9,<2.16 ; extra == 'dev'
+  - onnxconverter-common ; extra == 'dev'
+  - tf2onnx ; extra == 'dev'
+  - tensorflow-text<2.16 ; extra == 'dev'
+  - keras-nlp>=0.3.1,<0.14.0 ; extra == 'dev'
+  - torch>=2.2 ; extra == 'dev'
   - accelerate>=0.26.0 ; extra == 'dev'
-  - av==9.2.0 ; extra == 'dev'
-  - beautifulsoup4 ; extra == 'dev'
-  - codecarbon==1.2.0 ; extra == 'dev'
-  - cookiecutter==1.7.3 ; extra == 'dev'
-  - datasets!=2.5.0 ; extra == 'dev'
-  - decord==0.6.0 ; extra == 'dev'
-  - dill<0.3.5 ; extra == 'dev'
-  - evaluate>=0.2.0 ; extra == 'dev'
-  - faiss-cpu ; extra == 'dev'
-  - flax>=0.4.1,<=0.7.0 ; extra == 'dev'
-  - fugashi>=1.0 ; extra == 'dev'
-  - ipadic>=1.0.0,<2.0 ; extra == 'dev'
-  - isort>=5.5.4 ; extra == 'dev'
   - jax>=0.4.1,<=0.4.13 ; extra == 'dev'
   - jaxlib>=0.4.1,<=0.4.13 ; extra == 'dev'
-  - kenlm ; extra == 'dev'
-  - keras-nlp>=0.3.1,<0.14.0 ; extra == 'dev'
-  - libcst ; extra == 'dev'
-  - librosa ; extra == 'dev'
-  - nltk<=3.8.1 ; extra == 'dev'
-  - onnxconverter-common ; extra == 'dev'
+  - flax>=0.4.1,<=0.7.0 ; extra == 'dev'
   - optax>=0.0.8,<=0.1.4 ; extra == 'dev'
-  - optuna ; extra == 'dev'
-  - parameterized ; extra == 'dev'
-  - phonemizer ; extra == 'dev'
-  - protobuf ; extra == 'dev'
-  - psutil ; extra == 'dev'
-  - pyctcdecode>=0.4.0 ; extra == 'dev'
-  - pydantic ; extra == 'dev'
-  - pytest-rich ; extra == 'dev'
-  - pytest-timeout ; extra == 'dev'
-  - pytest-xdist ; extra == 'dev'
-  - pytest>=7.2.0,<8.0.0 ; extra == 'dev'
-  - ray[tune]>=2.7.0 ; extra == 'dev'
-  - rhoknp>=1.1.0,<1.3.1 ; extra == 'dev'
-  - rich ; extra == 'dev'
-  - rjieba ; extra == 'dev'
-  - rouge-score!=0.0.7,!=0.0.8,!=0.1,!=0.1.1 ; extra == 'dev'
-  - ruff==0.5.1 ; extra == 'dev'
-  - sacrebleu>=1.4.12,<2.0.0 ; extra == 'dev'
-  - sacremoses ; extra == 'dev'
-  - scikit-learn ; extra == 'dev'
   - scipy<1.13.0 ; extra == 'dev'
   - sentencepiece>=0.1.91,!=0.1.92 ; extra == 'dev'
-  - sigopt ; extra == 'dev'
-  - sudachidict-core>=20220729 ; extra == 'dev'
-  - sudachipy>=0.6.6 ; extra == 'dev'
-  - tensorboard ; extra == 'dev'
-  - tensorflow-text<2.16 ; extra == 'dev'
-  - tensorflow>2.9,<2.16 ; extra == 'dev'
-  - tf2onnx ; extra == 'dev'
-  - timeout-decorator ; extra == 'dev'
-  - timm<=0.9.16 ; extra == 'dev'
-  - tokenizers>=0.20,<0.21 ; extra == 'dev'
-  - torch ; extra == 'dev'
+  - protobuf ; extra == 'dev'
+  - tokenizers>=0.22.0,<=0.23.0 ; extra == 'dev'
   - torchaudio ; extra == 'dev'
+  - librosa ; extra == 'dev'
+  - pyctcdecode>=0.4.0 ; extra == 'dev'
+  - phonemizer ; extra == 'dev'
+  - kenlm ; extra == 'dev'
+  - pillow>=10.0.1,<=15.0 ; extra == 'dev'
+  - kernels>=0.6.1,<=0.9 ; extra == 'dev'
+  - optuna ; extra == 'dev'
+  - ray[tune]>=2.7.0 ; extra == 'dev'
+  - sigopt ; extra == 'dev'
+  - timm!=1.0.18,<=1.0.19 ; extra == 'dev'
   - torchvision ; extra == 'dev'
-  - unidic>=1.0.2 ; extra == 'dev'
-  - unidic-lite>=1.0.7 ; extra == 'dev'
+  - codecarbon>=2.8.1 ; extra == 'dev'
+  - av ; extra == 'dev'
+  - num2words ; extra == 'dev'
+  - mistral-common[opencv]>=1.6.3 ; extra == 'dev'
+  - jinja2>=3.1.0 ; extra == 'dev'
+  - pytest>=7.2.0 ; extra == 'dev'
+  - pytest-asyncio ; extra == 'dev'
+  - pytest-rich ; extra == 'dev'
+  - pytest-xdist ; extra == 'dev'
+  - pytest-order ; extra == 'dev'
+  - pytest-rerunfailures ; extra == 'dev'
+  - timeout-decorator ; extra == 'dev'
+  - parameterized>=0.9 ; extra == 'dev'
+  - psutil ; extra == 'dev'
+  - datasets>=2.15.0 ; extra == 'dev'
+  - dill<0.3.5 ; extra == 'dev'
+  - evaluate>=0.2.0 ; extra == 'dev'
+  - pytest-timeout ; extra == 'dev'
+  - ruff==0.11.2 ; extra == 'dev'
+  - rouge-score!=0.0.7,!=0.0.8,!=0.1,!=0.1.1 ; extra == 'dev'
+  - nltk<=3.8.1 ; extra == 'dev'
+  - gitpython<3.1.19 ; extra == 'dev'
+  - sacremoses ; extra == 'dev'
+  - rjieba ; extra == 'dev'
+  - beautifulsoup4 ; extra == 'dev'
+  - tensorboard ; extra == 'dev'
+  - pydantic>=2 ; extra == 'dev'
+  - sacrebleu>=1.4.12,<2.0.0 ; extra == 'dev'
+  - libcst ; extra == 'dev'
+  - faiss-cpu ; extra == 'dev'
+  - cookiecutter==1.7.3 ; extra == 'dev'
   - urllib3<2.0.0 ; extra == 'dev'
-  - gitpython<3.1.19 ; extra == 'dev-tensorflow'
-  - pillow>=10.0.1,<=15.0 ; extra == 'dev-tensorflow'
-  - beautifulsoup4 ; extra == 'dev-tensorflow'
-  - cookiecutter==1.7.3 ; extra == 'dev-tensorflow'
-  - datasets!=2.5.0 ; extra == 'dev-tensorflow'
+  - rich ; extra == 'dev'
+  - pandas<2.3.0 ; extra == 'dev'
+  - fugashi>=1.0 ; extra == 'dev'
+  - ipadic>=1.0.0,<2.0 ; extra == 'dev'
+  - unidic-lite>=1.0.7 ; extra == 'dev'
+  - unidic>=1.0.2 ; extra == 'dev'
+  - sudachipy>=0.6.6 ; extra == 'dev'
+  - sudachidict-core>=20220729 ; extra == 'dev'
+  - rhoknp>=1.1.0,<1.3.1 ; extra == 'dev'
+  - scikit-learn ; extra == 'dev'
+  - pytest>=7.2.0 ; extra == 'dev-tensorflow'
+  - pytest-asyncio ; extra == 'dev-tensorflow'
+  - pytest-rich ; extra == 'dev-tensorflow'
+  - pytest-xdist ; extra == 'dev-tensorflow'
+  - pytest-order ; extra == 'dev-tensorflow'
+  - pytest-rerunfailures ; extra == 'dev-tensorflow'
+  - timeout-decorator ; extra == 'dev-tensorflow'
+  - parameterized>=0.9 ; extra == 'dev-tensorflow'
+  - psutil ; extra == 'dev-tensorflow'
+  - datasets>=2.15.0 ; extra == 'dev-tensorflow'
   - dill<0.3.5 ; extra == 'dev-tensorflow'
   - evaluate>=0.2.0 ; extra == 'dev-tensorflow'
-  - faiss-cpu ; extra == 'dev-tensorflow'
-  - isort>=5.5.4 ; extra == 'dev-tensorflow'
-  - kenlm ; extra == 'dev-tensorflow'
-  - keras-nlp>=0.3.1,<0.14.0 ; extra == 'dev-tensorflow'
-  - libcst ; extra == 'dev-tensorflow'
-  - librosa ; extra == 'dev-tensorflow'
-  - nltk<=3.8.1 ; extra == 'dev-tensorflow'
-  - onnxconverter-common ; extra == 'dev-tensorflow'
-  - onnxruntime-tools>=1.4.2 ; extra == 'dev-tensorflow'
-  - onnxruntime>=1.4.0 ; extra == 'dev-tensorflow'
-  - parameterized ; extra == 'dev-tensorflow'
-  - phonemizer ; extra == 'dev-tensorflow'
-  - protobuf ; extra == 'dev-tensorflow'
-  - psutil ; extra == 'dev-tensorflow'
-  - pyctcdecode>=0.4.0 ; extra == 'dev-tensorflow'
-  - pydantic ; extra == 'dev-tensorflow'
-  - pytest-rich ; extra == 'dev-tensorflow'
   - pytest-timeout ; extra == 'dev-tensorflow'
-  - pytest-xdist ; extra == 'dev-tensorflow'
-  - pytest>=7.2.0,<8.0.0 ; extra == 'dev-tensorflow'
-  - rich ; extra == 'dev-tensorflow'
-  - rjieba ; extra == 'dev-tensorflow'
+  - ruff==0.11.2 ; extra == 'dev-tensorflow'
   - rouge-score!=0.0.7,!=0.0.8,!=0.1,!=0.1.1 ; extra == 'dev-tensorflow'
-  - ruff==0.5.1 ; extra == 'dev-tensorflow'
-  - sacrebleu>=1.4.12,<2.0.0 ; extra == 'dev-tensorflow'
+  - nltk<=3.8.1 ; extra == 'dev-tensorflow'
+  - gitpython<3.1.19 ; extra == 'dev-tensorflow'
   - sacremoses ; extra == 'dev-tensorflow'
-  - scikit-learn ; extra == 'dev-tensorflow'
-  - sentencepiece>=0.1.91,!=0.1.92 ; extra == 'dev-tensorflow'
+  - rjieba ; extra == 'dev-tensorflow'
+  - beautifulsoup4 ; extra == 'dev-tensorflow'
   - tensorboard ; extra == 'dev-tensorflow'
-  - tensorflow-text<2.16 ; extra == 'dev-tensorflow'
+  - pydantic>=2 ; extra == 'dev-tensorflow'
+  - sentencepiece>=0.1.91,!=0.1.92 ; extra == 'dev-tensorflow'
+  - sacrebleu>=1.4.12,<2.0.0 ; extra == 'dev-tensorflow'
+  - libcst ; extra == 'dev-tensorflow'
+  - faiss-cpu ; extra == 'dev-tensorflow'
+  - cookiecutter==1.7.3 ; extra == 'dev-tensorflow'
+  - mistral-common[opencv]>=1.6.3 ; extra == 'dev-tensorflow'
   - tensorflow>2.9,<2.16 ; extra == 'dev-tensorflow'
+  - onnxconverter-common ; extra == 'dev-tensorflow'
   - tf2onnx ; extra == 'dev-tensorflow'
-  - timeout-decorator ; extra == 'dev-tensorflow'
-  - tokenizers>=0.20,<0.21 ; extra == 'dev-tensorflow'
+  - tensorflow-text<2.16 ; extra == 'dev-tensorflow'
+  - keras-nlp>=0.3.1,<0.14.0 ; extra == 'dev-tensorflow'
+  - protobuf ; extra == 'dev-tensorflow'
+  - tokenizers>=0.22.0,<=0.23.0 ; extra == 'dev-tensorflow'
+  - pillow>=10.0.1,<=15.0 ; extra == 'dev-tensorflow'
   - urllib3<2.0.0 ; extra == 'dev-tensorflow'
-  - gitpython<3.1.19 ; extra == 'dev-torch'
-  - pillow>=10.0.1,<=15.0 ; extra == 'dev-torch'
-  - accelerate>=0.26.0 ; extra == 'dev-torch'
-  - beautifulsoup4 ; extra == 'dev-torch'
-  - codecarbon==1.2.0 ; extra == 'dev-torch'
-  - cookiecutter==1.7.3 ; extra == 'dev-torch'
-  - datasets!=2.5.0 ; extra == 'dev-torch'
+  - rich ; extra == 'dev-tensorflow'
+  - pandas<2.3.0 ; extra == 'dev-tensorflow'
+  - scikit-learn ; extra == 'dev-tensorflow'
+  - onnxruntime>=1.4.0 ; extra == 'dev-tensorflow'
+  - onnxruntime-tools>=1.4.2 ; extra == 'dev-tensorflow'
+  - librosa ; extra == 'dev-tensorflow'
+  - pyctcdecode>=0.4.0 ; extra == 'dev-tensorflow'
+  - phonemizer ; extra == 'dev-tensorflow'
+  - kenlm ; extra == 'dev-tensorflow'
+  - pytest>=7.2.0 ; extra == 'dev-torch'
+  - pytest-asyncio ; extra == 'dev-torch'
+  - pytest-rich ; extra == 'dev-torch'
+  - pytest-xdist ; extra == 'dev-torch'
+  - pytest-order ; extra == 'dev-torch'
+  - pytest-rerunfailures ; extra == 'dev-torch'
+  - timeout-decorator ; extra == 'dev-torch'
+  - parameterized>=0.9 ; extra == 'dev-torch'
+  - psutil ; extra == 'dev-torch'
+  - datasets>=2.15.0 ; extra == 'dev-torch'
   - dill<0.3.5 ; extra == 'dev-torch'
   - evaluate>=0.2.0 ; extra == 'dev-torch'
+  - pytest-timeout ; extra == 'dev-torch'
+  - ruff==0.11.2 ; extra == 'dev-torch'
+  - rouge-score!=0.0.7,!=0.0.8,!=0.1,!=0.1.1 ; extra == 'dev-torch'
+  - nltk<=3.8.1 ; extra == 'dev-torch'
+  - gitpython<3.1.19 ; extra == 'dev-torch'
+  - sacremoses ; extra == 'dev-torch'
+  - rjieba ; extra == 'dev-torch'
+  - beautifulsoup4 ; extra == 'dev-torch'
+  - tensorboard ; extra == 'dev-torch'
+  - pydantic>=2 ; extra == 'dev-torch'
+  - sentencepiece>=0.1.91,!=0.1.92 ; extra == 'dev-torch'
+  - sacrebleu>=1.4.12,<2.0.0 ; extra == 'dev-torch'
+  - libcst ; extra == 'dev-torch'
   - faiss-cpu ; extra == 'dev-torch'
+  - cookiecutter==1.7.3 ; extra == 'dev-torch'
+  - mistral-common[opencv]>=1.6.3 ; extra == 'dev-torch'
+  - torch>=2.2 ; extra == 'dev-torch'
+  - accelerate>=0.26.0 ; extra == 'dev-torch'
+  - protobuf ; extra == 'dev-torch'
+  - tokenizers>=0.22.0,<=0.23.0 ; extra == 'dev-torch'
+  - torchaudio ; extra == 'dev-torch'
+  - librosa ; extra == 'dev-torch'
+  - pyctcdecode>=0.4.0 ; extra == 'dev-torch'
+  - phonemizer ; extra == 'dev-torch'
+  - kenlm ; extra == 'dev-torch'
+  - pillow>=10.0.1,<=15.0 ; extra == 'dev-torch'
+  - kernels>=0.6.1,<=0.9 ; extra == 'dev-torch'
+  - optuna ; extra == 'dev-torch'
+  - ray[tune]>=2.7.0 ; extra == 'dev-torch'
+  - sigopt ; extra == 'dev-torch'
+  - timm!=1.0.18,<=1.0.19 ; extra == 'dev-torch'
+  - torchvision ; extra == 'dev-torch'
+  - codecarbon>=2.8.1 ; extra == 'dev-torch'
+  - urllib3<2.0.0 ; extra == 'dev-torch'
+  - rich ; extra == 'dev-torch'
+  - pandas<2.3.0 ; extra == 'dev-torch'
   - fugashi>=1.0 ; extra == 'dev-torch'
   - ipadic>=1.0.0,<2.0 ; extra == 'dev-torch'
-  - isort>=5.5.4 ; extra == 'dev-torch'
-  - kenlm ; extra == 'dev-torch'
-  - libcst ; extra == 'dev-torch'
-  - librosa ; extra == 'dev-torch'
-  - nltk<=3.8.1 ; extra == 'dev-torch'
-  - onnxruntime-tools>=1.4.2 ; extra == 'dev-torch'
-  - onnxruntime>=1.4.0 ; extra == 'dev-torch'
-  - optuna ; extra == 'dev-torch'
-  - parameterized ; extra == 'dev-torch'
-  - phonemizer ; extra == 'dev-torch'
-  - protobuf ; extra == 'dev-torch'
-  - psutil ; extra == 'dev-torch'
-  - pyctcdecode>=0.4.0 ; extra == 'dev-torch'
-  - pydantic ; extra == 'dev-torch'
-  - pytest-rich ; extra == 'dev-torch'
-  - pytest-timeout ; extra == 'dev-torch'
-  - pytest-xdist ; extra == 'dev-torch'
-  - pytest>=7.2.0,<8.0.0 ; extra == 'dev-torch'
-  - ray[tune]>=2.7.0 ; extra == 'dev-torch'
-  - rhoknp>=1.1.0,<1.3.1 ; extra == 'dev-torch'
-  - rich ; extra == 'dev-torch'
-  - rjieba ; extra == 'dev-torch'
-  - rouge-score!=0.0.7,!=0.0.8,!=0.1,!=0.1.1 ; extra == 'dev-torch'
-  - ruff==0.5.1 ; extra == 'dev-torch'
-  - sacrebleu>=1.4.12,<2.0.0 ; extra == 'dev-torch'
-  - sacremoses ; extra == 'dev-torch'
-  - scikit-learn ; extra == 'dev-torch'
-  - sentencepiece>=0.1.91,!=0.1.92 ; extra == 'dev-torch'
-  - sigopt ; extra == 'dev-torch'
-  - sudachidict-core>=20220729 ; extra == 'dev-torch'
-  - sudachipy>=0.6.6 ; extra == 'dev-torch'
-  - tensorboard ; extra == 'dev-torch'
-  - timeout-decorator ; extra == 'dev-torch'
-  - timm<=0.9.16 ; extra == 'dev-torch'
-  - tokenizers>=0.20,<0.21 ; extra == 'dev-torch'
-  - torch ; extra == 'dev-torch'
-  - torchaudio ; extra == 'dev-torch'
-  - torchvision ; extra == 'dev-torch'
-  - unidic>=1.0.2 ; extra == 'dev-torch'
   - unidic-lite>=1.0.7 ; extra == 'dev-torch'
-  - urllib3<2.0.0 ; extra == 'dev-torch'
-  - flax>=0.4.1,<=0.7.0 ; extra == 'flax'
+  - unidic>=1.0.2 ; extra == 'dev-torch'
+  - sudachipy>=0.6.6 ; extra == 'dev-torch'
+  - sudachidict-core>=20220729 ; extra == 'dev-torch'
+  - rhoknp>=1.1.0,<1.3.1 ; extra == 'dev-torch'
+  - scikit-learn ; extra == 'dev-torch'
+  - onnxruntime>=1.4.0 ; extra == 'dev-torch'
+  - onnxruntime-tools>=1.4.2 ; extra == 'dev-torch'
+  - num2words ; extra == 'dev-torch'
   - jax>=0.4.1,<=0.4.13 ; extra == 'flax'
   - jaxlib>=0.4.1,<=0.4.13 ; extra == 'flax'
+  - flax>=0.4.1,<=0.7.0 ; extra == 'flax'
   - optax>=0.0.8,<=0.1.4 ; extra == 'flax'
   - scipy<1.13.0 ; extra == 'flax'
-  - kenlm ; extra == 'flax-speech'
   - librosa ; extra == 'flax-speech'
-  - phonemizer ; extra == 'flax-speech'
   - pyctcdecode>=0.4.0 ; extra == 'flax-speech'
+  - phonemizer ; extra == 'flax-speech'
+  - kenlm ; extra == 'flax-speech'
   - ftfy ; extra == 'ftfy'
+  - hf-xet ; extra == 'hf-xet'
+  - kernels>=0.6.1,<=0.9 ; extra == 'hub-kernels'
+  - kernels>=0.6.1,<=0.9 ; extra == 'integrations'
   - optuna ; extra == 'integrations'
   - ray[tune]>=2.7.0 ; extra == 'integrations'
   - sigopt ; extra == 'integrations'
   - fugashi>=1.0 ; extra == 'ja'
   - ipadic>=1.0.0,<2.0 ; extra == 'ja'
-  - rhoknp>=1.1.0,<1.3.1 ; extra == 'ja'
-  - sudachidict-core>=20220729 ; extra == 'ja'
-  - sudachipy>=0.6.6 ; extra == 'ja'
-  - unidic>=1.0.2 ; extra == 'ja'
   - unidic-lite>=1.0.7 ; extra == 'ja'
+  - unidic>=1.0.2 ; extra == 'ja'
+  - sudachipy>=0.6.6 ; extra == 'ja'
+  - sudachidict-core>=20220729 ; extra == 'ja'
+  - rhoknp>=1.1.0,<1.3.1 ; extra == 'ja'
+  - mistral-common[opencv]>=1.6.3 ; extra == 'mistral-common'
   - cookiecutter==1.7.3 ; extra == 'modelcreation'
   - natten>=0.14.6,<0.15.0 ; extra == 'natten'
+  - num2words ; extra == 'num2words'
   - onnxconverter-common ; extra == 'onnx'
-  - onnxruntime-tools>=1.4.2 ; extra == 'onnx'
-  - onnxruntime>=1.4.0 ; extra == 'onnx'
   - tf2onnx ; extra == 'onnx'
-  - onnxruntime-tools>=1.4.2 ; extra == 'onnxruntime'
+  - onnxruntime>=1.4.0 ; extra == 'onnx'
+  - onnxruntime-tools>=1.4.2 ; extra == 'onnx'
   - onnxruntime>=1.4.0 ; extra == 'onnxruntime'
+  - onnxruntime-tools>=1.4.2 ; extra == 'onnxruntime'
+  - opentelemetry-api ; extra == 'open-telemetry'
+  - opentelemetry-exporter-otlp ; extra == 'open-telemetry'
+  - opentelemetry-sdk ; extra == 'open-telemetry'
   - optuna ; extra == 'optuna'
+  - datasets>=2.15.0 ; extra == 'quality'
+  - ruff==0.11.2 ; extra == 'quality'
   - gitpython<3.1.19 ; extra == 'quality'
-  - datasets!=2.5.0 ; extra == 'quality'
-  - isort>=5.5.4 ; extra == 'quality'
+  - urllib3<2.0.0 ; extra == 'quality'
   - libcst ; extra == 'quality'
   - rich ; extra == 'quality'
-  - ruff==0.5.1 ; extra == 'quality'
-  - urllib3<2.0.0 ; extra == 'quality'
+  - pandas<2.3.0 ; extra == 'quality'
   - ray[tune]>=2.7.0 ; extra == 'ray'
-  - datasets!=2.5.0 ; extra == 'retrieval'
   - faiss-cpu ; extra == 'retrieval'
-  - ruff==0.5.1 ; extra == 'ruff'
+  - datasets>=2.15.0 ; extra == 'retrieval'
+  - ruff==0.11.2 ; extra == 'ruff'
   - sagemaker>=2.31.0 ; extra == 'sagemaker'
-  - protobuf ; extra == 'sentencepiece'
   - sentencepiece>=0.1.91,!=0.1.92 ; extra == 'sentencepiece'
-  - fastapi ; extra == 'serving'
-  - pydantic ; extra == 'serving'
-  - starlette ; extra == 'serving'
+  - protobuf ; extra == 'sentencepiece'
+  - openai>=1.98.0 ; extra == 'serving'
+  - pydantic>=2 ; extra == 'serving'
   - uvicorn ; extra == 'serving'
+  - fastapi ; extra == 'serving'
+  - starlette ; extra == 'serving'
+  - torch>=2.2 ; extra == 'serving'
+  - accelerate>=0.26.0 ; extra == 'serving'
   - sigopt ; extra == 'sigopt'
   - scikit-learn ; extra == 'sklearn'
-  - kenlm ; extra == 'speech'
-  - librosa ; extra == 'speech'
-  - phonemizer ; extra == 'speech'
-  - pyctcdecode>=0.4.0 ; extra == 'speech'
   - torchaudio ; extra == 'speech'
-  - gitpython<3.1.19 ; extra == 'testing'
-  - beautifulsoup4 ; extra == 'testing'
-  - cookiecutter==1.7.3 ; extra == 'testing'
-  - datasets!=2.5.0 ; extra == 'testing'
+  - librosa ; extra == 'speech'
+  - pyctcdecode>=0.4.0 ; extra == 'speech'
+  - phonemizer ; extra == 'speech'
+  - kenlm ; extra == 'speech'
+  - pytest>=7.2.0 ; extra == 'testing'
+  - pytest-asyncio ; extra == 'testing'
+  - pytest-rich ; extra == 'testing'
+  - pytest-xdist ; extra == 'testing'
+  - pytest-order ; extra == 'testing'
+  - pytest-rerunfailures ; extra == 'testing'
+  - timeout-decorator ; extra == 'testing'
+  - parameterized>=0.9 ; extra == 'testing'
+  - psutil ; extra == 'testing'
+  - datasets>=2.15.0 ; extra == 'testing'
   - dill<0.3.5 ; extra == 'testing'
   - evaluate>=0.2.0 ; extra == 'testing'
-  - faiss-cpu ; extra == 'testing'
-  - nltk<=3.8.1 ; extra == 'testing'
-  - parameterized ; extra == 'testing'
-  - psutil ; extra == 'testing'
-  - pydantic ; extra == 'testing'
-  - pytest-rich ; extra == 'testing'
   - pytest-timeout ; extra == 'testing'
-  - pytest-xdist ; extra == 'testing'
-  - pytest>=7.2.0,<8.0.0 ; extra == 'testing'
-  - rjieba ; extra == 'testing'
+  - ruff==0.11.2 ; extra == 'testing'
   - rouge-score!=0.0.7,!=0.0.8,!=0.1,!=0.1.1 ; extra == 'testing'
-  - ruff==0.5.1 ; extra == 'testing'
-  - sacrebleu>=1.4.12,<2.0.0 ; extra == 'testing'
+  - nltk<=3.8.1 ; extra == 'testing'
+  - gitpython<3.1.19 ; extra == 'testing'
   - sacremoses ; extra == 'testing'
-  - sentencepiece>=0.1.91,!=0.1.92 ; extra == 'testing'
+  - rjieba ; extra == 'testing'
+  - beautifulsoup4 ; extra == 'testing'
   - tensorboard ; extra == 'testing'
-  - timeout-decorator ; extra == 'testing'
-  - keras-nlp>=0.3.1,<0.14.0 ; extra == 'tf'
-  - onnxconverter-common ; extra == 'tf'
-  - tensorflow-text<2.16 ; extra == 'tf'
+  - pydantic>=2 ; extra == 'testing'
+  - sentencepiece>=0.1.91,!=0.1.92 ; extra == 'testing'
+  - sacrebleu>=1.4.12,<2.0.0 ; extra == 'testing'
+  - libcst ; extra == 'testing'
+  - faiss-cpu ; extra == 'testing'
+  - cookiecutter==1.7.3 ; extra == 'testing'
+  - mistral-common[opencv]>=1.6.3 ; extra == 'testing'
   - tensorflow>2.9,<2.16 ; extra == 'tf'
+  - onnxconverter-common ; extra == 'tf'
   - tf2onnx ; extra == 'tf'
-  - keras-nlp>=0.3.1,<0.14.0 ; extra == 'tf-cpu'
+  - tensorflow-text<2.16 ; extra == 'tf'
+  - keras-nlp>=0.3.1,<0.14.0 ; extra == 'tf'
   - keras>2.9,<2.16 ; extra == 'tf-cpu'
-  - onnxconverter-common ; extra == 'tf-cpu'
   - tensorflow-cpu>2.9,<2.16 ; extra == 'tf-cpu'
-  - tensorflow-probability<0.24 ; extra == 'tf-cpu'
-  - tensorflow-text<2.16 ; extra == 'tf-cpu'
+  - onnxconverter-common ; extra == 'tf-cpu'
   - tf2onnx ; extra == 'tf-cpu'
-  - kenlm ; extra == 'tf-speech'
+  - tensorflow-text<2.16 ; extra == 'tf-cpu'
+  - keras-nlp>=0.3.1,<0.14.0 ; extra == 'tf-cpu'
+  - tensorflow-probability<0.24 ; extra == 'tf-cpu'
   - librosa ; extra == 'tf-speech'
-  - phonemizer ; extra == 'tf-speech'
   - pyctcdecode>=0.4.0 ; extra == 'tf-speech'
-  - blobfile ; extra == 'tiktoken'
+  - phonemizer ; extra == 'tf-speech'
+  - kenlm ; extra == 'tf-speech'
   - tiktoken ; extra == 'tiktoken'
-  - timm<=0.9.16 ; extra == 'timm'
-  - tokenizers>=0.20,<0.21 ; extra == 'tokenizers'
+  - blobfile ; extra == 'tiktoken'
+  - timm!=1.0.18,<=1.0.19 ; extra == 'timm'
+  - tokenizers>=0.22.0,<=0.23.0 ; extra == 'tokenizers'
+  - torch>=2.2 ; extra == 'torch'
   - accelerate>=0.26.0 ; extra == 'torch'
-  - torch ; extra == 'torch'
-  - kenlm ; extra == 'torch-speech'
-  - librosa ; extra == 'torch-speech'
-  - phonemizer ; extra == 'torch-speech'
-  - pyctcdecode>=0.4.0 ; extra == 'torch-speech'
   - torchaudio ; extra == 'torch-speech'
-  - pillow>=10.0.1,<=15.0 ; extra == 'torch-vision'
+  - librosa ; extra == 'torch-speech'
+  - pyctcdecode>=0.4.0 ; extra == 'torch-speech'
+  - phonemizer ; extra == 'torch-speech'
+  - kenlm ; extra == 'torch-speech'
   - torchvision ; extra == 'torch-vision'
+  - pillow>=10.0.1,<=15.0 ; extra == 'torch-vision'
   - filelock ; extra == 'torchhub'
-  - huggingface-hub>=0.23.2,<1.0 ; extra == 'torchhub'
+  - huggingface-hub>=0.34.0,<1.0 ; extra == 'torchhub'
   - importlib-metadata ; extra == 'torchhub'
   - numpy>=1.17 ; extra == 'torchhub'
   - packaging>=20.0 ; extra == 'torchhub'
@@ -7546,13 +7555,12 @@ packages:
   - regex!=2019.12.17 ; extra == 'torchhub'
   - requests ; extra == 'torchhub'
   - sentencepiece>=0.1.91,!=0.1.92 ; extra == 'torchhub'
-  - tokenizers>=0.20,<0.21 ; extra == 'torchhub'
-  - torch ; extra == 'torchhub'
+  - torch>=2.2 ; extra == 'torchhub'
+  - tokenizers>=0.22.0,<=0.23.0 ; extra == 'torchhub'
   - tqdm>=4.27 ; extra == 'torchhub'
-  - av==9.2.0 ; extra == 'video'
-  - decord==0.6.0 ; extra == 'video'
+  - av ; extra == 'video'
   - pillow>=10.0.1,<=15.0 ; extra == 'vision'
-  requires_python: '>=3.8.0'
+  requires_python: '>=3.9.0'
 - pypi: https://files.pythonhosted.org/packages/3e/79/9563bd90b2b964e85424b6e41e58c39d812d31f62198140b87c823e19ed9/trimesh-4.7.3-py3-none-any.whl
   name: trimesh
   version: 4.7.3

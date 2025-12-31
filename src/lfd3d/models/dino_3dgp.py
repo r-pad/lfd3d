@@ -85,7 +85,7 @@ class Dino3DGPNetwork(nn.Module):
     - Gripper token: 6DoF pose + gripper width (optional)
     - Source token: learnable embedding for human/robot (optional)
     - Transformer: self-attention blocks
-    - Output: N*256 GMM components, each predicting 13-dim (4×3 coords + 1 weight)
+    - Output: N*196 GMM components, each predicting 13-dim (4×3 coords + 1 weight)
     """
 
     def __init__(self, model_cfg):
@@ -177,13 +177,19 @@ class Dino3DGPNetwork(nn.Module):
         # Output head: predicts 13 dims per component (12 for 4×3 coords + 1 weight)
         self.output_head = nn.Linear(self.hidden_dim, 13)
 
+        # Register tokens
+        self.num_registers = 4
+        self.registers = nn.Parameter(
+            torch.randn(1, self.num_registers, self.hidden_dim) * 0.02
+        )
+
     def apply_image_token_dropout(self, tokens, patch_coords, num_cameras):
         """
         Apply image token dropout during training.
 
         Args:
-            tokens: (B, N*256, hidden_dim) image tokens
-            patch_coords: (B, N*256, 3) patch coordinates
+            tokens: (B, N*196, hidden_dim) image tokens
+            patch_coords: (B, N*196, 3) patch coordinates
             num_cameras: N - number of cameras
 
         Returns:
@@ -194,7 +200,7 @@ class Dino3DGPNetwork(nn.Module):
             return tokens, patch_coords
 
         B, total_tokens, hidden_dim = tokens.shape
-        tokens_per_camera = 256
+        tokens_per_camera = 196
         device = tokens.device
 
         # Sample dropout strategy: 0.6 = no dropout, 0.3 = token dropout, 0.1 = camera dropout
@@ -276,10 +282,10 @@ class Dino3DGPNetwork(nn.Module):
         B, N, _, _ = depth.shape
         device = depth.device
 
-        # Calculate patch grid size (DINOv2 uses 16×16 patches for 224×224 image)
+        # Calculate patch grid size (DINOv3 uses 16×16 patches for 224×224 image)
         h_patches = H // self.patch_size
         w_patches = W // self.patch_size
-        num_patches = h_patches * w_patches  # 256 for 224x224 with patch_size=14
+        num_patches = h_patches * w_patches  # 196 for 224x224 with patch_size=16
 
         # Get center pixel of each patch
         y_centers = (
@@ -377,30 +383,30 @@ class Dino3DGPNetwork(nn.Module):
                 inputs = {k: v.to(self.backbone.device) for k, v in inputs.items()}
                 dino_outputs = self.backbone(**inputs)
 
-            # Get patch features (skip CLS token)
+            # Get patch features (skip CLS and register tokens)
             patch_features = dino_outputs.last_hidden_state[
-                :, 1:
-            ]  # (B, 256, dino_hidden_dim)
+                :, 5:
+            ]  # (B, 196, dino_hidden_dim)
             all_patch_features.append(patch_features)
 
-        # Concatenate features from all cameras: (B, N*256, dino_hidden_dim)
+        # Concatenate features from all cameras: (B, N*196, dino_hidden_dim)
         patch_features = torch.cat(all_patch_features, dim=1)
 
         # Get 3D positional encoding for patches (in world frame)
         patch_coords = self.get_patch_centers(
             H, W, intrinsics, depth, extrinsics
-        )  # (B, N*256, 3)
-        pos_encoding = self.pos_encoder(patch_coords)  # (B, N*256, 128)
+        )  # (B, N*196, 3)
+        pos_encoding = self.pos_encoder(patch_coords)  # (B, N*196, 128)
 
         # Combine patch features with positional encoding
         tokens = torch.cat(
             [patch_features, pos_encoding], dim=-1
-        )  # (B, N*256, hidden_dim)
+        )  # (B, N*196, hidden_dim)
 
         # Apply image token dropout (training only)
         tokens, patch_coords = self.apply_image_token_dropout(tokens, patch_coords, N)
 
-        # Number of tokens T <= N*256
+        # Number of tokens T <= N*196
         num_patch_tokens = tokens.shape[1]
         mask = torch.zeros(B, num_patch_tokens, dtype=torch.bool, device=tokens.device)
 
@@ -441,11 +447,22 @@ class Dino3DGPNetwork(nn.Module):
                 [mask, torch.zeros(B, 1, dtype=torch.bool, device=tokens.device)], dim=1
             )
 
+        tokens = torch.cat([tokens, self.registers.expand(B, -1, -1)], dim=1)
+        mask = torch.cat(
+            [
+                mask,
+                torch.zeros(
+                    B, self.num_registers, dtype=torch.bool, device=tokens.device
+                ),
+            ],
+            dim=1,
+        )
+
         # Apply transformer blocks
         for block in self.transformer_blocks:
             tokens = block(tokens, src_key_padding_mask=mask)
 
-        # Take only the patch tokens (throw away language, gripper, source tokens)
+        # Take only the patch tokens (throw away language, gripper, source, register tokens)
         tokens = tokens[:, :num_patch_tokens]  # (B, T, hidden_dim)
 
         # Predict GMM parameters
@@ -709,7 +726,7 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
     ):
         """
         Negative log-likelihood loss for GMM.
-        Similar to articubot.py but adapted for T <= 256*N fixed components.
+        Similar to articubot.py but adapted for T <= 196*N fixed components.
         """
         batch_size, num_components = pred_displacement.shape[:2]
 
