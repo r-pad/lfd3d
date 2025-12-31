@@ -289,15 +289,15 @@ class BaseDataset(td.Dataset):
             raise NotImplementedError
 
         if augment_cfg["augment_transform"]:
-            # Apply random SO(2) rotation (around Y-axis as pcd is in camera frame) and translation
+            # Apply random SO(2) rotation (around Z-axis as pcd is in world frame) and translation
             theta = np.random.uniform(0, 2 * np.pi)  # Random angle
             R = np.array(
                 [
-                    [np.cos(theta), 0, np.sin(theta)],
-                    [0, 1, 0],
-                    [-np.sin(theta), 0, np.cos(theta)],
+                    [np.cos(theta), -np.sin(theta), 0],
+                    [np.sin(theta), np.cos(theta), 0],
+                    [0, 0, 1],
                 ]
-            )  # Rotation matrix around Y-axis
+            )  # Rotation matrix around Z-axis
             translation = np.random.uniform(
                 -0.2, 0.2, size=3
             )  # Random translation vector

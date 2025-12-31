@@ -1303,9 +1303,7 @@ class GoalRegressionModule(pl.LightningModule):
             gt_pcd, pcd_mean, pcd_std, R, t, scene_centroid
         )
 
-        # All points cloud are in the start image's coordinate frame
-        # We need to visualize the end image, therefore need to apply transform
-        # Transform the point clouds to align with end image coordinate frame
+        # Transform to end frame
         pcd_endframe = np.hstack((pcd, np.ones((pcd.shape[0], 1))))
         pcd_endframe = (end2start @ pcd_endframe.T).T[:, :3]
         all_pred_pcd_tmp = []
@@ -1316,6 +1314,37 @@ class GoalRegressionModule(pl.LightningModule):
         all_pred_pcd = np.stack(all_pred_pcd_tmp)
         gt_pcd = np.hstack((gt_pcd, np.ones((gt_pcd.shape[0], 1))))
         gt_pcd = (end2start @ gt_pcd.T).T[:, :3]
+
+        # Transform from world frame to primary camera frame for projection
+        # Primary camera extrinsics: T_world_from_cam, we need T_cam_from_world
+        primary_extrinsics = batch["extrinsics"][viz_idx].cpu().numpy()  # (4, 4)
+        T_cam_from_world = np.linalg.inv(primary_extrinsics)
+
+        # Save world-frame versions for action_anchor_pcd visualization
+        pcd_world = pcd.copy()
+        anchor_pcd_world = anchor_pcd.copy()
+
+        # Transform points to primary camera frame
+        # Transform initial pcd (for init_rgb_proj)
+        pcd_cam = np.hstack((pcd, np.ones((pcd.shape[0], 1))))
+        pcd_cam = (T_cam_from_world @ pcd_cam.T).T[:, :3]
+
+        pcd_endframe = np.hstack((pcd_endframe, np.ones((pcd_endframe.shape[0], 1))))
+        pcd_endframe = (T_cam_from_world @ pcd_endframe.T).T[:, :3]
+
+        all_pred_pcd_tmp = []
+        for i in range(N):
+            tmp_pcd = np.hstack((all_pred_pcd[i], np.ones((all_pred_pcd.shape[1], 1))))
+            tmp_pcd = (T_cam_from_world @ tmp_pcd.T).T[:, :3]
+            all_pred_pcd_tmp.append(tmp_pcd)
+        all_pred_pcd = np.stack(all_pred_pcd_tmp)
+
+        gt_pcd = np.hstack((gt_pcd, np.ones((gt_pcd.shape[0], 1))))
+        gt_pcd = (T_cam_from_world @ gt_pcd.T).T[:, :3]
+
+        # Also transform anchor_pcd to camera frame
+        anchor_pcd = np.hstack((anchor_pcd, np.ones((anchor_pcd.shape[0], 1))))
+        anchor_pcd = (T_cam_from_world @ anchor_pcd.T).T[:, :3]
 
         K = batch["intrinsics"][viz_idx].cpu().numpy()
 
@@ -1329,7 +1358,7 @@ class GoalRegressionModule(pl.LightningModule):
         )
 
         # Project tracks to image and save
-        init_rgb_proj = project_pcd_on_image(pcd, padding_mask, rgb_init, K, GREEN)
+        init_rgb_proj = project_pcd_on_image(pcd_cam, padding_mask, rgb_init, K, GREEN)
         end_rgb_proj = project_pcd_on_image(gt_pcd, padding_mask, rgb_end, K, RED)
         pred_rgb_proj = project_pcd_on_image(
             all_pred_pcd[-1], padding_mask, rgb_end, K, BLUE
@@ -1363,8 +1392,8 @@ class GoalRegressionModule(pl.LightningModule):
 
         # Visualize action/anchor point cloud
         action_anchor_pcd = get_action_anchor_pcd(
-            pcd,
-            anchor_pcd,
+            pcd_world,
+            anchor_pcd_world,
             GREEN,
             RED,
         )

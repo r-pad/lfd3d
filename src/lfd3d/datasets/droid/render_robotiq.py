@@ -11,9 +11,10 @@ import open3d as o3d
 import tensorflow_datasets as tfds
 import trimesh
 from lfd3d.utils.data_utils import combine_meshes
-from robot_descriptions.loaders.mujoco import load_robot_description
 from scipy.spatial.transform import Rotation
 from tqdm import tqdm
+
+from robot_descriptions.loaders.mujoco import load_robot_description
 
 """
 NOTE: MJCF needs to be modified to add free joint
@@ -214,16 +215,15 @@ def process_item(
         # Sample point cloud from its surface for saving
         # NOTE: Keeping a seed is very important so that we maintain correspondences over samples.
         points_, _ = trimesh.sample.sample_surface(mesh_, sample_n_points, seed=42)
-
-        homogenous_append = np.ones((sample_n_points, 1))
-        gripper_urdf_3d_pos = np.concatenate([points_, homogenous_append], axis=-1)[
-            :, :, None
-        ]
-        urdf_cam3dcoords = (world_to_cam @ gripper_urdf_3d_pos)[:, :3].squeeze(2)
-
-        gripper_pcds.append(urdf_cam3dcoords)
+        gripper_pcds.append(points_)
 
         if idx % 100 == 0:
+            homogenous_append = np.ones((sample_n_points, 1))
+            gripper_urdf_3d_pos = np.concatenate([points_, homogenous_append], axis=-1)[
+                :, :, None
+            ]
+            urdf_cam3dcoords = (world_to_cam @ gripper_urdf_3d_pos)[:, :3].squeeze(2)
+
             images = np.array([i["observation"][cam_image_key] for i in steps])
             os.makedirs(f"{viz_dir}/{idx}", exist_ok=True)
             urdf_proj_hom = (K @ urdf_cam3dcoords.T).T
