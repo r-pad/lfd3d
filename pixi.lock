@@ -319,7 +319,7 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/ed/f1/82ea8e783433707cafd9790099a2d19f113c22f32a31c8bb5abdc7a61dbb/jupytext-1.17.2-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/de/c6/7b9bb8044e150d4d1558423a1568e4f227193662a02231064e3824f37e0a/kiwisolver-1.4.8-cp310-cp310-manylinux_2_12_x86_64.manylinux2010_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/2d/00/d90b10b962b4277f5e64a78b6609968859ff86889f5b898c1a778c06ec00/lark-1.2.2-py3-none-any.whl
-      - pypi: git+https://github.com/r-pad/lerobot.git?rev=33e6e4cf090331e2fa23616007718a63aa35bd77#33e6e4cf090331e2fa23616007718a63aa35bd77
+      - pypi: git+https://github.com/r-pad/lerobot.git?rev=825eaf8086a4929b107ff907268069694ed5bf7b#825eaf8086a4929b107ff907268069694ed5bf7b
       - pypi: git+https://github.com/sriramsk1999/LIBERO.git?rev=15a91548acf90c6f502a99c21ca18792c5ae8256#15a91548acf90c6f502a99c21ca18792c5ae8256
       - pypi: https://files.pythonhosted.org/packages/16/2a/d5de2884759ca5eb1103200c1c3b9c5df362250020870a1556d19d15a6d1/lightning_utilities-0.11.7-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/aa/46/8ffbc114def88cc698906bf5acab54ca9fdf9214fe04aed0e71731fb3688/llvmlite-0.44.0-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
@@ -3451,7 +3451,7 @@ packages:
   purls: []
   size: 671240
   timestamp: 1740155456116
-- pypi: git+https://github.com/r-pad/lerobot.git?rev=33e6e4cf090331e2fa23616007718a63aa35bd77#33e6e4cf090331e2fa23616007718a63aa35bd77
+- pypi: git+https://github.com/r-pad/lerobot.git?rev=825eaf8086a4929b107ff907268069694ed5bf7b#825eaf8086a4929b107ff907268069694ed5bf7b
   name: lerobot
   version: 0.1.0
   requires_dist:
@@ -3521,7 +3521,7 @@ packages:
 - pypi: .
   name: lfd3d
   version: 0.1.0
-  sha256: 93a4701f7d602e05a1dd8d5040cefaed7bfed6dc102d4d0719b031acabbb1ae0
+  sha256: dfca697c602714453dd8cc25600627077dd3034ee8abf63d0dd1f316f2634399
   requires_dist:
   - diffusers>=0.26.3
   - gif

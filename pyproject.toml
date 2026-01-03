@@ -92,7 +92,7 @@ wheel = "*"
 ninja = "*"
 spconv-cu124 = "*"
 torch_geometric = "<2.3"
-lerobot = { git = "https://github.com/r-pad/lerobot.git", rev = "33e6e4cf090331e2fa23616007718a63aa35bd77" }
+lerobot = { git = "https://github.com/r-pad/lerobot.git", rev = "825eaf8086a4929b107ff907268069694ed5bf7b" }
 
 # Problematic dependencies as tasks
 [tool.pixi.tasks]
