@@ -6,7 +6,7 @@ use_text_embedding: True # If true, expects (siglip) text embedding to be provid
 use_gripper_token: True # Adds an additional gripper token
 use_source_token: True # If true, adds a learnable token for human/robot data source
 num_transformer_layers: 4 # num blocks for self atttention
-dino_model: 'facebook/dinov2-base'
+dino_model: 'facebook/dinov3-vitb16-pretrain-lvd1689m'
 
 dropout: 0.1
 
