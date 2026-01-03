@@ -36,6 +36,7 @@ dependencies = [
     "peft>=0.17,<0.18",
     "decord>=0.6.0,<0.7",
     "mink>=0.0.11,<0.0.12",
+    "pot>=0.9.6.post1,<0.10",
 ]
 
 [project.optional-dependencies]

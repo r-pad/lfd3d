@@ -468,7 +468,7 @@ class Dino3DGPNetwork(nn.Module):
         # Predict GMM parameters
         outputs = self.output_head(tokens)  # (B, T, 13)
 
-        return outputs, patch_coords
+        return outputs, patch_coords, tokens
 
 
 class Dino3DGPGoalRegressionModule(pl.LightningModule):
@@ -810,7 +810,7 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
         )  # (B, N, 4, 4)
 
         # Forward through network
-        outputs, patch_coords = self.network(
+        outputs, patch_coords, tokens = self.network(
             rgb,
             depth,
             all_intrinsics,
@@ -902,7 +902,7 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
                 else:
                     all_pred_dict = [self.predict(batch)]
 
-                pred_dict, weighted_displacement = all_pred_dict[0]
+                pred_dict, weighted_displacement, _ = all_pred_dict[0]
                 pred_dict[self.prediction_type]["all_pred"] = [
                     i[0][self.prediction_type]["pred"] for i in all_pred_dict
                 ]
@@ -992,7 +992,7 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
         )
 
         # Forward
-        outputs, patch_coords = self.network(
+        outputs, patch_coords, tokens = self.network(
             rgb,
             depth,
             all_intrinsics,
@@ -1002,13 +1002,15 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
             source=batch["data_source"],
         )
 
+        latent_repr = tokens.mean(dim=1)  # (B, T, D) -> (B, D)
+
         if self.is_gmm:
             pred = self.sample_from_gmm(outputs, patch_coords)
         else:
             pred = self.get_weighted_prediction(outputs, patch_coords)
 
         pred_displacement = pred - init
-        return {self.prediction_type: {"pred": pred_displacement}}, outputs
+        return {self.prediction_type: {"pred": pred_displacement}}, outputs, latent_repr
 
     def sample_from_gmm(self, outputs, patch_coords):
         """
@@ -1244,7 +1246,7 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
                     all_pred_dict.append(self.predict(batch))
             else:
                 all_pred_dict = [self.predict(batch)]
-            pred_dict, weighted_displacement = all_pred_dict[0]
+            pred_dict, weighted_displacement, _ = all_pred_dict[0]
 
             pred_dict[self.prediction_type]["all_pred"] = [
                 i[0][self.prediction_type]["pred"] for i in all_pred_dict
@@ -1360,7 +1362,7 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
         else:
             all_pred_dict = [self.predict(batch)]
 
-        pred_dict, weighted_displacement = all_pred_dict[0]
+        pred_dict, weighted_displacement, latent_repr = all_pred_dict[0]
         pred_dict[self.prediction_type]["all_pred"] = [
             i[0][self.prediction_type]["pred"] for i in all_pred_dict
         ]
@@ -1431,6 +1433,7 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
             "wta_pix_dist": pred_dict["wta_pix_dist"],
             "vid_name": batch["vid_name"],
             "caption": batch["caption"],
+            "latent_repr": latent_repr,  # (B, D) mean-pooled token representation
         }
 
     def on_predict_epoch_end(self):
