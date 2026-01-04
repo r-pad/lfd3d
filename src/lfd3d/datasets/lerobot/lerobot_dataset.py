@@ -104,6 +104,7 @@ class RpadLeRobotDataset(BaseDataset):
         self.GRIPPER_IDX = {
             "aloha": np.array([6, 197, 174]),
             "human": np.array([343, 763, 60]),
+            "droid": np.array([356, 232, 16]),
             "libero_franka": np.array(
                 [0, 1, 2]
             ),  # gripper pcd in dataset: [left right top grasp-center] in agentview; (right gripper, left gripper, top, grasp-center)

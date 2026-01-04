@@ -156,8 +156,15 @@ class Dino3DGPNetwork(nn.Module):
         self.use_source_token = model_cfg.use_source_token
         if self.use_source_token:
             # Learnable embeddings: 0 = human, 1 = robot
-            self.source_to_idx = {"human": 0, "aloha": 1, "libero_franka": 2}
-            self.source_embeddings = nn.Embedding(3, self.hidden_dim)
+            self.source_to_idx = {
+                "human": 0,
+                "aloha": 1,
+                "libero_franka": 2,
+                "droid": 3,
+            }
+            self.source_embeddings = nn.Embedding(
+                len(self.source_to_idx), self.hidden_dim
+            )
 
         # Transformer blocks (self-attention only)
         self.num_layers = model_cfg.num_transformer_layers
