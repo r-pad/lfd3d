@@ -204,7 +204,7 @@ def main(cfg):
                 pred_coord = pred["pred_coord"].cpu().numpy().astype(int)  # B, 2
                 metrics["pix_dist"].append(pred["pix_dist"])
                 metrics["rmse"].append(pred["rmse"])
-                episode_latents.append(pred["latent_repr"].cpu())
+                episode_latents.append(pred["z"].cpu())
 
                 for j in range(batch_size):
                     heatmap_ = generate_heatmap_from_points(
