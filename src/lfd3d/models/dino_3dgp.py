@@ -502,6 +502,13 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
         self.uniform_weights_coeff = cfg.model.uniform_weights_coeff
         self.is_gmm = cfg.model.is_gmm
 
+        # Optimal Transport loss parameters
+        self.use_ot_loss = cfg.model.use_ot_loss
+        self.ot_alpha = cfg.model.ot_alpha
+        self.ot_lambda = cfg.model.ot_lambda
+        self.ot_epsilon = cfg.model.ot_epsilon
+        self.ot_percentile = cfg.model.ot_percentile
+
         # Gripper noise augmentation parameters
         self.gripper_noise_prob = cfg.model.gripper_noise_prob
         self.gripper_noise_translation = cfg.model.gripper_noise_translation
@@ -882,19 +889,19 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
             loss = F.mse_loss(pred_points, gt)
             loss_dict["mse_loss"] = loss
 
-        ot_loss = self.ot_loss(
-            tokens,
-            embodiment=batch["data_source"],
-            caption=batch["caption"],
-            goal_vec=(gt - init)[:, 0, :],
-        )
-        loss_dict["ot_loss"] = ot_loss
-        alpha = 0.5
+        if self.use_ot_loss:
+            ot_loss = self.ot_loss(
+                tokens,
+                embodiment=batch["data_source"],
+                caption=batch["caption"],
+                goal_vec=(gt - init)[:, 0, :],
+            )
+            loss_dict["ot_loss"] = ot_loss
+            loss = loss + (self.ot_alpha * ot_loss)
 
-        loss = loss + (alpha * ot_loss)
         return None, loss, loss_dict
 
-    def ot_loss(self, tokens, embodiment, caption, goal_vec, lambda_=0.1, epsilon=0.1):
+    def ot_loss(self, tokens, embodiment, caption, goal_vec):
         """
         Optimal Transport-based loss for domain adaptation based on EgoBridge.
         Aligns distributions of the latent representations of human and robot data.
@@ -923,27 +930,24 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
         )
 
         # Similarity matrix of residual vectors (goal - current)
-        # Considered a match if the distance is less than the median
+        # Considered a match if the distance is less than the percentile threshold
         res_h, res_r = goal_vec[human_mask], goal_vec[robot_mask]
         R = torch.cdist(res_h, res_r) ** 2
-        percentile = 0.2
-        best_match = (R < R.quantile(percentile)) & task_match
+        best_match = (R < R.quantile(self.ot_percentile)) & task_match
 
         z = tokens.mean(dim=1)  # (B, T, D) -> (B, D)
         z_h, z_r = z[human_mask], z[robot_mask]
 
         # Compute cost matrix of latents
-        # Normalize cost, discount latents which should align
-        # Penalize cross-task latents
         C = torch.cdist(z_h, z_r) ** 2
         C = C / (C.max() + 1e-8)
-        C[best_match] *= lambda_
-        C[~task_match] = 1.0
+        C[best_match] *= self.ot_lambda  # Discount latents which should align
+        C[~task_match] /= self.ot_lambda  # Penalize cross-task
 
         # Optimal Transport loss
         a = torch.ones(n_h, device=tokens.device) / n_h
         b = torch.ones(n_r, device=tokens.device) / n_r
-        T = ot.sinkhorn(a, b, C, reg=epsilon)
+        T = ot.sinkhorn(a, b, C, reg=self.ot_epsilon)
         loss = (T * C).sum()
 
         return loss
@@ -1280,6 +1284,14 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
             return torch.stack(
                 [x[metric_name].mean() for x in self.train_outputs if metric_name in x]
             ).mean()
+
+        # Log loss_dict components
+        if any("gmm_loss" in x for x in self.train_outputs):
+            log_dictionary["train/gmm_loss"] = mean_metric("gmm_loss")
+        if any("mse_loss" in x for x in self.train_outputs):
+            log_dictionary["train/mse_loss"] = mean_metric("mse_loss")
+        if any("ot_loss" in x for x in self.train_outputs):
+            log_dictionary["train/ot_loss"] = mean_metric("ot_loss")
 
         if any("rmse" in x for x in self.train_outputs):
             log_dictionary["train/rmse"] = mean_metric("rmse")
