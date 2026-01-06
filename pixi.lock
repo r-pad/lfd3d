@@ -393,6 +393,7 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/6d/45/59578566b3275b8fd9157885918fcd0c4d74162928a5310926887b856a51/platformdirs-4.3.7-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/88/5f/e351af9a41f866ac3f1fac4ca0613908d9a41741cfcf2228f4ad853b697d/pluggy-1.5.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/f7/60/1974cfdd5bb770568ddc6f89f3e0df4cfdd1acffd5a609dff5e95f48c6e2/portalocker-3.1.1-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/5b/7d/1529014aebb9d5fd54538115886d005d371a624b1ecaf5c2525b45ad0f77/pot-0.9.6.post1-cp310-cp310-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/e3/b7/1d145c985d8be9729672a45b8b8113030ad60dff45dec592efc4e5f5897a/pre_commit-3.3.3-py2.py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/6d/7a/dcb10ad171dbffb6dd2122672f69e5b34e9859d9bcc6e7119c3cb2986ca2/proglog-0.1.11-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/ff/c2/ab7d37426c179ceb9aeb109a85cda8948bb269b7561a0be870cc656eefe4/prometheus_client-0.21.1-py3-none-any.whl
@@ -3521,7 +3522,7 @@ packages:
 - pypi: .
   name: lfd3d
   version: 0.1.0
-  sha256: dfca697c602714453dd8cc25600627077dd3034ee8abf63d0dd1f316f2634399
+  sha256: d9faf9747d41f86679e4f91b3643d0cc518b6c6c24fd3ebae2a9702b139230c2
   requires_dist:
   - diffusers>=0.26.3
   - gif
@@ -3549,6 +3550,7 @@ packages:
   - peft>=0.17,<0.18
   - decord>=0.6.0,<0.7
   - mink>=0.0.11,<0.0.12
+  - pot>=0.9.6.post1,<0.10
   - ruff==0.3.6 ; extra == 'develop'
   - mypy==1.3.0 ; extra == 'develop'
   - pytest==7.3.2 ; extra == 'develop'
@@ -5375,6 +5377,35 @@ packages:
   - pytest-rerunfailures>=15.0 ; extra == 'tests'
   - redis ; extra == 'redis'
   requires_python: '>=3.9'
+- pypi: https://files.pythonhosted.org/packages/5b/7d/1529014aebb9d5fd54538115886d005d371a624b1ecaf5c2525b45ad0f77/pot-0.9.6.post1-cp310-cp310-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl
+  name: pot
+  version: 0.9.6.post1
+  sha256: 48924f34d61b909e68651f3fe9fc1a892c69ae38d3c52bc832f95a28569c0e0e
+  requires_dist:
+  - numpy>=1.16
+  - scipy>=1.6
+  - jax ; extra == 'backend-jax'
+  - jaxlib ; extra == 'backend-jax'
+  - tensorflow ; extra == 'backend-tf'
+  - torch ; extra == 'backend-torch'
+  - cvxopt ; extra == 'cvxopt'
+  - scikit-learn ; extra == 'dr'
+  - pymanopt ; extra == 'dr'
+  - autograd ; extra == 'dr'
+  - torch ; extra == 'gnn'
+  - torch-geometric ; extra == 'gnn'
+  - matplotlib ; extra == 'plot'
+  - jax ; extra == 'all'
+  - jaxlib ; extra == 'all'
+  - tensorflow ; extra == 'all'
+  - torch ; extra == 'all'
+  - cvxopt ; extra == 'all'
+  - scikit-learn ; extra == 'all'
+  - pymanopt ; extra == 'all'
+  - autograd ; extra == 'all'
+  - torch-geometric ; extra == 'all'
+  - matplotlib ; extra == 'all'
+  requires_python: '>=3.7'
 - pypi: https://files.pythonhosted.org/packages/e3/b7/1d145c985d8be9729672a45b8b8113030ad60dff45dec592efc4e5f5897a/pre_commit-3.3.3-py2.py3-none-any.whl
   name: pre-commit
   version: 3.3.3

@@ -1,5 +1,7 @@
+import csv
 import json
 import random
+from pathlib import Path
 
 import cv2
 import hydra
@@ -166,16 +168,21 @@ def main(cfg):
     preds = trainer.predict(model, datamodule=eval_datamodule)
     preds_dict = {tag: {} for tag in eval_datamodule.eval_tags}
 
+    exp_dir = Path(cfg.log_dir) / f"{cfg.checkpoint.run_id}_{cfg.dataset.repo_id}"
+    exp_dir.mkdir(parents=True)
+    all_episode_metrics = []
+
     loader = eval_datamodule.predict_dataloader()
     for i, episode_id in enumerate(episode_idx):
-        heatmaps = []
-        raw_heatmaps = []
+        heatmaps, raw_heatmaps, episode_latents = [], [], []
         metrics = {"pix_dist": [], "rmse": []}
 
         if len(episode_idx) == 1:
             preds = [preds]
 
-        for pred, batch in tqdm(zip(preds[i], loader[i]), total=len(loader[i])):
+        for pred, batch in tqdm(
+            zip(preds[i], loader[i]), total=len(loader[i]), desc=f"Episode {episode_id}"
+        ):
             rgb = batch["rgbs"][:, 0].cpu().numpy()  # B, H, W, 3
             batch_size = rgb.shape[0]
 
@@ -197,6 +204,7 @@ def main(cfg):
                 pred_coord = pred["pred_coord"].cpu().numpy().astype(int)  # B, 2
                 metrics["pix_dist"].append(pred["pix_dist"])
                 metrics["rmse"].append(pred["rmse"])
+                episode_latents.append(pred["z"].cpu())
 
                 for j in range(batch_size):
                     heatmap_ = generate_heatmap_from_points(
@@ -215,19 +223,52 @@ def main(cfg):
 
         if len(raw_heatmaps) > 0:
             save_video(
-                f"{cfg.log_dir}/episode_{episode_id}_raw_heatmaps_{cfg.model.name}.mp4",
+                str(exp_dir / f"episode_{episode_id}_raw_heatmaps.mp4"),
                 frames=raw_heatmaps,
             )
         save_video(
-            f"{cfg.log_dir}/episode_{episode_id}_heatmap_{cfg.model.name}.mp4",
+            str(exp_dir / f"episode_{episode_id}_heatmap.mp4"),
             frames=heatmaps,
         )
 
+        if len(episode_latents) > 0:
+            episode_latents_tensor = torch.cat(episode_latents, dim=0)  # (N_frames, D)
+            latent_file = exp_dir / f"episode_{episode_id}.pt"
+            torch.save(
+                {
+                    "latents": episode_latents_tensor,
+                    "n_frames": episode_latents_tensor.shape[0],
+                    "latent_dim": episode_latents_tensor.shape[1],
+                },
+                latent_file,
+            )
+
+        # Compute and store metrics for this episode
+        episode_metric_dict = {"episode_id": episode_id}
         for key in metrics:
             if len(metrics[key]) != 0:
                 metric_val = torch.cat(metrics[key])
-                print(f"Mean {key}:", metric_val.mean().item())
-                print(f"Std. {key}:", metric_val.std().item())
+                mean_val = metric_val.mean().item()
+                std_val = metric_val.std().item()
+                episode_metric_dict[f"{key}_mean"] = mean_val
+                episode_metric_dict[f"{key}_std"] = std_val
+                print(
+                    f"Episode {episode_id} - {key}: mean={mean_val:.4f}, std={std_val:.4f}"
+                )
+
+        all_episode_metrics.append(episode_metric_dict)
+
+    # Save metrics to CSV sorted by episode number
+    if all_episode_metrics:
+        all_episode_metrics.sort(key=lambda x: x["episode_id"])
+        csv_file = exp_dir / "metrics.csv"
+        fieldnames = list(all_episode_metrics[0].keys())
+        with open(csv_file, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(all_episode_metrics)
+        print(f"\nSaved metrics to {csv_file}")
+        print(f"Experiment results saved to: {exp_dir}")
 
 
 if __name__ == "__main__":

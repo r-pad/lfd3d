@@ -1,0 +1,18 @@
+defaults:
+  - base_train
+
+# Override augment_train to image_color_only for dino 3dgp (safe for multiview)
+augment_train: "image_color_only"
+
+epochs: 100
+batch_size: 128
+val_batch_size: 128
+
+# ModelCheckpoint configurations
+checkpoints:
+  rmse:
+    monitor: val/rmse
+    mode: min
+  rmse_and_std_combi:
+    monitor: val/rmse_and_std_combi
+    mode: min

@@ -4,6 +4,7 @@ from typing import Dict, List
 
 import cv2
 import numpy as np
+import ot
 import pytorch_lightning as pl
 import torch
 import torch.nn.functional as F
@@ -156,8 +157,15 @@ class Dino3DGPNetwork(nn.Module):
         self.use_source_token = model_cfg.use_source_token
         if self.use_source_token:
             # Learnable embeddings: 0 = human, 1 = robot
-            self.source_to_idx = {"human": 0, "aloha": 1, "libero_franka": 2}
-            self.source_embeddings = nn.Embedding(3, self.hidden_dim)
+            self.source_to_idx = {
+                "human": 0,
+                "aloha": 1,
+                "libero_franka": 2,
+                "droid": 3,
+            }
+            self.source_embeddings = nn.Embedding(
+                len(self.source_to_idx), self.hidden_dim
+            )
 
         # Transformer blocks (self-attention only)
         self.num_layers = model_cfg.num_transformer_layers
@@ -468,7 +476,7 @@ class Dino3DGPNetwork(nn.Module):
         # Predict GMM parameters
         outputs = self.output_head(tokens)  # (B, T, 13)
 
-        return outputs, patch_coords
+        return outputs, patch_coords, tokens
 
 
 class Dino3DGPGoalRegressionModule(pl.LightningModule):
@@ -493,6 +501,13 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
         self.fixed_variance = cfg.model.fixed_variance
         self.uniform_weights_coeff = cfg.model.uniform_weights_coeff
         self.is_gmm = cfg.model.is_gmm
+
+        # Optimal Transport loss parameters
+        self.use_ot_loss = cfg.model.use_ot_loss
+        self.ot_alpha = cfg.model.ot_alpha
+        self.ot_lambda = cfg.model.ot_lambda
+        self.ot_epsilon = cfg.model.ot_epsilon
+        self.ot_percentile = cfg.model.ot_percentile
 
         # Gripper noise augmentation parameters
         self.gripper_noise_prob = cfg.model.gripper_noise_prob
@@ -810,7 +825,7 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
         )  # (B, N, 4, 4)
 
         # Forward through network
-        outputs, patch_coords = self.network(
+        outputs, patch_coords, tokens = self.network(
             rgb,
             depth,
             all_intrinsics,
@@ -842,6 +857,7 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
             B, num_components, device=outputs.device, dtype=torch.bool
         )
 
+        loss_dict = {}
         # Compute GMM loss
         if self.is_gmm:
             loss = 0
@@ -862,6 +878,7 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
                     var,
                     use_weights=False,
                 )
+            loss_dict["gmm_loss"] = loss
         else:
             # Simple MSE loss (if not using GMM)
             # Get weighted prediction
@@ -870,8 +887,70 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
                 dim=1
             )
             loss = F.mse_loss(pred_points, gt)
+            loss_dict["mse_loss"] = loss
 
-        return None, loss
+        if self.use_ot_loss:
+            ot_loss = self.ot_loss(
+                tokens,
+                embodiment=batch["data_source"],
+                caption=batch["caption"],
+                goal_vec=(gt - init)[:, 0, :],
+            )
+            loss_dict["ot_loss"] = ot_loss
+            loss = loss + (self.ot_alpha * ot_loss)
+
+        return None, loss, loss_dict
+
+    def ot_loss(self, tokens, embodiment, caption, goal_vec):
+        """
+        Optimal Transport-based loss for domain adaptation based on EgoBridge.
+        Aligns distributions of the latent representations of human and robot data.
+
+        Similar latents are expected when we have similar tasks (pick-place, fold)
+        and the goal vectors (goal_pos - current_pos) are similar.
+
+        For this to work, batch size needs to be reasonably large and contain similar amounts
+        and types of human and robot data, careful!
+        """
+        # Only compute OT loss if minibatch contains aloha and human data.
+        if set(embodiment) != {"aloha", "human"}:
+            return 0.0
+
+        human_mask = [i == "human" for i in embodiment]
+        robot_mask = [i == "aloha" for i in embodiment]
+        n_h, n_r = sum(human_mask), sum(robot_mask)
+
+        # Group the captions by the first word
+        # [Fold the onesie, Fold the shirt] -> Fold
+        # Somewhat hacky, should probably do semantic similarity?
+        task = np.array([c.split(" ")[0] for c in caption])
+        task_h, task_r = task[human_mask], task[robot_mask]
+        task_match = torch.tensor(
+            task_h[:, None] == task_r[None, :], device=tokens.device
+        )
+
+        # Similarity matrix of residual vectors (goal - current)
+        # Considered a match if the distance is less than the percentile threshold
+        res_h, res_r = goal_vec[human_mask], goal_vec[robot_mask]
+        R = torch.cdist(res_h, res_r) ** 2
+        best_match = (R < R.quantile(self.ot_percentile)) & task_match
+
+        z = tokens.mean(dim=1)  # (B, T, D) -> (B, D)
+        z_h, z_r = z[human_mask], z[robot_mask]
+
+        # Compute cost matrix of latents
+        C = torch.cdist(z_h, z_r) ** 2
+        C = C / (C.max() + 1e-8)
+        C[best_match] *= self.ot_lambda  # Discount latents which should align
+        C[~task_match] /= self.ot_lambda  # Penalize cross-task
+
+        # Optimal Transport loss
+        a = torch.ones(n_h, device=tokens.device) / n_h
+        b = torch.ones(n_r, device=tokens.device) / n_r
+        T = ot.sinkhorn(a, b, C, reg=self.ot_epsilon)
+        loss = (T * C).sum()
+
+        return loss
 
     def training_step(self, batch, batch_idx):
         """Training step with 3D GMM prediction"""
@@ -882,8 +961,9 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
         self.train()
         batch_size = batch[self.label_key].points_padded().shape[0]
 
-        _, loss = self(batch)
+        _, loss, loss_dict = self(batch)
         train_metrics = {"loss": loss}
+        train_metrics.update(loss_dict)
 
         # Additional logging
         do_additional_logging = (
@@ -902,7 +982,7 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
                 else:
                     all_pred_dict = [self.predict(batch)]
 
-                pred_dict, weighted_displacement = all_pred_dict[0]
+                pred_dict, weighted_displacement, _ = all_pred_dict[0]
                 pred_dict[self.prediction_type]["all_pred"] = [
                     i[0][self.prediction_type]["pred"] for i in all_pred_dict
                 ]
@@ -992,7 +1072,7 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
         )
 
         # Forward
-        outputs, patch_coords = self.network(
+        outputs, patch_coords, tokens = self.network(
             rgb,
             depth,
             all_intrinsics,
@@ -1002,13 +1082,15 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
             source=batch["data_source"],
         )
 
+        z = tokens.mean(dim=1)  # (B, T, D) -> (B, D)
+
         if self.is_gmm:
             pred = self.sample_from_gmm(outputs, patch_coords)
         else:
             pred = self.get_weighted_prediction(outputs, patch_coords)
 
         pred_displacement = pred - init
-        return {self.prediction_type: {"pred": pred_displacement}}, outputs
+        return {self.prediction_type: {"pred": pred_displacement}}, outputs, z
 
     def sample_from_gmm(self, outputs, patch_coords):
         """
@@ -1203,6 +1285,14 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
                 [x[metric_name].mean() for x in self.train_outputs if metric_name in x]
             ).mean()
 
+        # Log loss_dict components
+        if any("gmm_loss" in x for x in self.train_outputs):
+            log_dictionary["train/gmm_loss"] = mean_metric("gmm_loss")
+        if any("mse_loss" in x for x in self.train_outputs):
+            log_dictionary["train/mse_loss"] = mean_metric("mse_loss")
+        if any("ot_loss" in x for x in self.train_outputs):
+            log_dictionary["train/ot_loss"] = mean_metric("ot_loss")
+
         if any("rmse" in x for x in self.train_outputs):
             log_dictionary["train/rmse"] = mean_metric("rmse")
             log_dictionary["train/wta_rmse"] = mean_metric("wta_rmse")
@@ -1244,7 +1334,7 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
                     all_pred_dict.append(self.predict(batch))
             else:
                 all_pred_dict = [self.predict(batch)]
-            pred_dict, weighted_displacement = all_pred_dict[0]
+            pred_dict, weighted_displacement, _ = all_pred_dict[0]
 
             pred_dict[self.prediction_type]["all_pred"] = [
                 i[0][self.prediction_type]["pred"] for i in all_pred_dict
@@ -1360,7 +1450,7 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
         else:
             all_pred_dict = [self.predict(batch)]
 
-        pred_dict, weighted_displacement = all_pred_dict[0]
+        pred_dict, weighted_displacement, z = all_pred_dict[0]
         pred_dict[self.prediction_type]["all_pred"] = [
             i[0][self.prediction_type]["pred"] for i in all_pred_dict
         ]
@@ -1431,6 +1521,7 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
             "wta_pix_dist": pred_dict["wta_pix_dist"],
             "vid_name": batch["vid_name"],
             "caption": batch["caption"],
+            "z": z,  # (B, D) mean-pooled token representation
         }
 
     def on_predict_epoch_end(self):
