@@ -942,7 +942,7 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
         C = torch.cdist(z_h, z_r) ** 2
         C = C / (C.max() + 1e-8)
         C[best_match] *= self.ot_lambda  # Discount latents which should align
-        C[~task_match] /= self.ot_lambda  # Penalize cross-task
+        C[~task_match] = 1.0  # Penalize cross-task
 
         # Optimal Transport loss
         a = torch.ones(n_h, device=tokens.device) / n_h
