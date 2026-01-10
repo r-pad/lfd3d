@@ -79,9 +79,9 @@ class FourierPositionalEncoding(nn.Module):
 
 class Dino3DGPNetwork(nn.Module):
     """
-    DINOv2 + 3D positional encoding + Transformer for 3D goal prediction
+    DINOv3 + 3D positional encoding + Transformer for 3D goal prediction
     Architecture:
-    - Image tokens: DINOv2 patches with 3D PE (x,y,z from depth)
+    - Image tokens: DINOv3 patches with 3D PE (x,y,z from depth)
     - Language tokens: Flan-T5 (optional)
     - Gripper token: 6DoF pose + gripper width (optional)
     - Source token: learnable embedding for human/robot (optional)
@@ -92,7 +92,7 @@ class Dino3DGPNetwork(nn.Module):
     def __init__(self, model_cfg):
         super(Dino3DGPNetwork, self).__init__()
 
-        # DINOv2 backbone
+        # DINOv3 backbone
         self.backbone_processor = AutoImageProcessor.from_pretrained(
             model_cfg.dino_model
         )
@@ -382,7 +382,7 @@ class Dino3DGPNetwork(nn.Module):
         """
         B, N, C, H, W = image.shape
 
-        # Extract DINOv2 features for each camera
+        # Extract DINOv3 features for each camera
         all_patch_features = []
         for cam_idx in range(N):
             with torch.no_grad():
@@ -482,7 +482,7 @@ class Dino3DGPNetwork(nn.Module):
 class Dino3DGPGoalRegressionModule(pl.LightningModule):
     """
     A goal generation module for 3D goal prediction with RGB+Depth.
-    Similar to articubot.py but uses DINOv2 with RGB+depth instead of PointNet++.
+    Similar to articubot.py but uses DINOv3 with RGB+depth instead of PointNet++.
     """
 
     def __init__(self, network, cfg) -> None:
