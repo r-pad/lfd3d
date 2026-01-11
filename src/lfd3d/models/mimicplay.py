@@ -20,6 +20,7 @@ from torch import nn, optim
 
 from lfd3d.utils.viz_utils import (
     get_img_and_track_pcd,
+    interpolate_colors,
     invert_augmentation_and_normalization,
     project_pcd_on_image,
 )
@@ -635,7 +636,7 @@ class MimicplayModule(pl.LightningModule):
 
         # Need both human and robot samples in the batch
         if not (human_mask.any() and robot_mask.any()):
-            return 0
+            return torch.tensor(0.0, device=latent_plan.device)
 
         human_latents = latent_plan[human_mask]  # (N_h, D)
         robot_latents = latent_plan[robot_mask]  # (N_r, D)
@@ -778,11 +779,6 @@ class MimicplayModule(pl.LightningModule):
         N = all_pred.shape[0]
         end2start = np.linalg.inv(batch["start2end"][viz_idx].cpu().numpy())
 
-        BLUES = [
-            (int(200 * (1 - i / (N - 1))), int(220 * (1 - i / (N - 1))), 255)
-            for i in range(N)
-        ]
-
         goal_text = batch["caption"][viz_idx]
         vid_name = batch["vid_name"][viz_idx]
         rmse = pred_dict["rmse"][viz_idx]
@@ -848,10 +844,20 @@ class MimicplayModule(pl.LightningModule):
             batch["depths"][viz_idx, 1].cpu().numpy(),
         )
 
-        # Project tracks to image
-        end_rgb_proj = project_pcd_on_image(gt_pcd, padding_mask, rgb_end, K, RED)
+        # Project tracks to image with color interpolation
+        YELLOW = (255, 255, 0)
+        GREEN = (0, 255, 0)
+
+        # GT trajectory: RED to YELLOW gradient
+        RED2YELLOW = interpolate_colors(RED, YELLOW, gt_pcd.shape[0])
+        end_rgb_proj = project_pcd_on_image(
+            gt_pcd, padding_mask, rgb_end, K, RED2YELLOW, radius=3
+        )
+
+        # Predicted trajectory: BLUE to GREEN gradient
+        BLUE2GREEN = interpolate_colors(BLUE, GREEN, all_pred_pcd[-1].shape[0])
         pred_rgb_proj = project_pcd_on_image(
-            all_pred_pcd[-1], padding_mask, rgb_end, K, BLUE
+            all_pred_pcd[-1], padding_mask, rgb_end, K, BLUE2GREEN, radius=3
         )
         rgb_proj_viz = cv2.hconcat([rgb_init, end_rgb_proj, pred_rgb_proj])
 
@@ -861,6 +867,25 @@ class MimicplayModule(pl.LightningModule):
             ; Right: Final Frame (Pred Track)\n; Goal Description : {goal_text};\n\
             rmse={rmse};\nvideo path = {vid_name}; ",
         )
+
+        # Create BLUE to GREEN gradients for all predictions
+        # Each prediction gets a gradient from a shade of blue to corresponding shade of green
+        BLUES2GREENS = []
+        for i in range(N):
+            start_blue = (
+                (int(200 * (1 - i / (N - 1))), int(220 * (1 - i / (N - 1))), 255)
+                if N > 1
+                else (200, 220, 255)
+            )
+            end_green = (
+                (int(200 * (1 - i / (N - 1))), 255, int(220 * (1 - i / (N - 1))))
+                if N > 1
+                else (200, 255, 220)
+            )
+            gradient = interpolate_colors(
+                start_blue, end_green, all_pred_pcd[i].shape[0]
+            )
+            BLUES2GREENS.append(gradient)
 
         # Visualize point cloud
         viz_pcd, _ = get_img_and_track_pcd(
@@ -872,8 +897,8 @@ class MimicplayModule(pl.LightningModule):
             gt_pcd,
             all_pred_pcd,
             GREEN,
-            RED,
-            BLUES,
+            RED2YELLOW,
+            BLUES2GREENS,
             max_depth,
             4096,
         )
@@ -912,9 +937,6 @@ class MimicplayModule(pl.LightningModule):
         if any("rmse" in x for x in self.train_outputs):
             log_dictionary["train/rmse"] = mean_metric("rmse")
             log_dictionary["train/wta_rmse"] = mean_metric("wta_rmse")
-            log_dictionary["train/chamfer_dist"] = mean_metric("chamfer_dist")
-            log_dictionary["train/wta_chamfer_dist"] = mean_metric("wta_chamfer_dist")
-            log_dictionary["train/sample_std"] = mean_metric("sample_std")
             log_dictionary["train/pix_dist"] = mean_metric("pix_dist")
             log_dictionary["train/wta_pix_dist"] = mean_metric("wta_pix_dist")
             log_dictionary["train/normalized_pix_dist"] = mean_metric(
@@ -970,9 +992,6 @@ class MimicplayModule(pl.LightningModule):
         all_metrics = {
             "rmse": [],
             "wta_rmse": [],
-            "chamfer_dist": [],
-            "wta_chamfer_dist": [],
-            "sample_std": [],
             "pix_dist": [],
             "wta_pix_dist": [],
             "normalized_pix_dist": [],
@@ -996,12 +1015,6 @@ class MimicplayModule(pl.LightningModule):
 
         for metric, values in all_metrics.items():
             log_dict[f"val/{metric}"] = torch.stack(values).mean()
-
-        # Combined metric
-        alpha = 0.95
-        log_dict["val/rmse_and_std_combi"] = alpha * log_dict["val/rmse"] + (
-            1 - alpha
-        ) * (-log_dict["val/sample_std"])
 
         self.log_dict(
             log_dict,

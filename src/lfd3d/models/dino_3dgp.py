@@ -1018,7 +1018,7 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
         """
         # Only compute OT loss if minibatch contains aloha and human data.
         if set(embodiment) != {"aloha", "human"}:
-            return 0.0
+            return torch.tensor(0.0, device=tokens.device)
 
         human_mask = [i == "human" for i in embodiment]
         robot_mask = [i == "aloha" for i in embodiment]
