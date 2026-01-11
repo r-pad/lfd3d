@@ -730,6 +730,148 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
         gripper_token = torch.cat([gripper_pos, gripper_rot6d, gripper_width], dim=-1)
         return gripper_token
 
+    def combine_camera_data(self, batch):
+        """
+        Combine primary and auxiliary camera data.
+
+        Returns:
+            rgb: (B, N, 3, H, W)
+            depth: (B, N, H, W)
+            all_intrinsics: (B, N, 3, 3)
+            all_extrinsics: (B, N, 4, 4)
+        """
+        primary_rgb = batch["rgbs"][:, 0]  # (B, H, W, 3)
+        primary_depth = batch["depths"][:, 0]  # (B, H, W)
+        aux_rgbs = batch["aux_rgbs"][:, :, 0, :, :, :]  # (B, N_aux, H, W, 3)
+        aux_depths = batch["aux_depths"][:, :, 0, :, :]  # (B, N_aux, H, W)
+
+        # Stack along camera dimension
+        all_rgbs = torch.cat(
+            [primary_rgb.unsqueeze(1), aux_rgbs], dim=1
+        )  # (B, N, H, W, 3)
+        all_depths = torch.cat(
+            [primary_depth.unsqueeze(1), aux_depths], dim=1
+        )  # (B, N, H, W)
+
+        # Clip depths
+        all_depths[all_depths > self.max_depth] = 0
+
+        # Permute RGB to (B, N, 3, H, W)
+        rgb = all_rgbs.permute(0, 1, 4, 2, 3)
+        depth = all_depths
+
+        # Combine intrinsics and extrinsics
+        all_intrinsics = torch.cat(
+            [
+                batch["intrinsics"].unsqueeze(1),  # (B, 1, 3, 3)
+                batch["aux_intrinsics"],  # (B, N_aux, 3, 3)
+            ],
+            dim=1,
+        )  # (B, N, 3, 3)
+
+        all_extrinsics = torch.cat(
+            [
+                batch["extrinsics"].unsqueeze(1),  # (B, 1, 4, 4)
+                batch["aux_extrinsics"],  # (B, N_aux, 4, 4)
+            ],
+            dim=1,
+        )  # (B, N, 4, 4)
+
+        return rgb, depth, all_intrinsics, all_extrinsics
+
+    def collect_and_stack_predictions(self, batch, n_samples):
+        """
+        Collect multiple predictions and stack them.
+
+        Returns:
+            pred_dict: Dictionary with stacked predictions in "all_pred" key
+            weighted_displacement: Weighted displacement from first prediction
+            z: Mean-pooled token representation
+        """
+        all_pred_dict = []
+        if self.is_gmm:
+            for i in range(n_samples):
+                all_pred_dict.append(self.predict(batch))
+        else:
+            all_pred_dict = [self.predict(batch)]
+
+        pred_dict, weighted_displacement, z = all_pred_dict[0]
+        pred_dict[self.prediction_type]["all_pred"] = [
+            i[0][self.prediction_type]["pred"] for i in all_pred_dict
+        ]
+        pred_dict[self.prediction_type]["all_pred"] = torch.stack(
+            pred_dict[self.prediction_type]["all_pred"]
+        ).permute(1, 0, 2, 3)
+
+        return pred_dict, weighted_displacement, z
+
+    def calculate_pixel_metrics(self, pred_dict, batch, init, gt):
+        """
+        Calculate pixel-based metrics by projecting 3D predictions to 2D.
+
+        Args:
+            pred_dict: Prediction dictionary to update
+            batch: Batch data
+            init: Initial gripper positions (B, 4, 3)
+            gt: Ground truth gripper positions (B, 4, 3)
+
+        Returns:
+            Updated pred_dict with pixel metrics
+        """
+        intrinsics = batch["intrinsics"]
+        extrinsics = batch["extrinsics"]
+        H, W = batch["rgbs"].shape[2:4]
+
+        # Project GT to 2D (take first point only)
+        gt_2d = (
+            self.project_3d_to_2d(gt[:, :1, :], intrinsics, extrinsics, (H, W))
+            .squeeze(1)
+            .long()
+        )  # (B, 2)
+
+        # Project all predictions to 2D (take first point only)
+        all_pred_3d = (
+            init[:, None, :, :] + pred_dict[self.prediction_type]["all_pred"]
+        )  # (B, N, 4, 3)
+        all_pred_2d = (
+            self.project_3d_to_2d(
+                all_pred_3d[:, :, :1, :], intrinsics, extrinsics, (H, W)
+            )
+            .squeeze(2)
+            .long()
+        )  # (B, N, 2)
+
+        pred_dict = calc_pix_metrics(pred_dict, gt_2d, all_pred_2d, (H, W))
+        return pred_dict
+
+    def transform_points_homogeneous(self, points, transform_matrix):
+        """
+        Transform 3D points using a 4x4 homogeneous transformation matrix.
+
+        Args:
+            points: (N, 3) or (M, N, 3) array of 3D points
+            transform_matrix: (4, 4) transformation matrix
+
+        Returns:
+            Transformed points with same shape as input
+        """
+        original_shape = points.shape
+        if points.ndim == 2:
+            points = points[np.newaxis, ...]
+
+        # Add homogeneous coordinate
+        points_hom = np.hstack(
+            (points.reshape(-1, 3), np.ones((points.reshape(-1, 3).shape[0], 1)))
+        )
+        # Transform
+        points_transformed = (transform_matrix @ points_hom.T).T[:, :3]
+
+        # Reshape back
+        if len(original_shape) == 2:
+            return points_transformed
+        else:
+            return points_transformed.reshape(original_shape)
+
     def nll_loss(
         self,
         pred_displacement,
@@ -784,45 +926,7 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
         gripper_token = self.apply_gripper_noise_to_token(gripper_token)
 
         # Combine primary + auxiliary cameras
-        # Primary: batch["rgbs"][:, 0] is (B, H, W, 3), batch["depths"][:, 0] is (B, H, W)
-        # Auxiliary: batch["aux_rgbs"] is (B, N_aux, 2, H, W, 3), batch["aux_depths"] is (B, N_aux, 2, H, W)
-
-        primary_rgb = batch["rgbs"][:, 0]  # (B, H, W, 3)
-        primary_depth = batch["depths"][:, 0]  # (B, H, W)
-        aux_rgbs = batch["aux_rgbs"][:, :, 0, :, :, :]  # (B, N_aux, H, W, 3)
-        aux_depths = batch["aux_depths"][:, :, 0, :, :]  # (B, N_aux, H, W)
-
-        # Stack along camera dimension
-        all_rgbs = torch.cat(
-            [primary_rgb.unsqueeze(1), aux_rgbs], dim=1
-        )  # (B, N, H, W, 3)
-        all_depths = torch.cat(
-            [primary_depth.unsqueeze(1), aux_depths], dim=1
-        )  # (B, N, H, W)
-
-        # Clip depths
-        all_depths[all_depths > self.max_depth] = 0
-
-        # Permute RGB to (B, N, 3, H, W)
-        rgb = all_rgbs.permute(0, 1, 4, 2, 3)
-        depth = all_depths
-
-        # Combine intrinsics and extrinsics
-        all_intrinsics = torch.cat(
-            [
-                batch["intrinsics"].unsqueeze(1),  # (B, 1, 3, 3)
-                batch["aux_intrinsics"],  # (B, N_aux, 3, 3)
-            ],
-            dim=1,
-        )  # (B, N, 3, 3)
-
-        all_extrinsics = torch.cat(
-            [
-                batch["extrinsics"].unsqueeze(1),  # (B, 1, 4, 4)
-                batch["aux_extrinsics"],  # (B, N_aux, 4, 4)
-            ],
-            dim=1,
-        )  # (B, N, 4, 4)
+        rgb, depth, all_intrinsics, all_extrinsics = self.combine_camera_data(batch)
 
         # Forward through network
         outputs, patch_coords, tokens = self.network(
@@ -975,20 +1079,9 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
             n_samples_wta = self.run_cfg.n_samples_wta
             self.eval()
             with torch.no_grad():
-                all_pred_dict = []
-                if self.is_gmm:
-                    for i in range(n_samples_wta):
-                        all_pred_dict.append(self.predict(batch))
-                else:
-                    all_pred_dict = [self.predict(batch)]
-
-                pred_dict, weighted_displacement, _ = all_pred_dict[0]
-                pred_dict[self.prediction_type]["all_pred"] = [
-                    i[0][self.prediction_type]["pred"] for i in all_pred_dict
-                ]
-                pred_dict[self.prediction_type]["all_pred"] = torch.stack(
-                    pred_dict[self.prediction_type]["all_pred"]
-                ).permute(1, 0, 2, 3)
+                pred_dict, weighted_displacement, _ = (
+                    self.collect_and_stack_predictions(batch, n_samples_wta)
+                )
             self.train()
 
             init, gt = self.extract_gt_4_points(batch)
@@ -1005,31 +1098,7 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
                 padding_mask,
             )
 
-            # Calculate pixel metrics
-            intrinsics = batch["intrinsics"]
-            extrinsics = batch["extrinsics"]
-            H, W = batch["rgbs"].shape[2:4]
-
-            # Project GT to 2D (take first point only)
-            gt_2d = (
-                self.project_3d_to_2d(gt[:, :1, :], intrinsics, extrinsics, (H, W))
-                .squeeze(1)
-                .long()
-            )  # (B, 2)
-
-            # Project all predictions to 2D (take first point only)
-            all_pred_3d = (
-                init[:, None, :, :] + pred_dict[self.prediction_type]["all_pred"]
-            )  # (B, N, 4, 3)
-            all_pred_2d = (
-                self.project_3d_to_2d(
-                    all_pred_3d[:, :, :1, :], intrinsics, extrinsics, (H, W)
-                )
-                .squeeze(2)
-                .long()
-            )  # (B, N, 2)
-
-            pred_dict = calc_pix_metrics(pred_dict, gt_2d, all_pred_2d, (H, W))
+            pred_dict = self.calculate_pixel_metrics(pred_dict, batch, init, gt)
             train_metrics.update(pred_dict)
 
             if self.trainer.is_global_zero:
@@ -1047,29 +1116,8 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
         init, gt = self.extract_gt_4_points(batch)
         gripper_token = self.get_gripper_token(init)
 
-        # Combine primary + auxiliary cameras (same as forward)
-        primary_rgb = batch["rgbs"][:, 0]  # (B, H, W, 3)
-        primary_depth = batch["depths"][:, 0]  # (B, H, W)
-        aux_rgbs = batch["aux_rgbs"][:, :, 0, :, :, :]  # (B, N_aux, H, W, 3)
-        aux_depths = batch["aux_depths"][:, :, 0, :, :]  # (B, N_aux, H, W)
-
-        all_rgbs = torch.cat(
-            [primary_rgb.unsqueeze(1), aux_rgbs], dim=1
-        )  # (B, N, H, W, 3)
-        all_depths = torch.cat(
-            [primary_depth.unsqueeze(1), aux_depths], dim=1
-        )  # (B, N, H, W)
-
-        rgb = all_rgbs.permute(0, 1, 4, 2, 3)  # (B, N, 3, H, W)
-        depth = all_depths
-
-        all_intrinsics = torch.cat(
-            [batch["intrinsics"].unsqueeze(1), batch["aux_intrinsics"]], dim=1
-        )
-
-        all_extrinsics = torch.cat(
-            [batch["extrinsics"].unsqueeze(1), batch["aux_extrinsics"]], dim=1
-        )
+        # Combine primary + auxiliary cameras
+        rgb, depth, all_intrinsics, all_extrinsics = self.combine_camera_data(batch)
 
         # Forward
         outputs, patch_coords, tokens = self.network(
@@ -1188,16 +1236,14 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
         )
 
         # Transform to end frame
-        pcd_endframe = np.hstack((pcd, np.ones((pcd.shape[0], 1))))
-        pcd_endframe = (end2start @ pcd_endframe.T).T[:, :3]
-        all_pred_pcd_tmp = []
-        for i in range(N):
-            tmp_pcd = np.hstack((all_pred_pcd[i], np.ones((all_pred_pcd.shape[1], 1))))
-            tmp_pcd = (end2start @ tmp_pcd.T).T[:, :3]
-            all_pred_pcd_tmp.append(tmp_pcd)
-        all_pred_pcd = np.stack(all_pred_pcd_tmp)
-        gt_pcd = np.hstack((gt_pcd, np.ones((gt_pcd.shape[0], 1))))
-        gt_pcd = (end2start @ gt_pcd.T).T[:, :3]
+        pcd_endframe = self.transform_points_homogeneous(pcd, end2start)
+        all_pred_pcd = np.stack(
+            [
+                self.transform_points_homogeneous(all_pred_pcd[i], end2start)
+                for i in range(N)
+            ]
+        )
+        gt_pcd = self.transform_points_homogeneous(gt_pcd, end2start)
 
         # Transform from world frame to primary camera frame for projection
         # Primary camera extrinsics: T_world_from_cam, we need T_cam_from_world
@@ -1206,21 +1252,15 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
 
         # Transform points to primary camera frame
         # Transform initial pcd (for init_rgb_proj)
-        pcd_cam = np.hstack((pcd, np.ones((pcd.shape[0], 1))))
-        pcd_cam = (T_cam_from_world @ pcd_cam.T).T[:, :3]
-
-        pcd_endframe = np.hstack((pcd_endframe, np.ones((pcd_endframe.shape[0], 1))))
-        pcd_endframe = (T_cam_from_world @ pcd_endframe.T).T[:, :3]
-
-        all_pred_pcd_tmp = []
-        for i in range(N):
-            tmp_pcd = np.hstack((all_pred_pcd[i], np.ones((all_pred_pcd.shape[1], 1))))
-            tmp_pcd = (T_cam_from_world @ tmp_pcd.T).T[:, :3]
-            all_pred_pcd_tmp.append(tmp_pcd)
-        all_pred_pcd = np.stack(all_pred_pcd_tmp)
-
-        gt_pcd = np.hstack((gt_pcd, np.ones((gt_pcd.shape[0], 1))))
-        gt_pcd = (T_cam_from_world @ gt_pcd.T).T[:, :3]
+        pcd_cam = self.transform_points_homogeneous(pcd, T_cam_from_world)
+        pcd_endframe = self.transform_points_homogeneous(pcd_endframe, T_cam_from_world)
+        all_pred_pcd = np.stack(
+            [
+                self.transform_points_homogeneous(all_pred_pcd[i], T_cam_from_world)
+                for i in range(N)
+            ]
+        )
+        gt_pcd = self.transform_points_homogeneous(gt_pcd, T_cam_from_world)
 
         K = batch["intrinsics"][viz_idx].cpu().numpy()
 
@@ -1328,20 +1368,9 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
         n_samples_wta = self.run_cfg.n_samples_wta
         self.eval()
         with torch.no_grad():
-            all_pred_dict = []
-            if self.is_gmm:
-                for i in range(n_samples_wta):
-                    all_pred_dict.append(self.predict(batch))
-            else:
-                all_pred_dict = [self.predict(batch)]
-            pred_dict, weighted_displacement, _ = all_pred_dict[0]
-
-            pred_dict[self.prediction_type]["all_pred"] = [
-                i[0][self.prediction_type]["pred"] for i in all_pred_dict
-            ]
-            pred_dict[self.prediction_type]["all_pred"] = torch.stack(
-                pred_dict[self.prediction_type]["all_pred"]
-            ).permute(1, 0, 2, 3)
+            pred_dict, weighted_displacement, _ = self.collect_and_stack_predictions(
+                batch, n_samples_wta
+            )
 
         init, gt = self.extract_gt_4_points(batch)
         gt_displacement = gt - init
@@ -1357,31 +1386,7 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
             padding_mask,
         )
 
-        # Calculate pixel metrics
-        intrinsics = batch["intrinsics"]
-        extrinsics = batch["extrinsics"]
-        H, W = batch["rgbs"].shape[2:4]
-
-        # Project GT to 2D (take first point only)
-        gt_2d = (
-            self.project_3d_to_2d(gt[:, :1, :], intrinsics, extrinsics, (H, W))
-            .squeeze(1)
-            .long()
-        )  # (B, 2)
-
-        # Project all predictions to 2D (take first point only)
-        all_pred_3d = (
-            init[:, None, :, :] + pred_dict[self.prediction_type]["all_pred"]
-        )  # (B, N, 4, 3)
-        all_pred_2d = (
-            self.project_3d_to_2d(
-                all_pred_3d[:, :, :1, :], intrinsics, extrinsics, (H, W)
-            )
-            .squeeze(2)
-            .long()
-        )  # (B, N, 2)
-
-        pred_dict = calc_pix_metrics(pred_dict, gt_2d, all_pred_2d, (H, W))
+        pred_dict = self.calculate_pixel_metrics(pred_dict, batch, init, gt)
         self.val_outputs[val_tag].append(pred_dict)
 
         if (
@@ -1443,20 +1448,9 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
         eval_tag = self.trainer.datamodule.eval_tags[dataloader_idx]
         n_samples_wta = self.trainer.datamodule.n_samples_wta
 
-        all_pred_dict = []
-        if self.is_gmm:
-            for i in range(n_samples_wta):
-                all_pred_dict.append(self.predict(batch))
-        else:
-            all_pred_dict = [self.predict(batch)]
-
-        pred_dict, weighted_displacement, z = all_pred_dict[0]
-        pred_dict[self.prediction_type]["all_pred"] = [
-            i[0][self.prediction_type]["pred"] for i in all_pred_dict
-        ]
-        pred_dict[self.prediction_type]["all_pred"] = torch.stack(
-            pred_dict[self.prediction_type]["all_pred"]
-        ).permute(1, 0, 2, 3)
+        pred_dict, weighted_displacement, z = self.collect_and_stack_predictions(
+            batch, n_samples_wta
+        )
 
         init, gt = self.extract_gt_4_points(batch)
         gt_displacement = gt - init
@@ -1472,31 +1466,7 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
             padding_mask,
         )
 
-        # Calculate pixel metrics
-        intrinsics = batch["intrinsics"]
-        extrinsics = batch["extrinsics"]
-        H, W = batch["rgbs"].shape[2:4]
-
-        # Project GT to 2D (take first point only)
-        gt_2d = (
-            self.project_3d_to_2d(gt[:, :1, :], intrinsics, extrinsics, (H, W))
-            .squeeze(1)
-            .long()
-        )  # (B, 2)
-
-        # Project all predictions to 2D (take first point only)
-        all_pred_3d = (
-            init[:, None, :, :] + pred_dict[self.prediction_type]["all_pred"]
-        )  # (B, N, 4, 3)
-        all_pred_2d = (
-            self.project_3d_to_2d(
-                all_pred_3d[:, :, :1, :], intrinsics, extrinsics, (H, W)
-            )
-            .squeeze(2)
-            .long()
-        )  # (B, N, 2)
-
-        pred_dict = calc_pix_metrics(pred_dict, gt_2d, all_pred_2d, (H, W))
+        pred_dict = self.calculate_pixel_metrics(pred_dict, batch, init, gt)
         self.predict_outputs[eval_tag].append(pred_dict)
         self.predict_weighted_displacements[eval_tag].append(
             weighted_displacement.cpu()
