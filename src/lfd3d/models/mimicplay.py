@@ -231,6 +231,7 @@ def monkey_patch_mimicplay(network):
         ),
         # 5 modes × (10 timesteps × 3 coords × 2 [mean+scale]) + 5 logits = 305
     )
+    del network.output_head
 
     # Add in a separate forward pass for MimicPlay
     network.mimicplay_forward = types.MethodType(mimicplay_forward, network)
@@ -850,6 +851,9 @@ class MimicplayModule(pl.LightningModule):
 
         # GT trajectory: RED to YELLOW gradient
         RED2YELLOW = interpolate_colors(RED, YELLOW, gt_pcd.shape[0])
+        init_rgb_proj = project_pcd_on_image(
+            gt_pcd, padding_mask, rgb_init, K, RED2YELLOW, radius=3
+        )
         end_rgb_proj = project_pcd_on_image(
             gt_pcd, padding_mask, rgb_end, K, RED2YELLOW, radius=3
         )
@@ -859,7 +863,7 @@ class MimicplayModule(pl.LightningModule):
         pred_rgb_proj = project_pcd_on_image(
             all_pred_pcd[-1], padding_mask, rgb_end, K, BLUE2GREEN, radius=3
         )
-        rgb_proj_viz = cv2.hconcat([rgb_init, end_rgb_proj, pred_rgb_proj])
+        rgb_proj_viz = cv2.hconcat([init_rgb_proj, end_rgb_proj, pred_rgb_proj])
 
         wandb_proj_img = wandb.Image(
             rgb_proj_viz,
