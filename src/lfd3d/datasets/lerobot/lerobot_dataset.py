@@ -211,6 +211,39 @@ class RpadLeRobotDataset(BaseDataset):
 
         return points_world
 
+    def load_gripper_trajectory(self, idx, data_source):
+        episode_index = self.lerobot_dataset[idx]["episode_index"]
+        gripper_idx = self.GRIPPER_IDX[data_source]
+
+        GRIPPER_PCD_KEY = self.gripper_pcd_key
+
+        NUM_FRAMES = 70  # Close to 5 secs into the future at 15fps
+        NUM_TIMESTEPS = 10
+
+        gripper_pcds = []
+        end_idx = idx + (NUM_FRAMES // NUM_TIMESTEPS)
+        while (
+            (end_idx < len(self.lerobot_dataset))
+            and (self.lerobot_dataset[end_idx]["episode_index"] == episode_index)
+            and (len(gripper_pcds) < NUM_TIMESTEPS)
+        ):
+            gripper_pcds.append(
+                self.lerobot_dataset[end_idx][GRIPPER_PCD_KEY][gripper_idx]
+            )
+            end_idx += NUM_FRAMES // NUM_TIMESTEPS
+
+        if len(gripper_pcds) < NUM_TIMESTEPS:
+            last_pcd = (
+                gripper_pcds[-1]
+                if len(gripper_pcds) > 0
+                else self.lerobot_dataset[idx][GRIPPER_PCD_KEY][gripper_idx]
+            )
+            while len(gripper_pcds) < NUM_TIMESTEPS:
+                gripper_pcds.append(last_pcd)
+
+        gripper_trajectory = np.stack(gripper_pcds, axis=0)
+        return gripper_trajectory
+
     def __getitem__(self, index):
         # Map the dataset index to the actual LeRobot dataset index using split_indices
         actual_index = self.split_indices[index]
@@ -228,6 +261,8 @@ class RpadLeRobotDataset(BaseDataset):
             demo_name,
             cam_names,
         ) = self.load_transition(actual_index)
+
+        gripper_trajectory = self.load_gripper_trajectory(actual_index, data_source)
 
         # Load intrinsics and extrinsics for all cameras
         all_intrinsics = []
@@ -358,6 +393,7 @@ class RpadLeRobotDataset(BaseDataset):
             "action_pcd": start_tracks,
             "anchor_pcd": start_scene_pcd_world,
             "anchor_feat_pcd": start_scene_feat_pcd,
+            "gripper_trajectory": gripper_trajectory,
             # Labels
             "cross_displacement": end_tracks - start_tracks,
             # Text/metadata

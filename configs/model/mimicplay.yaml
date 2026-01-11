@@ -1,0 +1,7 @@
+defaults:
+  - dino_3dgp # Mimicplay baseline is a modified version of Dino3DGP
+
+name: mimicplay
+
+kl_lambda: 1.0 # Weight for KL-div loss
+gmm_min_std: 0.0001

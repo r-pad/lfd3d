@@ -22,6 +22,7 @@ from lfd3d.models.articubot import ArticubotNetwork, GoalRegressionModule
 from lfd3d.models.dino_3dgp import Dino3DGPGoalRegressionModule, Dino3DGPNetwork
 from lfd3d.models.dino_heatmap import DinoHeatmapNetwork, HeatmapSamplerModule
 from lfd3d.models.diptv3 import DiPTv3, DiPTv3Adapter
+from lfd3d.models.mimicplay import MimicplayModule
 from lfd3d.models.tax3d import (
     CrossDisplacementModule,
     DiffusionTransformerNetwork,
@@ -73,6 +74,10 @@ def create_model(cfg):
     elif cfg.model.name == "dino_3dgp":
         network_fn = Dino3DGPNetwork
         module_fn = Dino3DGPGoalRegressionModule
+    elif cfg.model.name == "mimicplay":
+        # The MimicPlay baseline is a modified version of Dino3DGP
+        network_fn = Dino3DGPNetwork
+        module_fn = MimicplayModule
     else:
         raise NotImplementedError(cfg.model.name)
 
