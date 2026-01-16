@@ -1466,6 +1466,10 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
             padding_mask,
         )
 
+        intrinsics = batch["intrinsics"]
+        extrinsics = batch["extrinsics"]
+        H, W = batch["rgbs"].shape[2:4]
+
         pred_dict = self.calculate_pixel_metrics(pred_dict, batch, init, gt)
         self.predict_outputs[eval_tag].append(pred_dict)
         self.predict_weighted_displacements[eval_tag].append(
