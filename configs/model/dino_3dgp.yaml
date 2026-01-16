@@ -2,7 +2,7 @@ name: dino_3dgp
 
 # Model settings
 type: cross_displacement # Type of model
-use_text_embedding: True # If true, expects (siglip) text embedding to be provided as input and uses as another token
+use_text_embedding: True # If true, expects text to be provided as input
 use_gripper_token: True # Adds an additional gripper token
 use_source_token: True # If true, adds a learnable token for human/robot data source
 num_transformer_layers: 4 # num blocks for self atttention
@@ -20,7 +20,7 @@ fixed_variance: [0.01, 0.05, 0.1, 0.25, 0.5] # for gmm
 uniform_weights_coeff: 0.1 # coefficient for nll loss term when we use uniform mixing weights instead of pred
 
 # Optimal Transport loss settings (for domain adaptation)
-use_ot_loss: True # Enable optimal transport loss for aligning human/robot latent distributions
+use_ot_loss: False # Enable optimal transport loss for aligning human/robot latent distributions
 ot_alpha: 0.05 # Weight for combining OT loss with main loss
 ot_lambda: 0.1 # Discount factor for matching latents (lower = stronger discount)
 ot_epsilon: 0.1 # Regularization parameter for Sinkhorn algorithm

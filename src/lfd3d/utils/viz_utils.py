@@ -3,18 +3,56 @@ from typing import List, Union
 
 import cv2
 import imageio.v3 as iio
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import trimesh
 from matplotlib import cm
 from pytorch3d.ops import sample_farthest_points
-import matplotlib.pyplot as plt
 
 
-def project_pcd_on_image(pcd, mask, image, K, color, return_coords=False):
+def interpolate_colors(color_start, color_end, n_points):
+    """
+    Interpolate between two colors.
+
+    Args:
+        color_start: (R, G, B) starting color
+        color_end: (R, G, B) ending color
+        n_points: Number of interpolation points
+
+    Returns:
+        Array of shape (n_points, 3) with interpolated colors
+    """
+    if n_points == 1:
+        return np.array([color_start])
+
+    color_start = np.array(color_start)
+    color_end = np.array(color_end)
+
+    # Linear interpolation
+    alphas = np.linspace(0, 1, n_points)[:, None]  # (n_points, 1)
+    colors = (1 - alphas) * color_start + alphas * color_end
+
+    return colors.astype(int)
+
+
+def project_pcd_on_image(pcd, mask, image, K, color, return_coords=False, radius=1):
     """
     Project point cloud onto image, overwrite projected
     points with the provided colour.
+
+    Args:
+        pcd: Point cloud array (N, 3)
+        mask: Boolean mask for points to project
+        image: RGB image (H, W, 3)
+        K: Camera intrinsics (3, 3)
+        color: Either a single color tuple (R, G, B) or a sequence of colors [(R, G, B), ...]
+               If sequence, length must match number of masked points
+        return_coords: Whether to return projected coordinates
+        radius: Circle radius for visualization
+
+    Returns:
+        viz_image or (coords, viz_image) if return_coords=True
     """
     height, width, ch = image.shape
     viz_image = image.copy()
@@ -26,8 +64,35 @@ def project_pcd_on_image(pcd, mask, image, K, color, return_coords=False):
     projected_image_coords = projected_points.T.round().astype(int)
 
     coords = np.clip(projected_image_coords, 0, [width - 1, height - 1])
-    for point in coords:
-        cv2.circle(viz_image, point, color=color, thickness=-1, radius=1)
+
+    # Check if color is a sequence of colors or a single color
+    # Single color: tuple/list with 3 elements (R, G, B)
+    # Sequence of colors: list/array where each element is a color
+    is_single_color = (
+        isinstance(color, (tuple, list))
+        and len(color) == 3
+        and all(isinstance(c, (int, np.integer)) for c in color)
+    )
+
+    if is_single_color:
+        # Use same color for all points (backward compatible)
+        for point in coords:
+            cv2.circle(viz_image, point, color=color, thickness=-1, radius=radius)
+    else:
+        # Use different color for each point
+        colors = np.array(color)
+        if len(colors) != len(coords):
+            raise ValueError(
+                f"Number of colors ({len(colors)}) must match number of points ({len(coords)})"
+            )
+        for point, pt_color in zip(coords, colors):
+            cv2.circle(
+                viz_image,
+                point,
+                color=tuple(pt_color.tolist()),
+                thickness=-1,
+                radius=radius,
+            )
 
     if return_coords:
         return coords, viz_image
@@ -91,28 +156,76 @@ def get_img_and_track_pcd(
     max_depth,
     num_points,
 ):
-    init_pcd_color, all_pred_color, gt_color = (
-        np.array(init_pcd_color),
-        np.array(all_pred_color),
-        np.array(gt_color),
+    """
+    Create a combined point cloud visualization with image points and trajectory points.
+
+    Args:
+        image: RGB image
+        depth: Depth map
+        K: Camera intrinsics
+        mask: Boolean mask for trajectory points
+        init_pcd: Initial trajectory points
+        gt_pcd: Ground truth trajectory points
+        all_pred_pcd: List of predicted trajectories
+        init_pcd_color: Single color (R,G,B) or sequence of colors (N_init, 3)
+        gt_color: Single color (R,G,B) or sequence of colors (N_gt, 3)
+        all_pred_color: Either:
+            - Array (N_preds, 3): one color per prediction (backward compatible)
+            - List of arrays [(N_points, 3), ...]: color sequence per prediction
+        max_depth: Maximum depth for filtering
+        num_points: Number of points to sample from image
+
+    Returns:
+        viz_pcd: Combined point cloud with colors
+        num_pred_points: Number of prediction points
+    """
+    init_pcd_color = np.array(init_pcd_color)
+    gt_color = np.array(gt_color)
+    all_pred_color = (
+        np.array(all_pred_color)
+        if not isinstance(all_pred_color, list)
+        else all_pred_color
     )
 
     image_pcd_pts, image_pcd_colors = get_img_pcd(
         image, depth, K, max_depth, num_points
     )
 
+    # Process init_pcd colors
     init_pcd_pts = init_pcd[mask]
-    init_pcd_color = np.repeat(init_pcd_color[None, :], init_pcd_pts.shape[0], axis=0)
+    if init_pcd_color.ndim == 1:
+        # Single color: repeat for all points
+        init_pcd_color = np.repeat(
+            init_pcd_color[None, :], init_pcd_pts.shape[0], axis=0
+        )
+    else:
+        # Color sequence: apply mask
+        init_pcd_color = init_pcd_color[mask]
 
+    # Process gt_pcd colors
     gt_pcd_pts = gt_pcd[mask]
-    gt_color = np.repeat(gt_color[None, :], gt_pcd_pts.shape[0], axis=0)
+    if gt_color.ndim == 1:
+        # Single color: repeat for all points
+        gt_color = np.repeat(gt_color[None, :], gt_pcd_pts.shape[0], axis=0)
+    else:
+        # Color sequence: apply mask
+        gt_color = gt_color[mask]
 
+    # Process all_pred_pcd colors
     all_pred_pcd_pts, all_pred_colors = [], []
     for i, pred_pcd in enumerate(all_pred_pcd):
         pred_pcd_pts = pred_pcd[mask]
-        pred_color = np.repeat(
-            all_pred_color[None, i], all_pred_pcd[0][mask].shape[0], axis=0
-        )
+
+        # Check if all_pred_color is list of color sequences or array of single colors
+        if isinstance(all_pred_color, list):
+            # List of color sequences
+            pred_color = all_pred_color[i][mask]
+        else:
+            # Array of single colors (backward compatible)
+            pred_color = np.repeat(
+                all_pred_color[None, i], pred_pcd_pts.shape[0], axis=0
+            )
+
         all_pred_pcd_pts.append(pred_pcd_pts)
         all_pred_colors.append(pred_color)
 
@@ -313,12 +426,13 @@ def save_video(
     print(f"saving video of size {(n, h, w)} to {save_path}")
     iio.imwrite(save_path, frames, fps=fps, extension=".webm", codec="vp9")
 
+
 def plot_seq_data(data, title, xlabel, ylabel, path):
     """
     Plot a sequence of numeric data with its mean and variance statistics.
 
-    The function creates a line plot of the input data sequence, adds a 
-    horizontal line representing the mean value, and displays the variance 
+    The function creates a line plot of the input data sequence, adds a
+    horizontal line representing the mean value, and displays the variance
     in a text box on the plot. The figure is then saved to the given file path.
 
     Args:
@@ -335,13 +449,18 @@ def plot_seq_data(data, title, xlabel, ylabel, path):
     avg = float(np.nanmean(data))
     std = float(np.nanstd(data))
 
-    ax.axhline(avg, color="red", linestyle="--", linewidth=1.2, label=f"Mean = {avg:.4f}")
-    ax.text(0.02, 0.95,
+    ax.axhline(
+        avg, color="red", linestyle="--", linewidth=1.2, label=f"Mean = {avg:.4f}"
+    )
+    ax.text(
+        0.02,
+        0.95,
         f"Std = {std:.4f}",
         transform=ax.transAxes,
         fontsize=9,
         verticalalignment="top",
-        bbox=dict(boxstyle="round", facecolor="white", alpha=0.6))
+        bbox=dict(boxstyle="round", facecolor="white", alpha=0.6),
+    )
 
     ax.set_title(title)
     ax.set_xlabel(xlabel)
@@ -353,16 +472,26 @@ def plot_seq_data(data, title, xlabel, ylabel, path):
     fig.savefig(path, dpi=150, bbox_inches="tight")
     plt.close(fig)
 
+
 def plot_barchart_with_error(data, error, title, xlabel, ylabel, path):
     """
     Plot data as a bar with an error bar.
     """
     data = np.asarray(data)
-    error  = np.asarray(error)
+    error = np.asarray(error)
     x = np.arange(len(data))
 
     fig, ax = plt.subplots()
-    ax.bar(x, data, yerr=error, capsize=4, width=1.0, align="edge", color="skyblue", edgecolor="black")
+    ax.bar(
+        x,
+        data,
+        yerr=error,
+        capsize=4,
+        width=1.0,
+        align="edge",
+        color="skyblue",
+        edgecolor="black",
+    )
 
     ax.set_xticks(x + 0.5)
     ax.set_xticklabels([str(i) for i in x])
@@ -377,7 +506,7 @@ def plot_barchart_with_error(data, error, title, xlabel, ylabel, path):
     plt.close(fig)
 
 
-def annotate_video(frames, annotation=None, path = None, fps=30):
+def annotate_video(frames, annotation=None, path=None, fps=30):
     """
     Args:
         frames: np.ndarray of shape (N, H, W, 3) dtype=uint8
@@ -390,17 +519,28 @@ def annotate_video(frames, annotation=None, path = None, fps=30):
     font = cv2.FONT_HERSHEY_SIMPLEX
 
     annotated_frames = []
-    pos = [(10, 30), (W - 300, 30), (10, H - 30), (W - 300, H - 30),]
+    pos = [
+        (10, 30),
+        (W - 300, 30),
+        (10, H - 30),
+        (W - 300, H - 30),
+    ]
     for i, frame in enumerate(frames):
         img = frame.copy()
 
         if annotation is not None:
             for j, (key, value) in enumerate(annotation.items()):
                 cv2.putText(
-                    img, f"{key}: {value[i]:.4f}", pos[j],
-                    font, 1, (255, 0, 0), 2, cv2.LINE_AA
+                    img,
+                    f"{key}: {value[i]:.4f}",
+                    pos[j],
+                    font,
+                    1,
+                    (255, 0, 0),
+                    2,
+                    cv2.LINE_AA,
                 )
-                
+
         annotated_frames.append(img)
     annotated_frames = np.stack(annotated_frames)
     if path:
