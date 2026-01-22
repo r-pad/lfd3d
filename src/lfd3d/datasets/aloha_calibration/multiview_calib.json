@@ -5,7 +5,7 @@
       "color_key": "observation.images.cam_azure_kinect_front.color",
       "depth_key": "observation.images.cam_azure_kinect_front.transformed_depth",
       "intrinsics": "intrinsics_000259921812.txt",
-      "extrinsics": "T_world_from_camera_front_1208.txt"
+      "extrinsics": "T_world_from_camera_front_20260121.txt"
     },
     {
       "name": "cam_azure_kinect_back",
