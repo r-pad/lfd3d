@@ -1299,7 +1299,7 @@ class Dino3DGPGoalRegressionModule(pl.LightningModule):
             all_pred_pcd,
             GREEN,
             RED,
-            BLUES,
+            np.array(BLUES),
             max_depth,
             4096,
         )
