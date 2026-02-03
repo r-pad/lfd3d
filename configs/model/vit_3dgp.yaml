@@ -1,0 +1,42 @@
+name: vit_3dgp
+
+# Model settings
+type: cross_displacement # Type of model
+use_text_embedding: True # If true, expects text to be provided as input
+use_gripper_token: True # Adds an additional gripper token
+use_source_token: True # If true, adds a learnable token for human/robot data source
+num_transformer_layers: 4 # num blocks for self attention
+
+# ViT backbone settings (trainable, from scratch)
+# Sized to be comparable to ResNet-18 (~11M params)
+img_size: 224
+patch_size: 16
+vit_embed_dim: 384 # Output dim matches DINO ViT-B for compatibility
+vit_depth: 6 # Number of transformer layers in ViT
+vit_num_heads: 6 # Number of attention heads
+vit_mlp_ratio: 4.0 # MLP hidden dim ratio
+
+dropout: 0.1
+
+# Positional encoding settings
+use_fourier_pe: False # If true, use Fourier positional encoding instead of MLP
+fourier_num_frequencies: 21 # Number of frequency bands for Fourier encoding
+fourier_include_input: True # Whether to include input coordinates in Fourier encoding
+
+is_gmm: True # Train a GMM and minimize negative log likelihood
+fixed_variance: [0.01, 0.05, 0.1, 0.25, 0.5] # for gmm
+uniform_weights_coeff: 0.1 # coefficient for nll loss term when using uniform mixing weights
+
+# Optimal Transport loss settings (for domain adaptation)
+use_ot_loss: False # Enable optimal transport loss for aligning human/robot latent distributions
+ot_alpha: 0.05 # Weight for combining OT loss with main loss
+ot_lambda: 0.1 # Discount factor for matching latents
+ot_epsilon: 0.1 # Regularization parameter for Sinkhorn algorithm
+ot_percentile: 0.1 # Percentile threshold for determining best matches
+
+# Model-specific training augmentations
+image_token_dropout: True # Enable image token dropout during training
+gripper_noise_prob: 0.4 # Probability of applying gripper noise augmentation
+gripper_noise_translation: 0.01 # Translation noise in meters
+gripper_noise_rotation: 3.0 # Rotation noise in degrees
+gripper_noise_width: 0.005 # Gripper width noise in meters
