@@ -8,3 +8,4 @@ val_size: null # (int, null) Length of the validation dataset
 num_points: 8192 # Points in PCD
 max_depth: 1.5 # Filter out PCD beyond this depth
 normalize: False # If false, leave in original scale (could be metric or relative depth), if true, normalize to 0 mean and unit std
+drop_last: False # Whether to drop the last incomplete batch in dataloaders

@@ -7,6 +7,8 @@ use_gripper_token: True # Adds an additional gripper token
 use_source_token: True # If true, adds a learnable token for human/robot data source
 num_transformer_layers: 4 # num blocks for self atttention
 dino_model: 'facebook/dinov3-vitb16-pretrain-lvd1689m'
+use_rope: False # Whether to use RayRoPE for 3D positional encoding instead of MLP or Fourier
+num_heads: 8 # Number of attention heads for transformer layers
 
 dropout: 0.1
 

@@ -437,6 +437,7 @@ class BaseDataModule(pl.LightningDataModule):
         self.seed = seed
         self.augment_train = augment_train
         self.augment_cfg = augment_cfg
+        self.drop_last = dataset_cfg.drop_last
 
         # setting root directory based on dataset type
         try:
@@ -466,6 +467,7 @@ class BaseDataModule(pl.LightningDataModule):
             shuffle=True if self.stage == "fit" else False,
             num_workers=self.num_workers,
             collate_fn=collate_pcd_fn,
+            drop_last=self.drop_last,
         )
 
     def train_subset_dataloader(self):
@@ -484,6 +486,7 @@ class BaseDataModule(pl.LightningDataModule):
             num_workers=self.num_workers,
             collate_fn=collate_pcd_fn,
             pin_memory=True,
+            drop_last=self.drop_last,
         )
 
     def val_dataloader(self):
@@ -498,6 +501,7 @@ class BaseDataModule(pl.LightningDataModule):
                 shuffle=False,
                 num_workers=self.num_workers,
                 collate_fn=collate_pcd_fn,
+                drop_last=self.drop_last,
             )
             for tag, dataset in self.val_datasets.items()
         }
@@ -514,6 +518,7 @@ class BaseDataModule(pl.LightningDataModule):
                 shuffle=False,
                 num_workers=self.num_workers,
                 collate_fn=collate_pcd_fn,
+                drop_last=self.drop_last,
             )
             for tag, dataset in self.test_datasets.items()
         }

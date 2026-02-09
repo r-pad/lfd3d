@@ -17,6 +17,8 @@ from pytorch3d.transforms import (
 )
 from torch import nn, optim
 from transformers import AutoImageProcessor, AutoModel, T5EncoderModel, T5Tokenizer
+from RayRoPE.pos_enc.rayrope import RayRoPE_DotProductAttention
+from RayRoPE.pos_enc.utils.rayrope_mha import MultiheadAttention
 
 from lfd3d.models.dino_heatmap import calc_pix_metrics
 from lfd3d.models.tax3d import calc_pcd_metrics
@@ -107,7 +109,12 @@ class Dino3DGPNetwork(nn.Module):
         # Training augmentations
         self.image_token_dropout = model_cfg.image_token_dropout
 
-        # 3D Positional encoding
+        # 3D rope positional encoding
+        self.use_rope = model_cfg.use_rope
+        if self.use_rope:
+            self.num_heads = model_cfg.num_heads
+            self.rope_init = False
+    
         if model_cfg.use_fourier_pe:
             # Fourier positional encoding
             fourier_encoder = FourierPositionalEncoding(
@@ -405,6 +412,38 @@ class Dino3DGPNetwork(nn.Module):
             H, W, intrinsics, depth, extrinsics
         )  # (B, N*196, 3)
         pos_encoding = self.pos_encoder(patch_coords)  # (B, N*196, 128)
+
+        if self.use_rope:
+            if not self.rope_init:
+                
+                num_patches = (H // self.patch_size)
+                self.rayrope_attn = RayRoPE_DotProductAttention(head_dim=self.backbone.config.hidden_size//self.num_heads, image_width=W, image_height=H, patches_x = num_patches, patches_y = num_patches)
+                self.rope_mha_layer = MultiheadAttention(embed_dim=self.backbone.config.hidden_size, num_heads=self.num_heads, predict_d= 'known+predict_dsig', sdpa_fn=self.rayrope_attn.forward)
+                self.rope_init = True
+                
+            device = extrinsics.device
+            extrinsics = extrinsics.detach().cpu()
+            intrinsics = intrinsics.detach().cpu()
+            context_depths = depth.unsqueeze(-1).detach().cpu()
+            self.rayrope_attn._precompute_and_cache_apply_fns(
+                extrinsics,  
+                intrinsics, 
+                context_depths=context_depths
+            )
+            
+            extrinsics = extrinsics.to(device)
+            intrinsics = intrinsics.to(device)
+
+            device = patch_features.device
+
+            # identity_extrinsics = torch.from_numpy(np.tile(np.eye(4), (B, N, 1, 1))).to(device, dtype=torch.float32)# Keep the depth in Camera frame
+    
+            # patch_depth_cam = self.get_patch_centers(
+            #     H, W, intrinsics, depth, identity_extrinsics
+            # )[:,:,-1].unsqueeze(-1)  # (B, N*196, 1)
+            patch_features = patch_features.detach().cpu()
+            patch_features = self.rope_mha_layer(patch_features, patch_features, patch_features)
+            patch_features = patch_features.to(device)
 
         # Combine patch features with positional encoding
         tokens = torch.cat(
