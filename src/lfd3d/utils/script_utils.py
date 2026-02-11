@@ -28,6 +28,7 @@ from lfd3d.models.tax3d import (
     DiffusionTransformerNetwork,
     SceneDisplacementModule,
 )
+from lfd3d.models.vit_3dgp import ViT3DGPNetwork
 from omegaconf import OmegaConf
 from pytorch_lightning.callbacks import ModelCheckpoint
 
@@ -74,6 +75,9 @@ def create_model(cfg):
     elif cfg.model.name == "dino_3dgp":
         network_fn = Dino3DGPNetwork
         module_fn = Dino3DGPGoalRegressionModule
+    elif cfg.model.name == "vit_3dgp":
+        network_fn = ViT3DGPNetwork
+        module_fn = Dino3DGPGoalRegressionModule  # Reuse same training module
     elif cfg.model.name == "mimicplay":
         # The MimicPlay baseline is a modified version of Dino3DGP
         network_fn = Dino3DGPNetwork
