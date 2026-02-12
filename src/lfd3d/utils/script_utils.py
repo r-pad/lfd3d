@@ -46,7 +46,7 @@ class ModelCheckpointExplicit(ModelCheckpoint):
         self.artifact_name = artifact_name
 
     def on_train_end(self, trainer, pl_module):
-        if self.best_model_path:
+        if trainer.is_global_zero and self.best_model_path:
             artifact = wandb.Artifact(self.artifact_name, type="model")
             artifact.add_file(local_path=self.best_model_path, name="model.ckpt")
             wandb.log_artifact(artifact, aliases=["latest", "best"])

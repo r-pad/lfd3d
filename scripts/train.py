@@ -201,8 +201,8 @@ def main(cfg):
         model = apply_lora(model, cfg.lora)
 
     trainer.fit(model, datamodule=datamodule)
-    wandb.run.finish()
     wandb.finish()
+
 
 if __name__ == "__main__":
     main()
